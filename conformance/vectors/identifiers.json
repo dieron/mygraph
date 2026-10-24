@@ -1,0 +1,156 @@
+{
+  "format": "mygraph-vectors/1",
+  "spec_version": "0.1.0-draft",
+  "spec": "spec/model/identifiers.md",
+  "groups": [
+    {
+      "function": "encode_id",
+      "rules": ["ID-FORM-1", "ID-FORM-2", "ID-FORM-3", "ID-CODEC-1", "ID-CODEC-2"],
+      "description": "Object kind and internal number -> canonical ID string.",
+      "cases": [
+        { "input": { "kind": "node", "number": 1 }, "output": "n_1" },
+        { "input": { "kind": "node", "number": 9 }, "output": "n_9" },
+        { "input": { "kind": "node", "number": 10 }, "output": "n_a" },
+        { "input": { "kind": "link", "number": 31 }, "output": "l_z" },
+        { "input": { "kind": "evidence", "number": 32 }, "output": "e_10" },
+        { "input": { "kind": "citation", "number": 33 }, "output": "c_11" },
+        { "input": { "kind": "batch", "number": 1023 }, "output": "b_zz" },
+        { "input": { "kind": "node", "number": 1024 }, "output": "n_100" },
+        { "input": { "kind": "node", "number": 3703 }, "output": "n_3kq" },
+        { "input": { "kind": "node", "number": 12345 }, "output": "n_c1s" },
+        { "input": { "kind": "node", "number": 1000000 }, "output": "n_ygj0" },
+        { "input": { "kind": "node", "number": 4294967296 }, "output": "n_4000000" },
+        { "input": { "kind": "node", "number": 9223372036854775807 }, "output": "n_7zzzzzzzzzzzz", "note": "largest number, 13-character body" }
+      ]
+    },
+    {
+      "function": "decode_id",
+      "rules": ["ID-CODEC-3", "ID-CODEC-4", "ID-CODEC-5"],
+      "description": "ID string -> object kind and internal number, or a reason code.",
+      "cases": [
+        { "input": "n_1", "output": { "kind": "node", "number": 1 } },
+        { "input": "n_3kq", "output": { "kind": "node", "number": 3703 } },
+        { "input": "N_3KQ", "output": { "kind": "node", "number": 3703 }, "note": "case-insensitive" },
+        { "input": "n_3Kq", "output": { "kind": "node", "number": 3703 } },
+        { "input": "l_z", "output": { "kind": "link", "number": 31 } },
+        { "input": "L_Z", "output": { "kind": "link", "number": 31 } },
+        { "input": "e_10", "output": { "kind": "evidence", "number": 32 } },
+        { "input": "c_11", "output": { "kind": "citation", "number": 33 } },
+        { "input": "b_zz", "output": { "kind": "batch", "number": 1023 } },
+        { "input": "n_i", "output": { "kind": "node", "number": 1 }, "note": "look-alike i -> 1" },
+        { "input": "n_L", "output": { "kind": "node", "number": 1 }, "note": "look-alike L -> 1" },
+        { "input": "n_1o", "output": { "kind": "node", "number": 32 }, "note": "look-alike o -> 0" },
+        { "input": "b_7zzzzzzzzzzzz", "output": { "kind": "batch", "number": 9223372036854775807 } },
+        { "input": "n1", "error": "id.malformed", "note": "no underscore" },
+        { "input": "n_", "error": "id.malformed", "note": "empty body" },
+        { "input": "_1", "error": "id.malformed", "note": "empty prefix" },
+        { "input": "n__1", "error": "id.malformed", "note": "two underscores" },
+        { "input": "n_1_", "error": "id.malformed" },
+        { "input": "n_1 ", "error": "id.malformed", "note": "trailing whitespace" },
+        { "input": " n_1", "error": "id.malformed", "note": "leading whitespace" },
+        { "input": "n_u", "error": "id.malformed", "note": "u is not in the alphabet" },
+        { "input": "n_1-2", "error": "id.malformed" },
+        { "input": "n_é1", "error": "id.malformed", "note": "non-ASCII letter" },
+        { "input": "x_1", "error": "id.unknown_prefix" },
+        { "input": "node_1", "error": "id.unknown_prefix" },
+        { "input": "n_0", "error": "id.non_canonical", "note": "zero is not a valid number and has no canonical form" },
+        { "input": "n_01", "error": "id.non_canonical", "note": "leading zero" },
+        { "input": "n_o1", "error": "id.non_canonical", "note": "o maps to 0, which is then a leading zero" },
+        { "input": "n_10000000000000", "error": "id.too_long", "note": "14-character body" },
+        { "input": "n_8000000000000", "error": "id.out_of_range", "note": "2^63" },
+        { "input": "n_zzzzzzzzzzzzz", "error": "id.out_of_range" }
+      ]
+    },
+    {
+      "function": "decode_id_of_kind",
+      "rules": ["ID-CODEC-6"],
+      "description": "Decode an ID where a specific object kind is expected.",
+      "cases": [
+        { "input": { "id": "n_1", "expect_kind": "node" }, "output": { "kind": "node", "number": 1 } },
+        { "input": { "id": "l_1", "expect_kind": "node" }, "error": "id.wrong_kind" },
+        { "input": { "id": "e_7a", "expect_kind": "evidence" }, "output": { "kind": "evidence", "number": 234 } },
+        { "input": { "id": "x_1", "expect_kind": "node" }, "error": "id.unknown_prefix", "note": "decoding errors take precedence over the kind check" }
+      ]
+    },
+    {
+      "function": "validate_key",
+      "rules": ["KEY-1", "KEY-2", "KEY-3"],
+      "description": "Natural key -> its NFC form, or a reason code.",
+      "cases": [
+        { "input": "person/ada-lovelace", "output": "person/ada-lovelace" },
+        { "input": "Person/Ada", "output": "Person/Ada", "note": "case is preserved; keys are case-sensitive" },
+        { "input": "https://example.org/ada?x=1", "output": "https://example.org/ada?x=1" },
+        { "input": "wikidata:Q7259", "output": "wikidata:Q7259" },
+        { "input": "person/ada lovelace", "output": "person/ada lovelace", "note": "inner spaces are allowed" },
+        { "input": "café", "output": "café", "note": "converted to NFC" },
+        { "input_repeat": { "unit": "a", "count": 1024 }, "output_repeat": { "unit": "a", "count": 1024 } },
+        { "input_repeat": { "unit": "é", "count": 512 }, "output_repeat": { "unit": "é", "count": 512 }, "note": "1024 bytes" },
+        { "input_repeat": { "unit": "é", "count": 512 }, "output_repeat": { "unit": "é", "count": 512 }, "note": "1536 bytes before NFC, 1024 after: length is measured after NFC" },
+        { "input": "", "error": "key.empty" },
+        { "input_repeat": { "unit": "a", "count": 1025 }, "error": "key.too_long" },
+        { "input_repeat": { "unit": "é", "count": 513 }, "error": "key.too_long", "note": "1026 bytes" },
+        { "input": "person/\u0000ada", "error": "key.control_char" },
+        { "input": "person/ada\n", "error": "key.control_char", "note": "LF is both Cc and White_Space; control_char is checked first" },
+        { "input": " person/ada", "error": "key.edge_whitespace" },
+        { "input": "person/ada ", "error": "key.edge_whitespace", "note": "no-break space is White_Space but not Cc" }
+      ]
+    },
+    {
+      "function": "validate_batch_ref",
+      "rules": ["REF-1"],
+      "description": "Batch reference syntax.",
+      "cases": [
+        { "input": "@ada", "output": "@ada" },
+        { "input": "@Ada_2-x", "output": "@Ada_2-x" },
+        { "input_repeat": { "unit": "a", "count": 64, "prefix": "@" }, "output_repeat": { "unit": "a", "count": 64, "prefix": "@" } },
+        { "input": "@", "error": "ref.malformed" },
+        { "input": "ada", "error": "ref.malformed" },
+        { "input": "@ada lovelace", "error": "ref.malformed" },
+        { "input": "@é", "error": "ref.malformed" },
+        { "input_repeat": { "unit": "a", "count": 65, "prefix": "@" }, "error": "ref.malformed" }
+      ]
+    },
+    {
+      "function": "validate_graph_name",
+      "rules": ["GRAPH-NAME-1", "GRAPH-NAME-2"],
+      "description": "Graph name syntax and reserved names.",
+      "cases": [
+        { "input": "research", "output": "research" },
+        { "input": "my-graph_2", "output": "my-graph_2" },
+        { "input": "0graph", "output": "0graph" },
+        { "input": "a", "output": "a" },
+        { "input": "console", "output": "console" },
+        { "input": "com10", "output": "com10" },
+        { "input_repeat": { "unit": "a", "count": 63 }, "output_repeat": { "unit": "a", "count": 63 } },
+        { "input": "", "error": "graph_name.malformed" },
+        { "input": "Research", "error": "graph_name.malformed", "note": "uppercase is rejected, not converted" },
+        { "input": "_x", "error": "graph_name.malformed" },
+        { "input": "-x", "error": "graph_name.malformed" },
+        { "input": "my graph", "error": "graph_name.malformed" },
+        { "input": "my.graph", "error": "graph_name.malformed" },
+        { "input_repeat": { "unit": "a", "count": 64 }, "error": "graph_name.malformed" },
+        { "input": "con", "error": "graph_name.reserved" },
+        { "input": "nul", "error": "graph_name.reserved" },
+        { "input": "com1", "error": "graph_name.reserved" },
+        { "input": "lpt9", "error": "graph_name.reserved" }
+      ]
+    },
+    {
+      "function": "validate_actor_name",
+      "rules": ["ACTOR-NAME-1"],
+      "description": "Actor name syntax.",
+      "cases": [
+        { "input": "claude-code@laptop", "output": "claude-code@laptop" },
+        { "input": "import:wikidata", "output": "import:wikidata" },
+        { "input": "admin", "output": "admin" },
+        { "input": "A.B", "output": "A.B" },
+        { "input_repeat": { "unit": "a", "count": 128 }, "output_repeat": { "unit": "a", "count": 128 } },
+        { "input": "", "error": "actor_name.malformed" },
+        { "input": "-x", "error": "actor_name.malformed" },
+        { "input": "has space", "error": "actor_name.malformed" },
+        { "input": "é", "error": "actor_name.malformed" },
+        { "input_repeat": { "unit": "a", "count": 129 }, "error": "actor_name.malformed" }
+      ]
+    }
+  ]
+}

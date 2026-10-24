@@ -1,0 +1,90 @@
+{
+  "format": "mygraph-vectors/1",
+  "spec_version": "0.1.0-draft",
+  "spec": "spec/model/normalization.md",
+  "groups": [
+    {
+      "function": "canonical_node_type",
+      "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
+      "description": "Node type as written -> PascalCase canonical form (normalize_types = true).",
+      "cases": [
+        { "input": "person", "output": "Person" },
+        { "input": "Person", "output": "Person" },
+        { "input": "PERSON", "output": "Person" },
+        { "input": "research paper", "output": "ResearchPaper" },
+        { "input": "research_paper", "output": "ResearchPaper" },
+        { "input": "research-paper", "output": "ResearchPaper" },
+        { "input": "researchPaper", "output": "ResearchPaper" },
+        { "input": "ResearchPaper", "output": "ResearchPaper" },
+        { "input": "  Research   Paper ", "output": "ResearchPaper" },
+        { "input": "TVShow", "output": "TvShow", "note": "acronyms lose their capitals" },
+        { "input": "tv show", "output": "TvShow" },
+        { "input": "HTTPServer", "output": "HttpServer" },
+        { "input": "Covid19Case", "output": "Covid19Case" },
+        { "input": "base64 codec", "output": "Base64Codec" },
+        { "input": "ﬁle", "output": "File", "note": "fi ligature, NFKC first" },
+        { "input": "человек", "output": "Человек", "note": "человек -> Человек" },
+        { "input": "научная статья", "output": "НаучнаяСтатья", "note": "научная статья -> НаучнаяСтатья" },
+        { "input": "会社", "output": "会社", "note": "letters without case are kept" },
+        { "input": "3D model", "error": "vocab.bad_start", "note": "canonical form 3DModel starts with a digit" },
+        { "input": "", "error": "vocab.empty" },
+        { "input": "---", "error": "vocab.empty" },
+        { "input_repeat": { "unit": "a", "count": 64 }, "output_repeat": { "unit": "a", "count": 63, "prefix": "A" } },
+        { "input_repeat": { "unit": "a", "count": 65 }, "error": "vocab.too_long" }
+      ]
+    },
+    {
+      "function": "canonical_link_type",
+      "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
+      "description": "Link type as written -> UPPER_SNAKE canonical form (normalize_types = true).",
+      "cases": [
+        { "input": "works at", "output": "WORKS_AT" },
+        { "input": "worksAt", "output": "WORKS_AT" },
+        { "input": "WORKS_AT", "output": "WORKS_AT" },
+        { "input": "works-at", "output": "WORKS_AT" },
+        { "input": "Works_At", "output": "WORKS_AT" },
+        { "input": "  married   to  ", "output": "MARRIED_TO" },
+        { "input": "isPartOf", "output": "IS_PART_OF" },
+        { "input": "HTTPLinksTo", "output": "HTTP_LINKS_TO" },
+        { "input": "authored2", "output": "AUTHORED2" },
+        { "input": "состоит в", "output": "СОСТОИТ_В", "note": "состоит в -> СОСТОИТ_В" },
+        { "input": "_", "error": "vocab.empty" },
+        { "input": "2nd author of", "error": "vocab.bad_start" }
+      ]
+    },
+    {
+      "function": "canonical_prop_key",
+      "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
+      "description": "Property key as written -> lower_snake canonical form (normalize_types = true).",
+      "cases": [
+        { "input": "born", "output": "born" },
+        { "input": "birthDate", "output": "birth_date" },
+        { "input": "Birth Date", "output": "birth_date" },
+        { "input": "birth-date", "output": "birth_date" },
+        { "input": "BIRTH_DATE", "output": "birth_date" },
+        { "input": "ISBN13", "output": "isbn13" },
+        { "input": "URLPath", "output": "url_path" },
+        { "input": "population2020", "output": "population2020" },
+        { "input": "populationIn2020", "output": "population_in2020" },
+        { "input": "e-mail", "output": "e_mail" },
+        { "input": "größe", "output": "größe", "note": "größe" },
+        { "input": "Größe", "output": "größe" },
+        { "input": "дата рождения", "output": "дата_рождения", "note": "дата рождения -> дата_рождения" }
+      ]
+    },
+    {
+      "function": "validate_vocabulary_verbatim",
+      "rules": ["VOCAB-5"],
+      "description": "Validation when normalize_types = false: input is taken as given (after NFC).",
+      "cases": [
+        { "input": { "kind": "link_type", "value": "WORKS_AT" }, "output": "WORKS_AT" },
+        { "input": { "kind": "prop_key", "value": "birthDate" }, "output": "birthDate", "note": "not converted" },
+        { "input": { "kind": "node_type", "value": "Café" }, "output": "Café", "note": "converted to NFC" },
+        { "input": { "kind": "node_type", "value": "research paper" }, "error": "vocab.bad_char" },
+        { "input": { "kind": "prop_key", "value": "a-b" }, "error": "vocab.bad_char" },
+        { "input": { "kind": "node_type", "value": "3D" }, "error": "vocab.bad_start" },
+        { "input": { "kind": "link_type", "value": "" }, "error": "vocab.empty" }
+      ]
+    }
+  ]
+}
