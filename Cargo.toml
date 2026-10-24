@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/mygraph-core", "crates/mygraph-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+mygraph-core = { path = "crates/mygraph-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+unicode-normalization = "0.1"
+unicode-general-category = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "io-util"] }
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

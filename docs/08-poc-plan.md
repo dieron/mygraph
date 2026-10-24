@@ -53,6 +53,11 @@ Every milestone follows the spec-first workflow of
   normalization, values, `schema.sql` + `0001_init.sql`, `conformance/README.md` and 339 vector
   cases. Vectors and schema were cross-checked with a throwaway independent script (not kept in the
   repo). Remaining in M0: Rust workspace, CI, config, conformance runner.
+- *Progress 2026-10-24 (later):* Rust workspace (`mygraph-core`, `mygraph-server`), ID codec, name
+  keys, vocabulary and values implemented; all 339 vectors pass as a Rust test; `mygraph serve`
+  answers `/health`; config file with local-only defaults; CI workflow (fmt, clippy, tests on
+  Linux and Windows). Remaining in M0: standalone conformance runner crate (the vectors already
+  run as tests; the HTTP runner is needed from M1).
 
 ### M1 — Core model and storage (L)
 - **Spec:** `model/objects.md` (fields, invariants), `algorithms/upsert-matching.md`,

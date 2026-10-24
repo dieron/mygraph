@@ -17,6 +17,23 @@ binary keeps the whole graph topology and search indexes in RAM, stores everythi
 SQLite, and exposes 11 agent operations (search, resolve, get, write, retract, merge, neighbors,
 paths, find with aggregations, history, overview) over MCP and REST.
 
+## Building
+
+```bash
+cargo test --workspace
+```
+
+```bash
+cargo run -p mygraph-server -- serve
+```
+
+The server listens on `127.0.0.1:7420`; `GET /health` reports the spec and storage format
+versions. `crates/mygraph-core/tests/vectors.rs` runs every vector in `conformance/vectors/`.
+
+Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest Visual Studio
+lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
+(e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
+
 ## Documents
 
 | # | Document | What it answers |

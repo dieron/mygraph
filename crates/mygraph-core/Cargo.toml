@@ -1,0 +1,15 @@
+[package]
+name = "mygraph-core"
+description = "MyGraph engine core: model, rules from spec/, no transport dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+unicode-normalization.workspace = true
+unicode-general-category.workspace = true
+
+[lints]
+workspace = true
