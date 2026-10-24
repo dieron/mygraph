@@ -75,6 +75,11 @@ Every milestone follows the spec-first workflow of
   [04-data-model.md §11](04-data-model.md); restart test (state identical after reload); kill-during-write test.
 - **Done when:** invariants hold under property tests; 1 M-node synthetic graph loads and its RAM
   footprint is measured.
+- *Progress 2026-10-24:* spec written — `model/objects.md`, `algorithms/upsert-matching.md`,
+  `storage/storage-format.md`, `api/operations/{write,retract,merge}.md`. Code: crate
+  `mygraph-store-sqlite` creates and opens graph files (migrations from `spec/`, header checks,
+  WAL, policies), 4 tests including "created schema equals spec schema". Next: record writes and
+  change log, RAM indexes, the write path, then retract/merge and property tests.
 
 ### M2 — Reads, search and analytics (L)
 - **Spec:** operations `get`, `search`, `resolve`, `neighbors`, `paths`, `find`, `history`;

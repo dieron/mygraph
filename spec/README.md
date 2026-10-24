@@ -32,7 +32,10 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | `VOCAB` | Canonical spelling of node types, link types and property keys | [model/normalization.md](model/normalization.md) |
 | `VAL` | Property values: kinds, JSON forms, limits, ordering, storage encoding | [model/values.md](model/values.md) |
 | `STORE` | Storage format | [storage/schema.sql](storage/schema.sql) (comments are normative) |
-| `OBJ`, `WRITE`, `READ`, `SEARCH`, `FIND`, `PATH`, `API`, `ERR`, `ADMIN` | Planned (M1–M3) | — |
+| `OBJ` | Objects, lifecycle, evidence policy, merge | [model/objects.md](model/objects.md) |
+| `WRITE` | Write processing order, matching, field combination | [algorithms/upsert-matching.md](algorithms/upsert-matching.md) |
+| `OP` | Operations: requests, responses, errors | [api/operations/](api/operations/) |
+| `READ`, `SEARCH`, `FIND`, `PATH`, `API`, `ERR`, `ADMIN` | Planned (M2–M3) | — |
 
 ## 3. Common definitions
 
@@ -74,9 +77,9 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | [model/normalization.md](model/normalization.md) | Draft | M0 |
 | [model/values.md](model/values.md) | Draft | M0 |
 | [storage/schema.sql](storage/schema.sql), [storage/migrations/](storage/migrations/) | Draft | M0 |
-| `model/objects.md` — graph, node, link, evidence, citation, invariants | Planned | M1 |
-| `storage/storage-format.md` — column encodings in detail, FTS sync, change-log diff format, blob store | Planned | M1 |
-| `algorithms/upsert-matching.md`, `api/operations/write.md`, `retract.md`, `merge.md` | Planned | M1 |
+| [model/objects.md](model/objects.md) — graph, node, link, evidence, citation, lifecycle, merge | Draft | M1 |
+| [storage/storage-format.md](storage/storage-format.md) — column encodings, FTS sync, change-log diff format, blob store | Draft | M1 |
+| [algorithms/upsert-matching.md](algorithms/upsert-matching.md), [api/operations/write.md](api/operations/write.md), [retract.md](api/operations/retract.md), [merge.md](api/operations/merge.md) | Draft | M1 |
 | `api/operations/{get,search,resolve,neighbors,paths,find,history}.md`, `algorithms/*` | Planned | M2 |
 | `api/conventions.md`, `api/errors.md`, `api/schemas/`, `api/openapi.yaml`, `api/mcp-tools.json`, `admin/` | Planned | M3 |
 

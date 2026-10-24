@@ -1,0 +1,18 @@
+[package]
+name = "mygraph-store-sqlite"
+description = "MyGraph storage format v1 on SQLite (spec/storage/)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mygraph-core.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
