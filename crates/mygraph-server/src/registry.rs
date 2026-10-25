@@ -281,12 +281,15 @@ impl Registry {
     pub fn commit_text_all(&self) {
         for (name, state) in self.list() {
             let SlotState::Ready(h) = state else { continue };
-            // The handle is taken under the lock, the commit runs without it.
-            let text = h
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_ref()
-                .and_then(|g| g.text_handle());
+            // The handle is taken under the lock, the commit runs without it. A graph busy with a
+            // long write (an import) is skipped rather than waited for, so checkpoints still run.
+            let text = match h.try_read() {
+                Ok(g) => g.as_ref().and_then(|g| g.text_handle()),
+                Err(std::sync::TryLockError::Poisoned(p)) => {
+                    p.into_inner().as_ref().and_then(|g| g.text_handle())
+                }
+                Err(std::sync::TryLockError::WouldBlock) => continue,
+            };
             if let Some(t) = text
                 && t.pending() > 0
                 && let Err(e) = t.commit()
@@ -323,5 +326,49 @@ impl Registry {
                 tracing::warn!(graph = %name, "checkpoint failed: {e}");
             }
         }
+    }
+}
+
+impl Registry {
+    /// A file name inside one of the data folder's subfolders; nothing outside it can be named.
+    pub fn data_file(&self, folder: &str, name: &str) -> Result<PathBuf, ApiError> {
+        let plain =
+            !name.is_empty() && !name.contains(['/', '\\', ':']) && name != "." && name != "..";
+        let path = self.data_dir.join(folder).join(name);
+        if plain && path.is_file() {
+            Ok(path)
+        } else {
+            let code = if folder == "snapshots" {
+                "admin.snapshot_not_found"
+            } else {
+                "admin.file_not_found"
+            };
+            Err(ApiError::new(code, format!("no file {name} in {folder}/")))
+        }
+    }
+
+    /// Makes a snapshot the graph `name` ([ADMIN-GRAPH-6]); it loads on first use.
+    pub fn restore(&self, name: &str, snapshot: &Path, replace: bool) -> Result<(), ApiError> {
+        mygraph_core::ids::validate_graph_name(name)
+            .map_err(|r| ApiError::new(r.code(), format!("name {name:?}: {r}")))?;
+        if lock(&self.slots).contains_key(name) {
+            if !replace {
+                return Err(ApiError::new(
+                    "graph.exists",
+                    format!("graph {name} exists; pass replace: true to replace it"),
+                ));
+            }
+            self.delete(name)?;
+        }
+        let target = graph_path(&self.data_dir, name);
+        std::fs::create_dir_all(target.parent().expect("graphs folder"))
+            .map_err(|e| internal(&e.to_string()))?;
+        std::fs::copy(snapshot, &target).map_err(|e| internal(&e.to_string()))?;
+        let _ = std::fs::remove_dir_all(index_dir(&self.data_dir, name));
+        lock(&self.slots).insert(
+            name.to_owned(),
+            Arc::new(watch::Sender::new(SlotState::Unloaded)),
+        );
+        Ok(())
     }
 }

@@ -56,6 +56,9 @@ and [model/objects.md](../../model/objects.md)):
 | evidence | `id`, `kind`, `title`, `uri`, `status` | as for nodes | as for nodes |
 | citation | `id`, `evidence`, `target`, `role`, `status` | as for nodes | as for nodes |
 
+At `normal` and `full`, a link item also has `ends`: `{"from": {id, type, name}, "to": {…}}`, the
+nodes it connects.
+
 **[OP-GET-4]** A node's `links`: `counts` lists, for each link type and direction, the number of
 active links (`direction` is `out` or `in` from this node's side for directed links, `both` for
 undirected ones), ordered by type then direction. `items` lists up to `limit` of those links

@@ -38,11 +38,19 @@ pub fn brief(o: &Json) -> String {
             } else {
                 "->"
             };
+            // With `ends` (get), each end also shows its name.
+            let end = |side: &str| {
+                let id = s(o, side).unwrap_or("?");
+                match s(&o["ends"][side], "name") {
+                    Some(n) => format!("{id} {}", Json::from(n)),
+                    None => id.to_owned(),
+                }
+            };
             format!(
                 "{id} {} {} {arrow} {}",
                 s(o, "type").unwrap_or("?"),
-                s(o, "from").unwrap_or("?"),
-                s(o, "to").unwrap_or("?")
+                end("from"),
+                end("to")
             )
         }
         "e" => {
@@ -458,6 +466,7 @@ fn get_item(out: &mut String, it: &Json) {
         "directed",
         "role",
         "target",
+        "ends",
     ];
     // A citation's `evidence` is part of its brief form; a node's is the evidence list.
     skip.push("evidence");

@@ -745,3 +745,159 @@ async fn without_keys_requests_are_the_local_admin() {
     c.keys.push(key("k", "a", Role::AgentRead, &[]));
     assert!(c.validate().is_ok());
 }
+
+/// Object lines of an export file (the header and actors differ between copies).
+fn object_lines(path: &str) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|l| l.starts_with("{\"id\"") || l.contains("\"id\":"))
+        .filter(|l| !l.contains("\"mygraph_export\""))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[tokio::test]
+async fn export_import_and_restore_keep_everything() {
+    let s = server();
+    s.create_graph("src").await;
+    let g = "/v1/graphs/src";
+    s.post(&format!("{g}/write"), WRITER, ada_batch()).await;
+    s.post(&format!("{g}/write"), WRITER, json!({
+        "evidence": [{ "ref": "@o", "kind": "observation", "content": "Same person" }],
+        "nodes": [{ "type": "Person", "name": "C. Babbage", "create_new": true, "cite": ["@o"] }]
+    })).await;
+    s.post(
+        &format!("{g}/merge"),
+        WRITER,
+        json!({ "into": "n_2", "merge": ["n_4"] }),
+    )
+    .await;
+    s.call(
+        Method::DELETE,
+        &format!("{g}/links/l_2"),
+        Some(WRITER),
+        None,
+    )
+    .await;
+
+    // [ADMIN-GRAPH-7]
+    let r = s.post("/admin/graphs/src/export", ADMIN, json!(null)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let exp = r.json();
+    assert_eq!(exp["counts"]["nodes"], 4);
+    let path = exp["path"].as_str().unwrap().to_owned();
+    let file = std::path::Path::new(&path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let first: Json = serde_json::from_str(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(first["mygraph_export"], 1);
+
+    // [ADMIN-GRAPH-8] into a new graph: identical objects, IDs and statuses.
+    let r = s
+        .post("/admin/graphs/copy/import", ADMIN, json!({ "file": file }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(
+        r.json()["imported"],
+        json!({ "nodes": 4, "links": 2, "evidence": 3, "citations": 6 })
+    );
+    let copy = s
+        .post("/admin/graphs/copy/export", ADMIN, json!(null))
+        .await
+        .json();
+    assert_eq!(
+        object_lines(&path),
+        object_lines(copy["path"].as_str().unwrap())
+    );
+    let n = s
+        .get("/v1/graphs/copy/nodes/n_4?detail=brief", READER)
+        .await
+        .json();
+    assert_eq!(n["merged_from"], "n_4");
+    let l = s.get("/v1/graphs/copy/links/l_2", READER).await.json();
+    assert_eq!(l["status"], "retracted");
+    assert_eq!(l["ends"]["to"]["name"], "Analytical Engine");
+    let h = s
+        .get("/v1/graphs/copy/nodes/n_1/history", READER)
+        .await
+        .json();
+    assert_eq!(h["entries"][0]["op"], "create");
+    // Searchable and writable after the import; new IDs continue after the imported ones.
+    let r = s.get("/v1/graphs/copy/search?q=lovelace", READER).await;
+    assert_eq!(r.json()["hits"][0]["id"], "n_1");
+    let r = s
+        .get("/v1/graphs/copy/search?q=published&in=evidence&mode=text", READER)
+        .await;
+    assert_eq!(r.json()["hits"][0]["id"], "e_2", "{}", r.text());
+    let r = s
+        .post(
+            "/v1/graphs/copy/write",
+            WRITER,
+            json!({
+                "evidence": [{ "ref": "@o", "kind": "observation", "content": "new" }],
+                "nodes": [{ "type": "Person", "name": "Grace Hopper", "cite": ["@o"] }]
+            }),
+        )
+        .await;
+    assert_eq!(r.json()["refs"]["@o"], "e_4");
+
+    // A graph with objects is refused; a file outside exports/ cannot be named.
+    let r = s
+        .post("/admin/graphs/copy/import", ADMIN, json!({ "file": file }))
+        .await;
+    assert_eq!(r.code(), "import.graph_not_empty");
+    let r = s
+        .post(
+            "/admin/graphs/x/import",
+            ADMIN,
+            json!({ "file": "../graphs/src.db" }),
+        )
+        .await;
+    assert_eq!(r.code(), "admin.file_not_found");
+
+    // [ADMIN-GRAPH-6]
+    let snap = s
+        .post("/admin/graphs/src/snapshot", ADMIN, json!(null))
+        .await
+        .json();
+    let snap_file = std::path::Path::new(snap["path"].as_str().unwrap())
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let r = s
+        .post(
+            "/admin/graphs/copy/restore",
+            ADMIN,
+            json!({ "snapshot": snap_file }),
+        )
+        .await;
+    assert_eq!(r.code(), "graph.exists");
+    let r = s
+        .post(
+            "/admin/graphs/copy/restore",
+            ADMIN,
+            json!({ "snapshot": snap_file, "replace": true }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(
+        r.json()["counts"]["nodes"],
+        3,
+        "the snapshot, without Grace Hopper"
+    );
+    let r = s.get("/v1/graphs/copy/search?q=lovelace", READER).await;
+    assert_eq!(r.json()["hits"][0]["id"], "n_1");
+}

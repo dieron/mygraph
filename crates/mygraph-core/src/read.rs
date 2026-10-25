@@ -259,6 +259,17 @@ impl<S: Store> Graph<S> {
                 );
             }
         }
+        // [OP-GET-3] who a link connects, readable without another call.
+        if let (Row::Link(l), false) = (&row, matches!(detail, Detail::Brief)) {
+            let end = |n: i64| {
+                let node = &st.nodes[&n];
+                json!({ "id": id_string(ObjectKind::Node, n), "type": &*node.type_, "name": node.name })
+            };
+            m.insert(
+                "ends".into(),
+                json!({ "from": end(l.src), "to": end(l.dst) }),
+            );
+        }
         if let (ObjectKind::Node, Some((limit, types))) = (kind, &inc.links) {
             m.insert(
                 "links".into(),

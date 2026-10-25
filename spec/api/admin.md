@@ -19,6 +19,9 @@ of the design; the rest is planned.
 | `DELETE /admin/graphs/{graph}?confirm={graph}` | — | `{"deleted": name, "moved_to": path}` |
 | `POST /admin/graphs/{graph}/snapshot` | — | `{"path": …, "bytes": n, "last_seq": n}` |
 | `POST /admin/graphs/{graph}/check` | — | `{"ok": bool, "problems": [text]}` |
+| `POST /admin/graphs/{graph}/restore` | `{"snapshot": file, "replace": bool}` | `GraphInfo` |
+| `POST /admin/graphs/{graph}/export` | — | `{"path": …, "bytes": n, "counts": {…}}` |
+| `POST /admin/graphs/{graph}/import` | `{"file": name}` | `GraphInfo` plus `imported` (counts) |
 
 **[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes"}`, plus, when the
 graph is loaded (`status` `ready`): `counts` (as in [OP-OVER-2]), `policies`, `last_seq`, and
@@ -37,11 +40,24 @@ running finish first; later requests fail with `graph.not_found`.
 
 **[ADMIN-GRAPH-4]** A snapshot is a consistent copy of the graph's database taken while it stays
 online, written to `<data_dir>/snapshots/<graph>-<UTC time as YYYYMMDDTHHMMSSmmmZ>.db`. Writes wait
-while it is taken. It can be opened by any implementation like the original file (restore is
-planned).
+while it is taken. It can be opened by any implementation like the original file, and restored
+with [ADMIN-GRAPH-6].
 
 **[ADMIN-GRAPH-5]** A check runs the storage engine's own integrity checks and reports each
 problem found as text; `ok` is `true` when there are none.
+
+**[ADMIN-GRAPH-6]** Restoring copies a snapshot file — a name in `<data_dir>/snapshots/` — to the
+graph `{graph}` and loads it. An existing graph of that name is first deleted as in
+[ADMIN-GRAPH-3] when `replace` is `true`, otherwise the call fails with `graph.exists`. A missing
+snapshot fails with `admin.snapshot_not_found`. The full-text cache of the name is rebuilt.
+
+**[ADMIN-GRAPH-7]** Export writes the graph in the format of [export-format.md](export-format.md) to
+`<data_dir>/exports/<graph>-<UTC time as in [ADMIN-GRAPH-4]>.jsonl`. Writes wait while it runs.
+
+**[ADMIN-GRAPH-8]** Import reads `file` — a name in `<data_dir>/exports/` — into `{graph}`
+([EXP-4], [EXP-5]). When the graph does not exist it is created with the header's policies; an
+existing graph must have no objects and no history (`import.graph_not_empty`). A missing file fails
+with `admin.file_not_found`.
 
 ## 2. Server
 

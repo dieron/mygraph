@@ -49,6 +49,15 @@ Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest 
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
 
+## Backups and moving data
+
+- `POST /admin/graphs/{g}/snapshot` copies the database online into `<data_dir>/snapshots/`;
+  `POST /admin/graphs/{g}/restore` with `{"snapshot": "<file>", "replace": true}` brings one back.
+- `POST /admin/graphs/{g}/export` writes the whole graph as JSONL to `<data_dir>/exports/`
+  ([spec/api/export-format.md](spec/api/export-format.md)); `POST /admin/graphs/{new}/import` with
+  `{"file": "<file>"}` reads it into a new graph with every ID intact. Blob files are not in the
+  export; copy `<data_dir>/blobs/` along when moving to another machine.
+
 ## Connecting an agent over MCP
 
 With the server running, register the stdio bridge in Claude Code (it forwards every tool call to

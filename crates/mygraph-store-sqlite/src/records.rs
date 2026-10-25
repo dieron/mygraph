@@ -419,7 +419,7 @@ impl Store for GraphFile {
 
     fn apply(&mut self, cs: &ChangeSet) -> Result<(), StoreFailure> {
         let tx = self.conn_mut().transaction()?;
-        if let Some(a) = &cs.new_actor {
+        for a in &cs.new_actors {
             tx.execute(
                 "INSERT INTO actor (idx, name, kind, created_at) VALUES (?1, ?2, ?3, ?4)",
                 params![a.idx, a.name, a.kind, cs.ts],
@@ -579,6 +579,12 @@ impl Store for GraphFile {
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    fn checkpoint(&self) -> Result<(), StoreFailure> {
+        self.connection()
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
     }
 
     fn recent_batches(&self, limit: usize) -> Result<Vec<BatchSummary>, StoreFailure> {

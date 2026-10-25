@@ -263,6 +263,19 @@ Every milestone follows the spec-first workflow of
   new-vocabulary warnings without similar names into one line; the server instructions now show
   the date format. Still open from the feedback: link lines show endpoint IDs without names;
   support counts on a retracted link can look like it is still supported.
+- *Progress 2026-10-25 (data safety):* **Spec:** `api/export-format.md` ([EXP-*]: JSONL with a
+  header, actors and every object in record form, any status; import keeps IDs, statuses,
+  versions and record times) and [ADMIN-GRAPH-6..8] (restore a snapshot, export, import). **Server:**
+  `POST /admin/graphs/{g}/restore | export | import`; import creates the graph from the header's
+  policies when needed and writes 10 000-object `import` batches, holding back objects whose
+  references come later in the file. `get` now names a link's ends (`ends`), which the compact
+  format shows (`l_2 WROTE_ABOUT n_1 "Ada Lovelace" -> n_3 "Analytical Engine"`). **1 M graph:**
+  export 74 s (4.9 GB); import into a new graph 33 min (~6 600 objects/s; 8.8 GB, like the
+  original); exporting the copy gives byte-identical object lines (same SHA-256). Two problems found
+  on the way, fixed: background maintenance waited for the graph lock that the import held, so no
+  checkpoint ran and the WAL reached 17 GB; and even with background checkpoints the WAL outgrew
+  the database during a bulk load. Maintenance now skips a busy graph's text commit (checkpoints
+  need no graph lock), and import runs a truncating checkpoint every 20 batches (WAL stays < 2.5 GB).
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

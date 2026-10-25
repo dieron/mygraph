@@ -64,7 +64,7 @@ pub struct LogEntry {
 pub struct ChangeSet {
     pub ts: i64,
     pub batch: BatchRow,
-    pub new_actor: Option<Actor>,
+    pub new_actors: Vec<Actor>,
     /// In dependency order (a row only references rows inserted before it or already stored).
     pub ops: Vec<RowOp>,
     pub log: Vec<LogEntry>,
@@ -139,6 +139,9 @@ pub trait Store {
         tokens: &[String],
         limit: usize,
     ) -> Result<Vec<TextHit>, StoreFailure>;
+    /// Copies the write-ahead log into the database and empties it, waiting for readers;
+    /// bulk operations call it between batches so the log stays small.
+    fn checkpoint(&self) -> Result<(), StoreFailure>;
     /// The most recent batches, newest first.
     fn recent_batches(&self, limit: usize) -> Result<Vec<BatchSummary>, StoreFailure>;
     /// Every vocabulary note.

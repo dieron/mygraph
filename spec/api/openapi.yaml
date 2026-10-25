@@ -439,6 +439,75 @@ paths:
         "4XX": { $ref: "#/components/responses/Error" }
         "5XX": { $ref: "#/components/responses/Error" }
 
+  /admin/graphs/{graph}/export:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [admin]
+      summary: Write the graph as JSONL (export-format.md) to the exports folder
+      operationId: adminExport
+      responses:
+        "200":
+          description: Where the export was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+                  bytes: { type: integer }
+                  counts: { type: object }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs/{graph}/import:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [admin]
+      summary: Import a JSONL export into a new or empty graph
+      operationId: adminImport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, description: A file name in the exports folder. }
+      responses:
+        "200":
+          description: The graph, with the numbers of imported objects in `imported`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphInfo" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs/{graph}/restore:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [admin]
+      summary: Make a snapshot this graph
+      operationId: adminRestore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [snapshot]
+              properties:
+                snapshot: { type: string, description: A file name in the snapshots folder. }
+                replace: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The restored graph.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphInfo" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
   /admin/stats:
     get:
       tags: [admin]

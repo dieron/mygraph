@@ -170,16 +170,20 @@ pub async fn delete_graph(
     finish(&app, "admin.delete_graph", Some(&graph), start, r)
 }
 
-/// `POST /admin/graphs/{graph}/{snapshot|check}`
+/// `POST /admin/graphs/{graph}/{snapshot|check|export|import|restore}`
 pub async fn graph_action(
     State(app): State<Arc<App>>,
     Path((graph, action)): Path<(String, String)>,
     caller: Caller,
+    body: Body,
 ) -> Response {
     let start = Instant::now();
     let label = match action.as_str() {
         "snapshot" => "admin.snapshot",
         "check" => "admin.check",
+        "export" => "admin.export",
+        "import" => "admin.import",
+        "restore" => "admin.restore",
         _ => "unknown",
     };
     let r = async {
@@ -217,6 +221,76 @@ pub async fn graph_action(
                     Ok(json!({ "ok": problems.is_empty(), "problems": problems }))
                 })
                 .await?
+            }
+            // [ADMIN-GRAPH-7]
+            "export" => with_graph(&app, &caller, &graph, Role::Admin, false, move |access| {
+                let g = access.graph();
+                let dir = data_dir.join("exports");
+                let internal = |e: &dyn std::fmt::Display| ApiError::new("internal", e.to_string());
+                std::fs::create_dir_all(&dir).map_err(|e| internal(&e))?;
+                let path = dir.join(format!("{name}-{}.jsonl", stamp(now_ms())));
+                let file = std::fs::File::create(&path).map_err(|e| internal(&e))?;
+                let mut out = std::io::BufWriter::new(file);
+                let counts = g
+                    .export(&mut out, now_ms())
+                    .map_err(|e| ApiError::new("storage.failure", e.to_string()))?;
+                drop(out);
+                let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
+                Ok(json!({ "path": path.display().to_string(), "bytes": bytes, "counts": counts }))
+            })
+            .await?,
+            // [ADMIN-GRAPH-8]
+            "import" => {
+                let req = parse_body(body)?;
+                let file = req
+                    .get("file")
+                    .and_then(Json::as_str)
+                    .ok_or_else(|| bad("file: expected a file name in exports/"))?;
+                let path = app.registry.data_file("exports", file)?;
+                if app.registry.state(&graph).is_none() {
+                    let header = std::io::BufRead::lines(std::io::BufReader::new(
+                        std::fs::File::open(&path)
+                            .map_err(|e| ApiError::new("internal", e.to_string()))?,
+                    ))
+                    .next()
+                    .and_then(Result::ok)
+                    .and_then(|l| serde_json::from_str::<Json>(&l).ok())
+                    .unwrap_or(Json::Null);
+                    let policies = Policies::from_json(&header["policies"]).unwrap_or_default();
+                    app.registry.create(&graph, &policies)?;
+                }
+                let actor = caller.actor.clone();
+                let imported =
+                    with_graph(&app, &caller, &graph, Role::Admin, true, move |access| {
+                        let crate::api::GraphAccess::Write(g) = access else {
+                            unreachable!("write access")
+                        };
+                        let file = std::fs::File::open(&path)
+                            .map_err(|e| ApiError::new("internal", e.to_string()))?;
+                        let mut input = std::io::BufReader::new(file);
+                        Ok(g.import(&actor, &mut input, now_ms())?)
+                    })
+                    .await?;
+                let mut info = graph_info(&app, &caller, &graph).await?;
+                info["imported"] = imported;
+                info
+            }
+            // [ADMIN-GRAPH-6]
+            "restore" => {
+                let req = parse_body(body)?;
+                let snapshot = req
+                    .get("snapshot")
+                    .and_then(Json::as_str)
+                    .ok_or_else(|| bad("snapshot: expected a file name in snapshots/"))?;
+                let replace = req.get("replace").and_then(Json::as_bool).unwrap_or(false);
+                let path = app.registry.data_file("snapshots", snapshot)?;
+                let reg = app.registry.clone();
+                let name = graph.clone();
+                tokio::task::spawn_blocking(move || reg.restore(&name, &path, replace))
+                    .await
+                    .map_err(|e| ApiError::new("internal", e.to_string()))??;
+                app.registry.get(&graph).await?;
+                graph_info(&app, &caller, &graph).await?
             }
             _ => return Err(api_not_found()),
         };

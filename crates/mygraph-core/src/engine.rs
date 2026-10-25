@@ -605,7 +605,7 @@ impl<S: Store> Graph<S> {
                 created_at: b.ts,
                 note: b.note.clone(),
             },
-            new_actor: b.new_actor.clone(),
+            new_actors: b.new_actor.clone().into_iter().collect(),
             ops,
             log: log.into_iter().map(|(e, _)| e).collect(),
         };
@@ -625,7 +625,7 @@ impl<S: Store> Graph<S> {
 
 impl<S: Store> Graph<S> {
     /// After a commit: re-index every node, link and evidence the batch wrote.
-    fn update_text(&mut self, changes: &ChangeSet) {
+    pub(crate) fn update_text(&mut self, changes: &ChangeSet) {
         if self.text.is_none() || self.text_stale.load(Ordering::Relaxed) {
             return;
         }
