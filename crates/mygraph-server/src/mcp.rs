@@ -129,6 +129,7 @@ async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
             )));
         }
     };
+    let shown = Json::Object(args.clone());
     let result = match backend {
         Backend::Local { app, caller } => {
             let graph = graph.unwrap_or_else(|| match &caller.graphs {
@@ -159,7 +160,7 @@ async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
             let text = if json_format {
                 resp.to_string()
             } else {
-                crate::compact::render(op, &resp)
+                crate::compact::render(op, &shown, &resp)
             };
             json!({ "content": [{ "type": "text", "text": text }] })
         }

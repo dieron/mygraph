@@ -339,7 +339,7 @@ pub async fn post_op(
     };
     let r = async {
         let req = strip_graph(parse_body(body)?, &graph)?;
-        let resp = run(&app, &caller, &graph, op, req).await?;
+        let resp = run(&app, &caller, &graph, op, req.clone()).await?;
         // [compact-format.md] on request.
         let text = headers
             .get(header::ACCEPT)
@@ -351,7 +351,7 @@ pub async fn post_op(
                     header::CONTENT_TYPE,
                     HeaderValue::from_static("text/plain; charset=utf-8"),
                 )],
-                crate::compact::render(op, &resp),
+                crate::compact::render(op, &req, &resp),
             )
                 .into_response());
         }

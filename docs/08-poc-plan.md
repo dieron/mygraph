@@ -253,8 +253,16 @@ Every milestone follows the spec-first workflow of
   which forwards tool calls to a running server's REST API (`--url`, so one process owns the
   data) or opens a data folder itself (`--data-dir`). Tool results are compact text by default;
   REST returns it with `Accept: text/plain`. Tests: protocol, tools, compact output and errors over
-  HTTP; stdio with a data folder; forwarding checked by hand against a running server. Not yet:
-  connecting Claude Code itself (the M3 "done when").
+  HTTP; stdio with a data folder; forwarding checked by hand against a running server.
+  **Claude Code smoke run:** registered with `claude mcp add mygraph -- mygraph mcp --url … --graph
+  research` (connected), then a headless session given one short source and three questions used
+  only the tools: overview → resolve (10 names) → one write (11 nodes, 13 links, 24 citations, 2
+  evidence) → paths, find, get → retract + get; 12 turns, 60 s, every call succeeded and every
+  answer cited evidence IDs. From its feedback the compact format now says `no path found` /
+  `no hits` instead of a bare `ok`, repeats candidate names in resolve lines, and folds
+  new-vocabulary warnings without similar names into one line; the server instructions now show
+  the date format. Still open from the feedback: link lines show endpoint IDs without names;
+  support counts on a retracted link can look like it is still supported.
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

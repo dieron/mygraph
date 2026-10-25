@@ -29,6 +29,10 @@ not active:
 
 **[CMP-3]** Properties as `key=value` separated by spaces, in the response's order.
 
+**[CMP-5]** Lists that come back empty say so (`no hits`, `no path found`), and resolve lines repeat
+the candidate's name from the request. `NEW_VOCABULARY` warnings without similar existing names are
+collected on one line (`new vocabulary: …`); the others keep a line each.
+
 **[CMP-4]** Every member of the JSON response that a layout below does not show is rendered by the
 generic layout: `label: value` for scalars and lists of scalars, nested objects indented by two
 spaces, arrays of objects one item per line with `- `. Nothing in the response is dropped

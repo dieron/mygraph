@@ -134,7 +134,26 @@ fn is_scalar_object(v: &Json) -> bool {
 
 fn warnings(out: &mut String, v: &Json, indent: usize) {
     let pad = " ".repeat(indent);
-    for w in v.as_array().into_iter().flatten() {
+    // New vocabulary without similar existing names is expected (an empty graph has only that):
+    // one line lists it all, so a warning that matters is not buried.
+    let plain = |w: &Json| {
+        s(w, "code") == Some("NEW_VOCABULARY")
+            && w["details"]["similar"].as_array().is_none_or(Vec::is_empty)
+    };
+    let new: Vec<String> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|w| plain(w))
+        .map(|w| {
+            let kind = s(&w["details"], "kind").unwrap_or("").replace('_', " ");
+            format!("{} ({kind})", s(&w["details"], "name").unwrap_or("?"))
+        })
+        .collect();
+    if !new.is_empty() {
+        let _ = writeln!(out, "{pad}new vocabulary: {}", new.join(", "));
+    }
+    for w in v.as_array().into_iter().flatten().filter(|w| !plain(w)) {
         let _ = write!(
             out,
             "{pad}warning {}: {}",
@@ -165,8 +184,8 @@ fn joined<'a>(v: Option<&'a Json>, f: impl Fn(&'a str, &'a Json) -> String) -> S
         .unwrap_or_default()
 }
 
-/// The compact rendering of operation `op`'s response.
-pub fn render(op: &str, r: &Json) -> String {
+/// The compact rendering of operation `op`'s response `r` to request `req`.
+pub fn render(op: &str, req: &Json, r: &Json) -> String {
     let mut out = String::new();
     let skip: &[&str] = match op {
         "overview" => {
@@ -186,6 +205,12 @@ pub fn render(op: &str, r: &Json) -> String {
             ]
         }
         "search" => {
+            if items(r, "hits").next().is_none() {
+                out.push_str(
+                    "no hits
+",
+                );
+            }
             for h in items(r, "hits") {
                 let score = h.get("score").and_then(Json::as_f64).unwrap_or(0.0);
                 let _ = write!(
@@ -202,8 +227,14 @@ pub fn render(op: &str, r: &Json) -> String {
             &["hits"]
         }
         "resolve" => {
+            let names: Vec<&Json> = items(req, "candidates").collect();
             for (i, res) in items(r, "results").enumerate() {
-                let _ = write!(out, "{} {}", i + 1, s(res, "verdict").unwrap_or("?"));
+                let name = names
+                    .get(i)
+                    .and_then(|c| c.get("name"))
+                    .map(val)
+                    .unwrap_or_default();
+                let _ = write!(out, "{} {name} {}", i + 1, s(res, "verdict").unwrap_or("?"));
                 let best = res.get("best");
                 if let Some(b) = best {
                     let _ = write!(out, " {}", scored(b));
@@ -295,6 +326,12 @@ pub fn render(op: &str, r: &Json) -> String {
             &["nodes", "links"]
         }
         "paths" => {
+            if items(r, "paths").next().is_none() {
+                out.push_str(
+                    "no path found (active links only, within max_length)
+",
+                );
+            }
             for p in items(r, "paths") {
                 path(&mut out, p);
             }
@@ -692,7 +729,7 @@ mod tests {
                       {"id": "l_2", "type": "Y", "from": "n_3", "to": "n_2", "directed": true}],
             "min_sources": 1}], "truncated": false});
         assert_eq!(
-            render("paths", &r),
+            render("paths", &json!({}), &r),
             "2: n_1 \"A\" -[X]-> n_2 \"B\" <-[Y]- n_3 \"C\" · min sources 1\n"
         );
     }
@@ -701,8 +738,8 @@ mod tests {
     fn nothing_is_dropped() {
         let r = json!({"hits": [], "truncated": true, "next_cursor": "20", "warnings": [{"code": "TRUNCATED", "message": "m", "details": null}]});
         assert_eq!(
-            render("search", &r),
-            "next_cursor: \"20\"\ntruncated: true\nwarning TRUNCATED: m\n"
+            render("search", &json!({}), &r),
+            "no hits\nnext_cursor: \"20\"\ntruncated: true\nwarning TRUNCATED: m\n"
         );
     }
 }
