@@ -43,7 +43,7 @@ meet the spec. Observable behaviour and stored data are defined normatively in `
 | Crate | Responsibility |
 |---|---|
 | `mygraph-core` | Model types, validation, engine, in-memory indexes, query executor, storage traits. No HTTP/MCP dependencies. |
-| `mygraph-store-sqlite` | `Store` + `TextIndex` implementations, schema migrations |
+| `mygraph-store-sqlite` | `Store` + `TextIndex` implementations, schema migrations, local blob store |
 | `mygraph-api` | Request/response DTOs for every operation, matching `spec/api/schemas`; embeds the spec's MCP tool definitions and OpenAPI document and serves them unchanged |
 | `mygraph-server` | The binary: `serve` (HTTP: REST + MCP), `mcp` (stdio), `import`, `export`, `check`, `bench-data` subcommands; config; auth; metrics |
 | `mygraph-bench` | Synthetic data generator, load scenarios, latency reports |
@@ -59,9 +59,9 @@ The operation layer is the product. Transports stay thin so a gRPC or a native l
 
 | Seam | Contract |
 |---|---|
-| `Store` | `load` (snapshot for the in-memory indexes), `counters` (last used internal numbers), `apply` (one `ChangeSet` — rows, batch, change-log entries — in one transaction), plus change-log queries for restore and retract-by-batch. The engine assigns internal numbers and change-log sequence numbers itself, so a change set is complete before it reaches the store |
+| `Store` | `load_into` (streams actors and rows into a `LoadSink`, which the in-memory state implements; `load` collects them into a snapshot), `counters` (last used internal numbers), `apply` (one `ChangeSet` — rows, batch, change-log entries — in one transaction), plus change-log queries for restore and retract-by-batch. The engine assigns internal numbers and change-log sequence numbers itself, so a change set is complete before it reaches the store |
 | `TextIndex` | Index/unindex text fields of an object inside the caller's transaction; query → ranked object references with scores and snippets |
-| `BlobStore` | Put bytes → sha256; get by sha256; exists; delete (admin GC only) |
+| `BlobStore` | `put` (bytes → sha256, written and synced before it returns), `size` (also answers "exists"), `get`; delete only by admin GC. Reached through `Store::blobs()`; local implementation `BlobDir` in `mygraph-store-sqlite` |
 | `VectorIndex` (phase 2) | Upsert/remove vector for an object; k-nearest query with an optional allowed-set filter |
 
 ## 3. Write path
@@ -128,6 +128,41 @@ partial answer for a complete one.
 
 If that becomes too much, properties can stay on disk with only indexed properties in RAM — a
 contained change inside the engine.
+
+### Measured in M1 (2026-10-25)
+
+`mygraph-bench` generates graphs through the engine's own `write` and measures exact heap bytes
+per object (a counting allocator). Shape per node: 1 evidence, 5 links, 6 citations (every node and
+link cites evidence), about 5 properties per node, 30 % of links with properties.
+
+| Bytes per object (heap, in the loaded state) | Estimate above | First PoC layout | After M1 compaction |
+|---|---:|---:|---:|
+| Node (with name index entry) | 250 | 1 417 | 631 |
+| Link (with adjacency) | 56 | 620 | 259 |
+| Evidence metadata | 100 | 1 407 | 686 |
+| Citation | 24 | 719 | 201 |
+
+Full PoC dataset (1 M nodes, 5 M links, 1 M evidence, 6 M citations; generator v1, seed 42;
+8.3 GB SQLite file; generated in 59 min, links at ~1 400/s):
+
+| Layout | Graph state in RAM | Load time (warm / cold OS cache) |
+|---|---:|---:|
+| First PoC layout | 9.5 GB (+ 5.5 GB row snapshot held during load) | 38.6 s / — |
+| After M1 compaction | 3.8 GB (rows streamed, no snapshot) | 25.1 s / 36.9 s |
+
+M1 compaction, in order of effect: records in dense tables indexed by internal number instead of
+hash maps; index sets that keep one element inline; the link, citation and evidence identity maps
+replaced by lookups through adjacency and per-target citation lists (evidence identity keeps only a
+64-bit hash); type names and property keys interned; properties as a sorted vector instead of a
+tree map; rows streamed from SQLite into the indexes (no full copy of the rows during load).
+
+Still above the estimate, and why: records keep every field in RAM (record-time metadata, quotes,
+evidence titles and authors) in general-purpose structs (`Option<String>` = 24 bytes, metadata 40
+bytes, 8-byte numbers). Next steps, in expected order of gain, when the M4 benchmark asks for
+them: (1) a hot/cold split — keep in RAM what search, traversal, matching and filters need, read
+the rest (record metadata, quotes, notes, most evidence fields) from SQLite on `get`; (2) 32-bit
+internal numbers and actor ids; (3) the packed layout of the table above (string arena, encoded
+properties).
 
 ## 6. Concurrency
 

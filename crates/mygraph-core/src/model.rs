@@ -4,10 +4,8 @@
 use crate::ids::{ObjectId, ObjectKind};
 use crate::values::{DateTime, Value};
 use serde_json::{Map, Value as Json, json};
-use std::collections::BTreeMap;
 
-/// Property map; `BTreeMap` keeps keys in code point order ([VAL-STORE-1]).
-pub type PropMap = BTreeMap<String, Value>;
+pub use crate::values::{PropMap, Sym};
 
 /// [OBJ-LIFE-1] `Merged` exists only for nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,7 +56,7 @@ pub struct RecordMeta {
 pub struct Node {
     pub idx: i64,
     pub key: Option<String>,
-    pub type_: String,
+    pub type_: Sym,
     pub name: String,
     pub aliases: Vec<String>,
     pub labels: Vec<String>,
@@ -73,7 +71,7 @@ pub struct Node {
 pub struct Link {
     pub idx: i64,
     pub key: Option<String>,
-    pub type_: String,
+    pub type_: Sym,
     pub src: i64,
     pub dst: i64,
     pub directed: bool,
@@ -311,7 +309,11 @@ pub fn target_json(kind: TargetKind, idx: i64) -> Json {
 }
 
 pub fn props_json(p: &PropMap) -> Json {
-    Json::Object(p.iter().map(|(k, v)| (k.clone(), v.to_json())).collect())
+    Json::Object(
+        p.iter()
+            .map(|(k, v)| (k.to_string(), v.to_json()))
+            .collect(),
+    )
 }
 
 pub fn time_json(ms: i64) -> Json {
@@ -324,7 +326,7 @@ pub fn record_json(row: &Row, actor: &dyn Fn(i64) -> String) -> Map<String, Json
         Row::Node(n) => json!({
             "id": id_string(ObjectKind::Node, n.idx),
             "key": opt(n.key.clone()),
-            "type": n.type_,
+            "type": &*n.type_,
             "name": n.name,
             "aliases": n.aliases,
             "labels": n.labels,
@@ -336,7 +338,7 @@ pub fn record_json(row: &Row, actor: &dyn Fn(i64) -> String) -> Map<String, Json
         Row::Link(l) => json!({
             "id": id_string(ObjectKind::Link, l.idx),
             "key": opt(l.key.clone()),
-            "type": l.type_,
+            "type": &*l.type_,
             "from": id_string(ObjectKind::Node, l.src),
             "to": id_string(ObjectKind::Node, l.dst),
             "directed": l.directed,

@@ -60,8 +60,8 @@ fn write_creates_everything_and_is_idempotent() {
     );
     assert_eq!(r["refs"]["@ada"], "n_1");
     // Vocabulary was canonicalized and announced.
-    assert_eq!(g.state().nodes[&1].type_, "Person");
-    assert_eq!(g.state().links[&1].type_, "COLLABORATED_WITH");
+    assert_eq!(&*g.state().nodes[&1].type_, "Person");
+    assert_eq!(&*g.state().links[&1].type_, "COLLABORATED_WITH");
     assert!(
         r["warnings"]
             .as_array()
@@ -459,4 +459,121 @@ fn reference_and_validation_errors() {
         ),
         "ref.duplicate"
     );
+}
+
+#[test]
+fn blobs_are_uploaded_matched_and_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    // "hello" in base64; its SHA-256 is well known.
+    let hash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    let blob_file = dir.path().join("blobs/sha256/2c/f2").join(hash);
+    let upload = json!({ "evidence": [{ "kind": "file", "blob_base64": "aGVsbG8=", "mime": "text/plain" }] });
+
+    // [OP-WRITE-9] a dry run stores nothing.
+    let mut dry = upload.clone();
+    dry["options"] = json!({ "dry_run": true });
+    g.write(ACTOR, &dry, T).unwrap();
+    assert!(!blob_file.exists());
+
+    let r = g.write(ACTOR, &upload, T).unwrap();
+    assert_eq!(r["items"][0]["outcome"], "created");
+    assert_eq!(std::fs::read(&blob_file).unwrap(), b"hello");
+    let e = &g.state().evidence[&1];
+    assert_eq!(e.blob_sha256.as_deref(), Some(hash));
+    assert_eq!(e.blob_size, Some(5));
+
+    // [OP-WRITE-8] referring to the stored blob matches the same evidence.
+    let r = g
+        .write(
+            ACTOR,
+            &json!({ "evidence": [{ "kind": "file", "blob": { "sha256": hash } }] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["outcome"], "matched");
+
+    let err = |g: &mut Graph<GraphFile>, item: Json| {
+        g.write(ACTOR, &json!({ "evidence": [item] }), T)
+            .unwrap_err()
+            .reason
+            .code()
+    };
+    assert_eq!(
+        err(
+            &mut g,
+            json!({ "kind": "file", "blob": { "sha256": "0".repeat(64) } })
+        ),
+        "evidence.blob_missing"
+    );
+    assert_eq!(
+        err(
+            &mut g,
+            json!({ "kind": "file", "blob": { "sha256": "ABC" } })
+        ),
+        "write.invalid_field"
+    );
+    assert_eq!(
+        err(&mut g, json!({ "kind": "file", "blob_base64": "aGVsbG8" })),
+        "evidence.blob_invalid"
+    );
+    assert_eq!(
+        err(
+            &mut g,
+            json!({ "kind": "file", "blob_base64": "aGVs bG8=" })
+        ),
+        "evidence.blob_invalid"
+    );
+    assert_eq!(
+        err(
+            &mut g,
+            json!({ "kind": "file", "blob_base64": "aGVsbG8=", "blob": { "sha256": hash } })
+        ),
+        "evidence.blob_conflict"
+    );
+    assert_eq!(
+        err(&mut g, json!({ "id": "e_1", "blob_base64": "d29ybGQ=" })),
+        "evidence.immutable_field"
+    );
+    // The blob survives reopening, and the record says so.
+    drop(g);
+    let g = open(dir.path());
+    assert_eq!(g.state().evidence[&1].blob_size, Some(5));
+}
+
+#[test]
+fn new_vocabulary_lists_similar_items() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let r = g
+        .write(
+            ACTOR,
+            &json!({
+                "evidence": [{ "ref": "@o", "kind": "observation", "content": "seen" }],
+                "nodes": [{ "ref": "@p", "type": "Persons", "name": "Grace Hopper", "props": { "born_on": {"$date": "1906"} }, "cite": ["@o"] }],
+                "links": [{ "type": "WROTE_ABOUTS", "from": "@p", "to": { "type": "Machine", "name": "Analytical Engine" }, "cite": ["@o"] }]
+            }),
+            T + 1,
+        )
+        .unwrap();
+    let similar = |kind: &str| -> Json {
+        r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["code"] == "NEW_VOCABULARY" && w["details"]["kind"] == kind)
+            .map(|w| w["details"]["similar"].clone())
+            .unwrap()
+    };
+    // [VSIM-3] counts are usage counts: two Person nodes, one WROTE_ABOUT link.
+    assert_eq!(
+        similar("node_type"),
+        json!([{ "name": "Person", "count": 2 }])
+    );
+    assert_eq!(
+        similar("link_type"),
+        json!([{ "name": "WROTE_ABOUT", "count": 1 }])
+    );
+    assert_eq!(similar("prop_key"), json!([{ "name": "born", "count": 1 }]));
 }

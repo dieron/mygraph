@@ -1,0 +1,22 @@
+[package]
+name = "mygraph-bench"
+description = "MyGraph synthetic data generator and load measurements"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mygraph-bench"
+path = "src/main.rs"
+
+[dependencies]
+mygraph-core.workspace = true
+mygraph-store-sqlite.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+memory-stats = "1"
+cap = "0.1"
+
+[lints]
+workspace = true

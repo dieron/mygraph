@@ -88,7 +88,7 @@ Reason codes: `link.endpoint_not_active`.
 | `kind` | Required: `text`, `url`, `file`, `image`, `document`, `conversation`, `observation`, `dataset`, `other` | no |
 | `content` | Optional inline text, ≤ the graph's `inline_text_limit` bytes, stored exactly as received ([NORM-TEXT-2]) | no |
 | `uri` | Optional; ≤ 4096 bytes; an absolute URI: a scheme (`[A-Za-z][A-Za-z0-9+.-]*`) followed by `:` and at least one more character, no whitespace | no |
-| `blob` | Optional `{sha256, size, mime}` of a blob in the blob store | no |
+| `blob` | Optional `{sha256, size}` of a blob in the blob store ([STORE-BLOB-1]); its MIME type goes in `mime` | no |
 | `parent` | Optional evidence reference: this evidence is a fragment of the parent | no |
 | `locator` | Optional JSON object, ≤ 4096 bytes serialized; informative keys: `page`, `char_start`, `char_end`, `selector`, `timestamp_ms`, `bbox` | yes |
 | `title` | ≤ 1024 bytes | yes |
@@ -115,7 +115,8 @@ they must exist before the referencing evidence, chains cannot form cycles; an u
 `supersedes` that would create a cycle fails with `evidence.supersedes_cycle`.
 
 **[OBJ-EV-4]** A blob referenced by `blob.sha256` must exist in the blob store when the evidence is
-created; reason code `evidence.blob_missing`.
+created; reason code `evidence.blob_missing`. Uploading blobs: [OP-WRITE-7] .. [OP-WRITE-9] in
+`api/operations/write.md`.
 
 Reason codes: `evidence.content_too_long`, `evidence.uri_invalid`, `evidence.field_too_long`,
 `evidence.language_invalid`, `evidence.reliability_range`.

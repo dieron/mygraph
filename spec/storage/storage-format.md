@@ -105,3 +105,6 @@ same name is not rewritten.
 
 **[STORE-BLOB-4]** Blobs are shared by all graphs and never modified. Unreferenced blobs are removed
 only by the admin blob garbage collection.
+
+**[STORE-BLOB-5]** Temporary files ([STORE-BLOB-3]) have names starting with `.tmp`. Readers
+ignore them; blob garbage collection deletes them.

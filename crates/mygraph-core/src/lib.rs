@@ -12,6 +12,7 @@ pub mod name_key;
 pub mod reason;
 pub mod state;
 pub mod store;
+pub mod table;
 pub mod text;
 mod ucd;
 pub mod values;

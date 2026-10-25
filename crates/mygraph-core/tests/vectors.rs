@@ -101,6 +101,26 @@ fn run(function: &str, case: &Json) -> Result<Json, Reason> {
         "validate_vocabulary_verbatim" => Json::String(vocab::validate_verbatim(
             case["input"]["value"].as_str().unwrap(),
         )?),
+        "vocabulary_similar" => {
+            let vocabulary: Vec<(&str, usize)> = case["input"]["vocabulary"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| {
+                    (
+                        v["name"].as_str().unwrap(),
+                        v["count"].as_u64().unwrap() as usize,
+                    )
+                })
+                .collect();
+            let found = vocab::similar(case["input"]["new"].as_str().unwrap(), vocabulary);
+            json!(
+                found
+                    .iter()
+                    .map(|(n, c)| json!({ "name": n, "count": c }))
+                    .collect::<Vec<_>>()
+            )
+        }
         "parse_value" => {
             if let Some(r) = case.get("input_repeat") {
                 parsed_json(values::parse(&Json::String(repeat(r)))?)

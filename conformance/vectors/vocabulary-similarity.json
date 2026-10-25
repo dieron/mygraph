@@ -1,0 +1,79 @@
+{
+  "format": "mygraph-vectors/1",
+  "spec_version": "0.1.0-draft",
+  "spec": "spec/algorithms/vocabulary-similarity.md",
+  "groups": [
+    {
+      "function": "vocabulary_similar",
+      "rules": ["VSIM-1", "VSIM-2", "VSIM-3", "VSIM-4", "VSIM-5"],
+      "description": "New item + existing items with usage counts -> similar items in report order. Scores are worked out in each case's note.",
+      "cases": [
+        {
+          "note": "worksfor/worksat: d=3, L=8 -> 625; words 1/3 -> 333. EMPLOYED_BY and KNOWS stay below 600.",
+          "input": { "new": "WORKS_FOR", "vocabulary": [
+            { "name": "WORKS_AT", "count": 1204 }, { "name": "EMPLOYED_BY", "count": 30 }, { "name": "KNOWS", "count": 5000 } ] },
+          "output": [ { "name": "WORKS_AT", "count": 1204 } ]
+        },
+        {
+          "note": "persons/person: d=1, L=7 -> 857 (prefix 700). persons/personrole: d=4, L=10 -> 600, exactly the threshold. place: below.",
+          "input": { "new": "Persons", "vocabulary": [
+            { "name": "Place", "count": 7 }, { "name": "PersonRole", "count": 2 }, { "name": "Person", "count": 10 } ] },
+          "output": [ { "name": "Person", "count": 10 }, { "name": "PersonRole", "count": 2 } ]
+        },
+        {
+          "note": "bornon vs bornto, bornat, bornup: d=2, L=6 -> 666 each; ties broken by count, then by name. birth_date: below.",
+          "input": { "new": "born_on", "vocabulary": [
+            { "name": "born_up", "count": 3 }, { "name": "birth_date", "count": 40 }, { "name": "born_at", "count": 3 }, { "name": "born_to", "count": 9 } ] },
+          "output": [ { "name": "born_to", "count": 9 }, { "name": "born_at", "count": 3 }, { "name": "born_up", "count": 3 } ]
+        },
+        {
+          "note": "Case only (graphs with normalize_types off): joined forms are equal -> 1000.",
+          "input": { "new": "person", "vocabulary": [ { "name": "Person", "count": 4 } ] },
+          "output": [ { "name": "Person", "count": 4 } ]
+        },
+        {
+          "note": "Same words in another order: word score 2/2 -> 1000.",
+          "input": { "new": "PAPER_AUTHOR", "vocabulary": [ { "name": "AUTHOR_PAPER", "count": 1 } ] },
+          "output": [ { "name": "AUTHOR_PAPER", "count": 1 } ]
+        },
+        {
+          "note": "org is a prefix of organization -> 700 (characters only 250). org/ore: d=1, L=3 -> 666.",
+          "input": { "new": "Org", "vocabulary": [ { "name": "Ore", "count": 1 }, { "name": "Organization", "count": 12 } ] },
+          "output": [ { "name": "Organization", "count": 12 }, { "name": "Ore", "count": 1 } ]
+        },
+        {
+          "note": "Prefixes shorter than 3 code points do not count: or/organization -> characters 166.",
+          "input": { "new": "Or", "vocabulary": [ { "name": "Organization", "count": 12 } ] },
+          "output": []
+        },
+        {
+          "note": "tag/tagN: d=1, L=4 -> 750 for all seven (digits after letters do not split words); the 5 most used are reported.",
+          "input": { "new": "Tag", "vocabulary": [
+            { "name": "Tag1", "count": 1 }, { "name": "Tag2", "count": 2 }, { "name": "Tag3", "count": 3 }, { "name": "Tag4", "count": 4 },
+            { "name": "Tag5", "count": 5 }, { "name": "Tag6", "count": 6 }, { "name": "Tag7", "count": 7 } ] },
+          "output": [ { "name": "Tag7", "count": 7 }, { "name": "Tag6", "count": 6 }, { "name": "Tag5", "count": 5 }, { "name": "Tag4", "count": 4 }, { "name": "Tag3", "count": 3 } ]
+        },
+        {
+          "note": "Nothing similar.",
+          "input": { "new": "Machine", "vocabulary": [ { "name": "Person", "count": 3 } ] },
+          "output": []
+        },
+        {
+          "note": "Unused items (count 0) and the item itself are not candidates.",
+          "input": { "new": "Person", "vocabulary": [ { "name": "Person", "count": 3 }, { "name": "Persons", "count": 0 } ] },
+          "output": []
+        },
+        {
+          "note": "Distance in code points, not bytes: strasse/straße: d=2, L=7 -> 714.",
+          "input": { "new": "Straße", "vocabulary": [ { "name": "Strasse", "count": 2 } ] },
+          "output": [ { "name": "Strasse", "count": 2 } ]
+        },
+        {
+          "note": "Empty vocabulary.",
+          "input": { "new": "Person", "vocabulary": [] },
+          "output": []
+        }
+      ]
+    }
+  ]
+}

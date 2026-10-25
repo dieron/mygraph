@@ -74,7 +74,7 @@ impl From<Reason> for OpError {
     }
 }
 
-fn storage_error(e: StoreFailure) -> OpError {
+pub(crate) fn storage_error(e: StoreFailure) -> OpError {
     OpError::new("storage.failure", e.to_string())
 }
 
@@ -146,10 +146,9 @@ pub struct Graph<S: Store> {
 impl<S: Store> Graph<S> {
     /// Loads the in-memory indexes from the store ([docs/05 §7]).
     pub fn open(store: S, name: &str, policies: Policies) -> Result<Self, StoreFailure> {
-        let snapshot = store.load()?;
         let counters = store.counters()?;
         Ok(Self {
-            state: State::from_snapshot(snapshot),
+            state: State::load(&store, &counters)?,
             store,
             policies,
             counters,

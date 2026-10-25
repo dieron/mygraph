@@ -1,7 +1,7 @@
 //! Operation `write` — spec/api/operations/write.md, spec/algorithms/upsert-matching.md.
 
 use crate::Reason;
-use crate::engine::{Batch, Graph, OpError};
+use crate::engine::{Batch, Graph, OpError, storage_error};
 use crate::ids::{ObjectId, ObjectKind, validate_batch_ref, validate_key};
 use crate::model::{
     Citation, EVIDENCE_KINDS, Evidence, Link, Node, PropMap, RecordMeta, Role, Row, Status,
@@ -9,12 +9,11 @@ use crate::model::{
 };
 use crate::name_key::{check_name, name_key};
 use crate::state::{CitationIdentity, EvidenceIdentity, LinkIdentity};
-use crate::store::Store;
+use crate::store::{Store, sha256_hex};
 use crate::text::nfc;
-use crate::values::{self, Parsed, Value, temporal_bounds, values_equal};
+use crate::values::{self, Parsed, Sym, Value, temporal_bounds, values_equal};
 use crate::vocab::{self, VocabKind};
 use serde_json::{Map, Value as Json, json};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 pub(crate) type Obj = Map<String, Json>;
@@ -182,11 +181,15 @@ fn datetime_ms(o: &Obj, name: &str) -> Result<Option<i64>, OpError> {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+/// [VSIM-5] `details.similar` of a `NEW_VOCABULARY` warning.
+fn similar_json(counts: &HashMap<Sym, usize>, new: &str) -> Json {
+    let found = vocab::similar(new, counts.iter().map(|(k, c)| (&**k, *c)));
+    Json::Array(
+        found
+            .into_iter()
+            .map(|(name, count)| json!({ "name": name, "count": count }))
+            .collect(),
+    )
 }
 
 fn valid_uri(s: &str) -> bool {
@@ -265,6 +268,7 @@ fn combine<T: PartialEq + Clone>(
 struct Ctx {
     refs: Refs,
     on_conflict: OnConflict,
+    dry_run: bool,
     items: Vec<Json>,
     counts: HashMap<&'static str, HashMap<&'static str, u64>>,
     created: Vec<(ObjectKind, i64)>,
@@ -354,6 +358,7 @@ impl<S: Store> Graph<S> {
         let mut ctx = Ctx {
             refs: Refs::new(),
             on_conflict,
+            dry_run,
             items: Vec::new(),
             counts: HashMap::new(),
             created: Vec::new(),
@@ -533,7 +538,7 @@ impl<S: Store> Graph<S> {
     fn name_matches(&self, type_: &str, name: &str) -> Vec<i64> {
         self.state
             .names
-            .get(&(type_.to_owned(), name_key(name)))
+            .get(&(Sym::from(type_), name_key(name).into_boxed_str()))
             .map(|s| s.iter().copied().collect())
             .unwrap_or_default()
     }
@@ -581,13 +586,13 @@ impl<S: Store> Graph<S> {
 
     fn new_prop_key_warnings(&self, b: &mut Batch, keys: impl Iterator<Item = String>) {
         for k in keys {
-            if !self.state.prop_keys.contains_key(&k)
+            if !self.state.prop_keys.contains_key(k.as_str())
                 && !b.warnings.iter().any(|w| w["details"]["name"] == *k)
             {
                 b.warn(
                     "NEW_VOCABULARY",
                     format!("new property key {k}"),
-                    json!({ "kind": "prop_key", "name": k, "similar": [] }),
+                    json!({ "kind": "prop_key", "name": k, "similar": similar_json(&self.state.prop_keys, &k) }),
                 );
             }
         }
@@ -780,18 +785,18 @@ impl<S: Store> Graph<S> {
                     "name"
                 }));
             };
-            if !self.state.node_types.contains_key(&type_) {
+            if !self.state.node_types.contains_key(type_.as_str()) {
                 b.warn(
                     "NEW_VOCABULARY",
                     format!("new node type {type_}"),
-                    json!({ "kind": "node_type", "name": type_, "similar": [] }),
+                    json!({ "kind": "node_type", "name": type_, "similar": similar_json(&self.state.node_types, &type_) }),
                 );
             }
             let idx = b.next(ObjectKind::Node);
             let mut node = Node {
                 idx,
                 key: None,
-                type_,
+                type_: type_.into(),
                 name,
                 aliases: Vec::new(),
                 labels: Vec::new(),
@@ -825,7 +830,7 @@ impl<S: Store> Graph<S> {
                 ),
             ));
         }
-        if by_identity && type_.as_ref().is_some_and(|t| *t != before.type_) {
+        if by_identity && type_.as_ref().is_some_and(|t| t.as_str() != &*before.type_) {
             return Err(OpError::new(
                 "write.type_mismatch",
                 format!(
@@ -922,10 +927,7 @@ impl<S: Store> Graph<S> {
                 }));
             };
             let directed = directed_in.unwrap_or(!self.state.symmetric_link_types.contains(t));
-            self.state
-                .link_identity
-                .get(&LinkIdentity::new(t, directed, f, d))
-                .copied()
+            self.state.find_link(&LinkIdentity::new(t, directed, f, d))
         };
 
         let Some(idx) = existing else {
@@ -941,11 +943,11 @@ impl<S: Store> Graph<S> {
             self.require_active_node(src)?;
             self.require_active_node(dst)?;
             check_validity(&valid_from, &valid_to)?;
-            if !self.state.link_types.contains_key(&type_) {
+            if !self.state.link_types.contains_key(type_.as_str()) {
                 b.warn(
                     "NEW_VOCABULARY",
                     format!("new link type {type_}"),
-                    json!({ "kind": "link_type", "name": type_, "similar": [] }),
+                    json!({ "kind": "link_type", "name": type_, "similar": similar_json(&self.state.link_types, &type_) }),
                 );
             }
             let directed = directed_in.unwrap_or(!self.state.symmetric_link_types.contains(&type_));
@@ -953,7 +955,7 @@ impl<S: Store> Graph<S> {
             let mut link = Link {
                 idx,
                 key: None,
-                type_,
+                type_: type_.into(),
                 src,
                 dst,
                 directed,
@@ -993,7 +995,7 @@ impl<S: Store> Graph<S> {
                 (None, None) => true,
                 _ => false,
             };
-            if type_.as_ref().is_some_and(|t| *t != before.type_)
+            if type_.as_ref().is_some_and(|t| t.as_str() != &*before.type_)
                 || directed_in.is_some_and(|d| d != before.directed)
                 || !same_ends
             {
@@ -1065,18 +1067,65 @@ impl<S: Store> Graph<S> {
         })
     }
 
+    /// [OP-WRITE-7] .. [OP-WRITE-9]: the blob an evidence item refers to, as (SHA-256, size).
+    fn blob_field(&self, o: &Obj, dry_run: bool) -> Result<Option<(String, i64)>, OpError> {
+        const MAX: usize = 10_485_760;
+        match (get(o, "blob"), get(o, "blob_base64")) {
+            (None, None) => Ok(None),
+            (Some(_), Some(_)) => Err(OpError::new(
+                "evidence.blob_conflict",
+                "give either blob or blob_base64, not both",
+            )),
+            (Some(v), None) => {
+                let hash = v
+                    .as_object()
+                    .filter(|m| m.len() == 1)
+                    .and_then(|m| m.get("sha256"))
+                    .and_then(Json::as_str)
+                    .filter(|h| {
+                        h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                    })
+                    .ok_or_else(|| {
+                        invalid("blob", "{\"sha256\": 64 lowercase hexadecimal digits}")
+                    })?;
+                let size = self
+                    .store
+                    .blobs()
+                    .size(hash)
+                    .map_err(storage_error)?
+                    .ok_or_else(|| field_err(Reason("evidence.blob_missing"), "blob"))?;
+                Ok(Some((hash.to_owned(), size as i64)))
+            }
+            (None, Some(v)) => {
+                use base64::Engine;
+                let bad = || field_err(Reason("evidence.blob_invalid"), "blob_base64");
+                let text = v.as_str().ok_or_else(bad)?;
+                if text.len() > MAX.div_ceil(3) * 4 {
+                    return Err(field_err(Reason("evidence.blob_too_large"), "blob_base64"));
+                }
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(text)
+                    .map_err(|_| bad())?;
+                if bytes.len() > MAX {
+                    return Err(field_err(Reason("evidence.blob_too_large"), "blob_base64"));
+                }
+                let hash = if dry_run {
+                    sha256_hex(&bytes)
+                } else {
+                    self.store.blobs().put(&bytes).map_err(storage_error)?
+                };
+                Ok(Some((hash, bytes.len() as i64)))
+            }
+        }
+    }
+
     fn write_evidence(
         &mut self,
         b: &mut Batch,
         ctx: &mut Ctx,
         o: &Obj,
     ) -> Result<(Outcome, ObjectKind, i64), OpError> {
-        if get(o, "blob").is_some() || get(o, "blob_base64").is_some() {
-            return Err(OpError::new(
-                "evidence.blob_unsupported",
-                "blob upload is not implemented yet; use content or uri",
-            ));
-        }
+        let blob = self.blob_field(o, ctx.dry_run)?;
         let key = Self::key_field(o)?;
         let kind = opt_str(o, "kind")?;
         if kind
@@ -1117,26 +1166,24 @@ impl<S: Store> Graph<S> {
             let ident = EvidenceIdentity {
                 kind: kind.clone(),
                 uri: uri.clone(),
-                blob: None,
+                blob: blob.as_ref().map(|(h, _)| h.clone()),
                 parent,
                 content: content_sha256.clone(),
             };
-            self.state
-                .evidence_identity
-                .get(&ident)
-                .and_then(|s| s.iter().next().copied())
+            self.state.find_evidence(&ident)
         } else {
             return Err(missing("kind"));
         };
 
         let Some(idx) = existing else {
             let kind = kind.ok_or_else(|| missing("kind"))?;
-            if content.is_none() && uri.is_none() {
+            if content.is_none() && uri.is_none() && blob.is_none() {
                 return Err(OpError::new(
                     "evidence.empty",
-                    "evidence needs content or uri",
+                    "evidence needs content, uri or a blob",
                 ));
             }
+            let (blob_sha256, blob_size) = blob.unzip();
             let idx = b.next(ObjectKind::Evidence);
             let mut e = Evidence {
                 idx,
@@ -1146,8 +1193,8 @@ impl<S: Store> Graph<S> {
                 content,
                 content_sha256,
                 uri,
-                blob_sha256: None,
-                blob_size: None,
+                blob_sha256,
+                blob_size,
                 mime: fields.mime,
                 parent,
                 locator: fields.locator,
@@ -1184,11 +1231,12 @@ impl<S: Store> Graph<S> {
             let differs = kind.as_ref().is_some_and(|k| *k != before.kind)
                 || content_sha256.is_some() && content_sha256 != before.content_sha256
                 || uri.is_some() && uri != before.uri
+                || blob.is_some() && blob.as_ref().map(|(h, _)| h) != before.blob_sha256.as_ref()
                 || parent.is_some() && parent != before.parent;
             if differs {
                 return Err(OpError::new(
                     "evidence.immutable_field",
-                    format!("{id}: kind, content, uri and parent cannot change"),
+                    format!("{id}: kind, content, uri, blob and parent cannot change"),
                 ));
             }
         }
@@ -1364,7 +1412,7 @@ impl<S: Store> Graph<S> {
             prop: prop.clone(),
             role,
         };
-        if let Some(&idx) = self.state.citation_identity.get(&ident) {
+        if let Some(idx) = self.state.find_citation(&ident) {
             let before = self.state.citations[&idx].clone();
             let mut cit = before.clone();
             let id = id_string(ObjectKind::Citation, idx);
@@ -1494,7 +1542,7 @@ impl<S: Store> Graph<S> {
             }
             Row::Evidence(e) => {
                 Self::set_key(&self.state.evidence_keys, &mut e.key, set_key, idx)?;
-                for f in ["kind", "content", "uri", "parent", "blob"] {
+                for f in ["kind", "content", "uri", "parent", "blob", "blob_base64"] {
                     if o.contains_key(f) {
                         return Err(OpError::new(
                             "evidence.immutable_field",

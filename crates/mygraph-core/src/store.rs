@@ -70,8 +70,43 @@ pub struct ChangeSet {
     pub log: Vec<LogEntry>,
 }
 
+/// Receives what the engine keeps in memory as the store reads it, so loading never holds a full
+/// copy of the rows next to the indexes being built.
+pub trait LoadSink {
+    fn actor(&mut self, a: Actor);
+    /// A node, link, evidence (without `content`) or citation row.
+    fn row(&mut self, row: Row);
+    fn symmetric_link_type(&mut self, name: String);
+}
+
+impl LoadSink for Snapshot {
+    fn actor(&mut self, a: Actor) {
+        self.actors.push(a);
+    }
+
+    fn row(&mut self, row: Row) {
+        match row {
+            Row::Node(n) => self.nodes.push(n),
+            Row::Link(l) => self.links.push(l),
+            Row::Evidence(e) => self.evidence.push(e),
+            Row::Citation(c) => self.citations.push(c),
+        }
+    }
+
+    fn symmetric_link_type(&mut self, name: String) {
+        self.symmetric_link_types.push(name);
+    }
+}
+
 pub trait Store {
-    fn load(&self) -> Result<Snapshot, StoreFailure>;
+    /// Streams every actor, row and symmetric link type to `sink`.
+    fn load_into(&self, sink: &mut dyn LoadSink) -> Result<(), StoreFailure>;
+    /// Everything [`Store::load_into`] reads, collected.
+    fn load(&self) -> Result<Snapshot, StoreFailure> {
+        let mut s = Snapshot::default();
+        self.load_into(&mut s)?;
+        Ok(s)
+    }
     fn counters(&self) -> Result<Counters, StoreFailure>;
     fn apply(&mut self, changes: &ChangeSet) -> Result<(), StoreFailure>;
     /// Seq of the most recent `retract` entry of an object ([STORE-LOG-4]).
@@ -82,4 +117,25 @@ pub trait Store {
     fn batch_objects(&self, batch: i64, op: &str) -> Result<Vec<(i64, i64)>, StoreFailure>;
     /// Reads evidence content, which is not kept in memory.
     fn evidence_content(&self, idx: i64) -> Result<Option<String>, StoreFailure>;
+    /// The blob store this graph's evidence refers to ([STORE-BLOB-1]).
+    fn blobs(&self) -> &dyn BlobStore;
+}
+
+/// Content-addressed bytes shared by all graphs ([STORE-BLOB-1] .. [STORE-BLOB-5]). Hashes are
+/// 64 lowercase hexadecimal digits of SHA-256.
+pub trait BlobStore {
+    /// Stores bytes durably (written and synced before returning) and returns their hash.
+    fn put(&self, bytes: &[u8]) -> Result<String, StoreFailure>;
+    /// Size in bytes of a stored blob, or `None` when it is not in the store.
+    fn size(&self, sha256: &str) -> Result<Option<u64>, StoreFailure>;
+    fn get(&self, sha256: &str) -> Result<Option<Vec<u8>>, StoreFailure>;
+}
+
+/// SHA-256 as 64 lowercase hexadecimal digits.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }

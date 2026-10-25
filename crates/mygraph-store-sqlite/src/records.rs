@@ -6,7 +6,7 @@ use mygraph_core::Reason;
 use mygraph_core::model::{
     Actor, Citation, Evidence, Link, Node, PropMap, RecordMeta, Role, Row, Status, TargetKind,
 };
-use mygraph_core::store::{ChangeSet, Counters, RowOp, Snapshot, Store, StoreFailure};
+use mygraph_core::store::{BlobStore, ChangeSet, Counters, LoadSink, RowOp, Store, StoreFailure};
 use mygraph_core::values::{self, Value};
 use rusqlite::{OptionalExtension, Row as SqlRow, Transaction, params};
 use serde_json::{Map, Value as Json};
@@ -280,9 +280,8 @@ impl GraphFile {
 }
 
 impl Store for GraphFile {
-    fn load(&self) -> Result<Snapshot, StoreFailure> {
+    fn load_into(&self, sink: &mut dyn LoadSink) -> Result<(), StoreFailure> {
         let c = self.connection();
-        let mut s = Snapshot::default();
 
         let mut st = c.prepare("SELECT idx, name, kind FROM actor")?;
         for a in st.query_map([], |r| {
@@ -292,13 +291,13 @@ impl Store for GraphFile {
                 kind: r.get(2)?,
             })
         })? {
-            s.actors.push(a?);
+            sink.actor(a?);
         }
 
         let mut st = c.prepare(&format!("SELECT {NODE_COLS} FROM node"))?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            s.nodes.push(Node {
+            sink.row(Row::Node(Node {
                 idx: r.get(0)?,
                 key: r.get(1)?,
                 type_: r.get(2)?,
@@ -310,13 +309,13 @@ impl Store for GraphFile {
                 status: status(r.get(8)?)?,
                 merged_into: r.get(9)?,
                 meta: meta(r, 10)?,
-            });
+            }));
         }
 
         let mut st = c.prepare(&format!("SELECT {LINK_COLS} FROM link"))?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            s.links.push(Link {
+            sink.row(Row::Link(Link {
                 idx: r.get(0)?,
                 key: r.get(1)?,
                 type_: r.get(2)?,
@@ -329,14 +328,14 @@ impl Store for GraphFile {
                 valid_to: read_temporal(r.get(9)?)?,
                 status: status(r.get(10)?)?,
                 meta: meta(r, 11)?,
-            });
+            }));
         }
 
         let cols = EVIDENCE_COLS.replace("title, content,", "title, NULL,");
         let mut st = c.prepare(&format!("SELECT {cols} FROM evidence"))?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
-            s.evidence.push(Evidence {
+            sink.row(Row::Evidence(Evidence {
                 idx: r.get(0)?,
                 key: r.get(1)?,
                 kind: r.get(2)?,
@@ -361,14 +360,14 @@ impl Store for GraphFile {
                 extra: read_object(r.get(21)?)?,
                 status: status(r.get(22)?)?,
                 meta: meta(r, 23)?,
-            });
+            }));
         }
 
         let mut st = c.prepare(&format!("SELECT {CITATION_COLS} FROM citation"))?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
             let tk: i64 = r.get(2)?;
-            s.citations.push(Citation {
+            sink.row(Row::Citation(Citation {
                 idx: r.get(0)?,
                 evidence: r.get(1)?,
                 target_kind: if tk == 0 {
@@ -384,14 +383,14 @@ impl Store for GraphFile {
                 note: r.get(8)?,
                 status: status(r.get(9)?)?,
                 meta: meta(r, 10)?,
-            });
+            }));
         }
 
         let mut st = c.prepare("SELECT name FROM type_info WHERE kind = 1 AND symmetric = 1")?;
         for n in st.query_map([], |r| r.get(0))? {
-            s.symmetric_link_types.push(n?);
+            sink.symmetric_link_type(n?);
         }
-        Ok(s)
+        Ok(())
     }
 
     fn counters(&self) -> Result<Counters, StoreFailure> {
@@ -486,5 +485,9 @@ impl Store for GraphFile {
             })
             .optional()?
             .flatten())
+    }
+
+    fn blobs(&self) -> &dyn BlobStore {
+        &self.blobs
     }
 }

@@ -5,8 +5,11 @@
 use crate::ids::ObjectKind;
 use crate::model::{Actor, Citation, Evidence, Link, Node, Role, Row, Status, TargetKind};
 use crate::name_key::name_key;
-use crate::store::Snapshot;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use crate::store::{Counters, LoadSink, Snapshot, Store, StoreFailure};
+use crate::table::{DenseIndex, IdSet, Table};
+use crate::values::Sym;
+use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 /// [STORE-LINK-1] identity of an active, non-multi, unkeyed link.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,9 +35,18 @@ impl LinkIdentity {
         }
     }
 
-    fn of(l: &Link) -> Option<Self> {
-        (l.status == Status::Active && !l.multi && l.key.is_none())
-            .then(|| Self::new(&l.type_, l.directed, l.src, l.dst))
+    fn matches(&self, l: &Link) -> bool {
+        let ends = if l.directed || l.src <= l.dst {
+            (l.src, l.dst)
+        } else {
+            (l.dst, l.src)
+        };
+        l.status == Status::Active
+            && !l.multi
+            && l.key.is_none()
+            && l.directed == self.directed
+            && ends == (self.a, self.b)
+            && *l.type_ == *self.type_
     }
 }
 
@@ -58,6 +70,13 @@ impl EvidenceIdentity {
             content: e.content_sha256.clone(),
         })
     }
+
+    /// Only the hash is indexed; candidates are compared field by field.
+    fn hash64(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        self.hash(&mut h);
+        h.finish()
+    }
 }
 
 /// [OBJ-CIT-1] identity of an active citation.
@@ -71,43 +90,44 @@ pub struct CitationIdentity {
 }
 
 impl CitationIdentity {
-    fn of(c: &Citation) -> Option<Self> {
-        (c.status == Status::Active).then(|| Self {
-            evidence: c.evidence,
-            target_kind: c.target_kind,
-            target: c.target,
-            prop: c.prop.clone(),
-            role: c.role,
-        })
+    fn matches(&self, c: &Citation) -> bool {
+        c.status == Status::Active
+            && c.evidence == self.evidence
+            && c.target_kind == self.target_kind
+            && c.target == self.target
+            && c.prop == self.prop
+            && c.role == self.role
     }
 }
 
 #[derive(Debug, Default)]
 pub struct State {
-    pub nodes: HashMap<i64, Node>,
-    pub links: HashMap<i64, Link>,
-    pub evidence: HashMap<i64, Evidence>,
-    pub citations: HashMap<i64, Citation>,
+    pub nodes: Table<Node>,
+    pub links: Table<Link>,
+    pub evidence: Table<Evidence>,
+    pub citations: Table<Citation>,
     pub actors: HashMap<i64, Actor>,
     pub actor_by_name: HashMap<String, i64>,
     pub node_keys: HashMap<String, i64>,
     pub link_keys: HashMap<String, i64>,
     pub evidence_keys: HashMap<String, i64>,
     /// (node type, name key) -> active nodes with that name or alias.
-    pub names: HashMap<(String, String), BTreeSet<i64>>,
+    pub names: HashMap<(Sym, Box<str>), IdSet>,
     /// node -> links (any status) with that node as an endpoint.
-    pub adjacency: HashMap<i64, BTreeSet<i64>>,
-    pub link_identity: HashMap<LinkIdentity, i64>,
-    pub evidence_identity: HashMap<EvidenceIdentity, BTreeSet<i64>>,
-    pub citation_identity: HashMap<CitationIdentity, i64>,
-    /// (target kind, target) -> citations (any status).
-    pub cites_by_target: HashMap<(TargetKind, i64), BTreeSet<i64>>,
-    pub cites_by_evidence: HashMap<i64, BTreeSet<i64>>,
+    pub adjacency: DenseIndex,
+    /// Hash of an [`EvidenceIdentity`] -> active evidence with that hash.
+    evidence_identity: HashMap<u64, IdSet>,
+    /// Citations (any status) by target node and by target link.
+    cites_by_node: DenseIndex,
+    cites_by_link: DenseIndex,
+    pub cites_by_evidence: DenseIndex,
     /// Usage counts over objects of any status: node types, link types, property keys.
-    pub node_types: HashMap<String, usize>,
-    pub link_types: HashMap<String, usize>,
-    pub prop_keys: HashMap<String, usize>,
+    pub node_types: HashMap<Sym, usize>,
+    pub link_types: HashMap<Sym, usize>,
+    pub prop_keys: HashMap<Sym, usize>,
     pub symmetric_link_types: HashSet<String>,
+    /// One shared copy of every type name and property key in use or used before.
+    syms: HashSet<Sym>,
 }
 
 fn add<K: Eq + std::hash::Hash>(m: &mut HashMap<K, usize>, k: K) {
@@ -123,11 +143,11 @@ fn sub<K: Eq + std::hash::Hash>(m: &mut HashMap<K, usize>, k: &K) {
     }
 }
 
-fn set_add<K: Eq + std::hash::Hash>(m: &mut HashMap<K, BTreeSet<i64>>, k: K, v: i64) {
+fn set_add<K: Eq + std::hash::Hash>(m: &mut HashMap<K, IdSet>, k: K, v: i64) {
     m.entry(k).or_default().insert(v);
 }
 
-fn set_remove<K: Eq + std::hash::Hash>(m: &mut HashMap<K, BTreeSet<i64>>, k: &K, v: i64) {
+fn set_remove<K: Eq + std::hash::Hash>(m: &mut HashMap<K, IdSet>, k: &K, v: i64) {
     if let Some(s) = m.get_mut(k) {
         s.remove(&v);
         if s.is_empty() {
@@ -136,13 +156,45 @@ fn set_remove<K: Eq + std::hash::Hash>(m: &mut HashMap<K, BTreeSet<i64>>, k: &K,
     }
 }
 
+impl LoadSink for State {
+    fn actor(&mut self, a: Actor) {
+        self.put_actor(a);
+    }
+
+    fn row(&mut self, row: Row) {
+        self.put(row);
+    }
+
+    fn symmetric_link_type(&mut self, name: String) {
+        self.symmetric_link_types.insert(name);
+    }
+}
+
 impl State {
+    /// Loads the state from a store, streaming rows into the indexes ([docs/05 §7]).
+    pub fn load(store: &dyn Store, counters: &Counters) -> Result<Self, StoreFailure> {
+        let mut st = Self::default();
+        st.nodes.reserve_to(counters.node);
+        st.links.reserve_to(counters.link);
+        st.evidence.reserve_to(counters.evidence);
+        st.citations.reserve_to(counters.citation);
+        store.load_into(&mut st)?;
+        Ok(st)
+    }
+
     pub fn from_snapshot(s: Snapshot) -> Self {
         let mut st = Self::default();
         for a in s.actors {
             st.put_actor(a);
         }
         st.symmetric_link_types = s.symmetric_link_types.into_iter().collect();
+        let max = |ids: &mut dyn Iterator<Item = i64>| ids.max().unwrap_or(0);
+        st.nodes.reserve_to(max(&mut s.nodes.iter().map(|n| n.idx)));
+        st.links.reserve_to(max(&mut s.links.iter().map(|l| l.idx)));
+        st.evidence
+            .reserve_to(max(&mut s.evidence.iter().map(|e| e.idx)));
+        st.citations
+            .reserve_to(max(&mut s.citations.iter().map(|c| c.idx)));
         for n in s.nodes {
             st.put_node(n);
         }
@@ -207,14 +259,28 @@ impl State {
 
     // ---- nodes -------------------------------------------------------------------------
 
-    pub fn put_node(&mut self, n: Node) -> Option<Node> {
+    fn intern(syms: &mut HashSet<Sym>, s: &Sym) -> Sym {
+        if let Some(x) = syms.get(s) {
+            return x.clone();
+        }
+        syms.insert(s.clone());
+        s.clone()
+    }
+
+    pub fn put_node(&mut self, mut n: Node) -> Option<Node> {
         let old = self.remove_node(n.idx);
+        n.type_ = Self::intern(&mut self.syms, &n.type_);
+        n.props.intern_keys(|k| Self::intern(&mut self.syms, k));
         if let Some(k) = &n.key {
             self.node_keys.insert(k.clone(), n.idx);
         }
         if n.status == Status::Active {
             for name in std::iter::once(&n.name).chain(&n.aliases) {
-                set_add(&mut self.names, (n.type_.clone(), name_key(name)), n.idx);
+                set_add(
+                    &mut self.names,
+                    (n.type_.clone(), name_key(name).into_boxed_str()),
+                    n.idx,
+                );
             }
         }
         add(&mut self.node_types, n.type_.clone());
@@ -231,7 +297,11 @@ impl State {
             self.node_keys.remove(k);
         }
         for name in std::iter::once(&n.name).chain(&n.aliases) {
-            set_remove(&mut self.names, &(n.type_.clone(), name_key(name)), idx);
+            set_remove(
+                &mut self.names,
+                &(n.type_.clone(), name_key(name).into_boxed_str()),
+                idx,
+            );
         }
         sub(&mut self.node_types, &n.type_);
         for k in n.props.keys() {
@@ -242,16 +312,15 @@ impl State {
 
     // ---- links -------------------------------------------------------------------------
 
-    pub fn put_link(&mut self, l: Link) -> Option<Link> {
+    pub fn put_link(&mut self, mut l: Link) -> Option<Link> {
         let old = self.remove_link(l.idx);
+        l.type_ = Self::intern(&mut self.syms, &l.type_);
+        l.props.intern_keys(|k| Self::intern(&mut self.syms, k));
         if let Some(k) = &l.key {
             self.link_keys.insert(k.clone(), l.idx);
         }
-        if let Some(id) = LinkIdentity::of(&l) {
-            self.link_identity.insert(id, l.idx);
-        }
-        set_add(&mut self.adjacency, l.src, l.idx);
-        set_add(&mut self.adjacency, l.dst, l.idx);
+        self.adjacency.add(l.src, l.idx);
+        self.adjacency.add(l.dst, l.idx);
         add(&mut self.link_types, l.type_.clone());
         for k in l.props.keys() {
             add(&mut self.prop_keys, k.clone());
@@ -265,13 +334,8 @@ impl State {
         if let Some(k) = &l.key {
             self.link_keys.remove(k);
         }
-        if let Some(id) = LinkIdentity::of(&l)
-            && self.link_identity.get(&id) == Some(&idx)
-        {
-            self.link_identity.remove(&id);
-        }
-        set_remove(&mut self.adjacency, &l.src, idx);
-        set_remove(&mut self.adjacency, &l.dst, idx);
+        self.adjacency.remove(l.src, idx);
+        self.adjacency.remove(l.dst, idx);
         sub(&mut self.link_types, &l.type_);
         for k in l.props.keys() {
             sub(&mut self.prop_keys, k);
@@ -288,7 +352,7 @@ impl State {
             self.evidence_keys.insert(k.clone(), e.idx);
         }
         if let Some(id) = EvidenceIdentity::of(&e) {
-            set_add(&mut self.evidence_identity, id, e.idx);
+            set_add(&mut self.evidence_identity, id.hash64(), e.idx);
         }
         self.evidence.insert(e.idx, e);
         old
@@ -300,37 +364,74 @@ impl State {
             self.evidence_keys.remove(k);
         }
         if let Some(id) = EvidenceIdentity::of(&e) {
-            set_remove(&mut self.evidence_identity, &id, idx);
+            set_remove(&mut self.evidence_identity, &id.hash64(), idx);
         }
         Some(e)
     }
 
     // ---- citations ---------------------------------------------------------------------
 
+    fn cites_index(&mut self, kind: TargetKind) -> &mut DenseIndex {
+        match kind {
+            TargetKind::Node => &mut self.cites_by_node,
+            TargetKind::Link => &mut self.cites_by_link,
+        }
+    }
+
     pub fn put_citation(&mut self, c: Citation) -> Option<Citation> {
         let old = self.remove_citation(c.idx);
-        if let Some(id) = CitationIdentity::of(&c) {
-            self.citation_identity.insert(id, c.idx);
-        }
-        set_add(&mut self.cites_by_target, (c.target_kind, c.target), c.idx);
-        set_add(&mut self.cites_by_evidence, c.evidence, c.idx);
+        self.cites_index(c.target_kind).add(c.target, c.idx);
+        self.cites_by_evidence.add(c.evidence, c.idx);
         self.citations.insert(c.idx, c);
         old
     }
 
     pub fn remove_citation(&mut self, idx: i64) -> Option<Citation> {
         let c = self.citations.remove(&idx)?;
-        if let Some(id) = CitationIdentity::of(&c)
-            && self.citation_identity.get(&id) == Some(&idx)
-        {
-            self.citation_identity.remove(&id);
-        }
-        set_remove(&mut self.cites_by_target, &(c.target_kind, c.target), idx);
-        set_remove(&mut self.cites_by_evidence, &c.evidence, idx);
+        self.cites_index(c.target_kind).remove(c.target, idx);
+        self.cites_by_evidence.remove(c.evidence, idx);
         Some(c)
     }
 
     // ---- queries -----------------------------------------------------------------------
+
+    /// Citations (any status) of a node or link.
+    pub fn cites_of(&self, kind: TargetKind, idx: i64) -> Option<&IdSet> {
+        match kind {
+            TargetKind::Node => self.cites_by_node.get(&idx),
+            TargetKind::Link => self.cites_by_link.get(&idx),
+        }
+    }
+
+    /// The active link with this identity, found through the endpoint with fewer links.
+    pub fn find_link(&self, id: &LinkIdentity) -> Option<i64> {
+        let (a, b) = (self.adjacency.get(&id.a), self.adjacency.get(&id.b));
+        let smaller = match (a, b) {
+            (Some(a), Some(b)) => Some(if a.len() <= b.len() { a } else { b }),
+            _ => None,
+        }?;
+        smaller
+            .iter()
+            .copied()
+            .find(|l| self.links.get(l).is_some_and(|l| id.matches(l)))
+    }
+
+    /// The lowest-numbered active evidence with this identity.
+    pub fn find_evidence(&self, id: &EvidenceIdentity) -> Option<i64> {
+        self.evidence_identity
+            .get(&id.hash64())?
+            .iter()
+            .copied()
+            .find(|e| EvidenceIdentity::of(&self.evidence[e]).as_ref() == Some(id))
+    }
+
+    /// The active citation with this identity.
+    pub fn find_citation(&self, id: &CitationIdentity) -> Option<i64> {
+        self.cites_of(id.target_kind, id.target)?
+            .iter()
+            .copied()
+            .find(|c| id.matches(&self.citations[c]))
+    }
 
     /// [OBJ-REF-1] follows `merged_into`.
     pub fn resolve_node(&self, mut idx: i64) -> Option<i64> {
@@ -346,7 +447,7 @@ impl State {
 
     /// [OBJ-CIT-3]
     pub fn is_supported(&self, kind: TargetKind, idx: i64) -> bool {
-        self.cites_by_target.get(&(kind, idx)).is_some_and(|cs| {
+        self.cites_of(kind, idx).is_some_and(|cs| {
             cs.iter().any(|c| {
                 let c = &self.citations[c];
                 c.status == Status::Active

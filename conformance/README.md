@@ -79,6 +79,7 @@ Functions are named by what they compute; implementations map them to their own 
 | [values.json](vectors/values.json) | `parse_value` | JSON text of a property value | `{kind, value}` (+ `precision` for dates) or `{remove: true}` |
 | | `compare_values` | JSON text of `[a, b]` | `-1`, `0` or `1` |
 | | `values_equal` | JSON text of `[a, b]` | `true` / `false` |
+| [vocabulary-similarity.json](vectors/vocabulary-similarity.json) | `vocabulary_similar` | `{new, vocabulary: [{name, count}]}` | `[{name, count}]` in report order |
 
 Object kinds in `encode_id` / `decode_id`: `node`, `link`, `evidence`, `citation`, `batch`.
 

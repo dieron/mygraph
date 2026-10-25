@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/mygraph-core", "crates/mygraph-store-sqlite", "crates/mygraph-server"]
+members = ["crates/mygraph-core", "crates/mygraph-store-sqlite", "crates/mygraph-server", "crates/mygraph-bench"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ mygraph-store-sqlite = { path = "crates/mygraph-store-sqlite" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = "3"
 sha2 = "0.10"
+base64 = "0.22"
 proptest = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }

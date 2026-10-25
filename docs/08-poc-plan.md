@@ -93,6 +93,22 @@ Every milestone follows the spec-first workflow of
   **Deviations from docs/05 (PoC simplifications):** the graph's write lock is held for the whole
   batch, not only while applying to memory; in-memory records are in hash maps rather than dense
   vectors.
+- *Progress 2026-10-25 (later):* M1 gaps closed. **Blobs:** `blob_base64` upload and `blob`
+  references ([OP-WRITE-7] .. [OP-WRITE-9]), local content-addressed blob store (`BlobDir`,
+  [STORE-BLOB-5] added). **Vocabulary hints:** `algorithms/vocabulary-similarity.md` (integer
+  scores, so every implementation lists the same items) with 12 vector cases; `NEW_VOCABULARY`
+  now fills `similar`. **Generator and measurements:** crate `mygraph-bench` (deterministic
+  SplitMix64 generator writing through the engine's own `write`; `load --breakdown` reports exact
+  heap bytes per object). The first measurement showed about 10× the RAM estimate, so the in-memory
+  layout was compacted (dense tables, inline one-element sets, identity maps replaced by lookups,
+  interned vocabulary, vector property maps, streamed loading): 2.3–2.8× less memory per object.
+  **Done-when check:** the 1 M / 5 M / 1 M / 6 M graph loads in 25 s (warm cache; 37 s cold) into
+  3.8 GB of RAM (first layout: 9.5 GB plus a 5.5 GB transient snapshot). The RAM estimate of
+  ~1 GB is missed by about 4×; numbers and next steps in [05-architecture.md §5](05-architecture.md).
+  Write throughput fell from ~3 400 to ~1 400 links/s as the file grew to 8 GB (suspected: SQLite's
+  default 2 MB page cache); to be measured in M4. In-memory records now live
+  in dense tables, which removes the second deviation above. **HTTP conformance cases** move to M3,
+  where the REST transport exists; the vectors run as Rust tests until then.
 
 ### M2 — Reads, search and analytics (L)
 - **Spec:** operations `get`, `search`, `resolve`, `neighbors`, `paths`, `find`, `history`;

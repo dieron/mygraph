@@ -3,9 +3,11 @@
 A fast graph database with evidence: every node and link points to the source data it was built
 from. Designed for AI agents (MCP and REST APIs, no query language), with a separate admin API.
 
-**Status:** 2026-10-24 · design done, all decisions taken · language **Rust**, specification-first so
-it can be re-written in another language · **M0 spec work in progress** (`spec/`, `conformance/`) ·
-no Rust code yet.
+**Status:** 2026-10-25 · language **Rust**, specification-first so it can be re-written in another
+language · **M0 done, M1 (core model and storage) done**: write, retract/restore, merge, blobs and
+vocabulary hints on SQLite, with property-based and kill tests; synthetic data generator and
+memory measurements · next: **M2** (reads, search, aggregations). See
+[docs/08-poc-plan.md](docs/08-poc-plan.md).
 
 ## In one paragraph
 
@@ -30,6 +32,16 @@ cargo run -p mygraph-server -- serve
 The server listens on `127.0.0.1:7420`; `GET /health` reports the spec and storage format
 versions. `crates/mygraph-core/tests/vectors.rs` runs every vector in `conformance/vectors/`.
 
+Synthetic data and memory measurements (keep the data directory outside synced folders):
+
+```bash
+cargo run --release -p mygraph-bench -- generate --data ../mygraph-data --graph g100k --nodes 100000
+```
+
+```bash
+cargo run --release -p mygraph-bench -- load --data ../mygraph-data --graph g100k --breakdown
+```
+
 Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest Visual Studio
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
@@ -51,7 +63,7 @@ lacks the x64 desktop libraries; build from a developer prompt of an installatio
 | 10 | [Portability: specification first](docs/10-portability-and-spec.md) | How `spec/` + `conformance/` keep a rewrite in Go, C# or anything else easy |
 | — | [Decisions (ADRs)](docs/decisions.md) | ADR-001…012; Rust and spec-first accepted, the rest *Proposed* |
 | — | [Sources](docs/research/sources.md) | Everything consulted, with links |
-| — | [spec/](spec/README.md) | Normative contract (M0 parts written: identifiers, normalization, values, storage schema) |
+| — | [spec/](spec/README.md) | Normative contract (M0 and M1 parts written: identifiers, normalization, values, storage, objects, write/retract/merge, vocabulary similarity) |
 | — | [conformance/](conformance/README.md) | Shared test vectors, later HTTP cases, benchmarks, agent evals |
 
 ## Key recommendations

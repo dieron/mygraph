@@ -66,10 +66,8 @@ fn pick(ids: &[i64], n: u8) -> Option<i64> {
     (!ids.is_empty()).then(|| ids[n as usize % ids.len()])
 }
 
-fn sorted_ids<T>(m: &std::collections::HashMap<i64, T>, keep: impl Fn(&T) -> bool) -> Vec<i64> {
-    let mut v: Vec<i64> = m.iter().filter(|(_, x)| keep(x)).map(|(k, _)| *k).collect();
-    v.sort_unstable();
-    v
+fn sorted_ids<T>(m: &mygraph_core::table::Table<T>, keep: impl Fn(&T) -> bool) -> Vec<i64> {
+    m.iter().filter(|(_, x)| keep(x)).map(|(k, _)| k).collect()
 }
 
 fn run(g: &mut Graph<GraphFile>, op: &Op, step: i64) {
@@ -181,8 +179,8 @@ fn check(g: &Graph<GraphFile>, dir: &Path) {
     assert_eq!(st.evidence, fresh.evidence);
     assert_eq!(st.citations, fresh.citations);
     assert_eq!(st.names, fresh.names);
-    assert_eq!(st.link_identity, fresh.link_identity);
-    assert_eq!(st.citation_identity, fresh.citation_identity);
+    assert_eq!(st.adjacency, fresh.adjacency);
+    assert_eq!(st.cites_by_evidence, fresh.cites_by_evidence);
 }
 
 proptest! {

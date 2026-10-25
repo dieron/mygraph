@@ -2,7 +2,10 @@
 //!
 //! Opens and creates graph files; `records.rs` implements the engine's `Store` trait.
 
+mod blobs;
 mod records;
+
+pub use blobs::BlobDir;
 
 use mygraph_core::Reason;
 use mygraph_core::ids::validate_graph_name;
@@ -76,6 +79,7 @@ pub fn graph_path(data_dir: &Path, name: &str) -> PathBuf {
 pub struct GraphFile {
     conn: Connection,
     name: String,
+    blobs: BlobDir,
 }
 
 impl GraphFile {
@@ -115,6 +119,7 @@ impl GraphFile {
         Ok(Self {
             conn,
             name: name.to_owned(),
+            blobs: BlobDir::new(data_dir),
         })
     }
 
@@ -146,6 +151,7 @@ impl GraphFile {
         Ok(Self {
             conn,
             name: name.to_owned(),
+            blobs: BlobDir::new(data_dir),
         })
     }
 

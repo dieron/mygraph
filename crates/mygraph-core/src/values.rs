@@ -252,26 +252,111 @@ fn parse_object(m: &Map<String, Json>) -> Result<Value, Reason> {
 }
 
 // ----------------------------------------------------------------------------------------
+// Property maps
+// ----------------------------------------------------------------------------------------
+
+/// Shared vocabulary text: node and link types and property keys. The in-memory state interns
+/// them, so records point at one copy instead of owning their own.
+pub type Sym = std::sync::Arc<str>;
+
+/// Property map kept sorted by key in code point order ([VAL-STORE-1]). A sorted vector rather
+/// than a tree: objects usually have a handful of properties, and memory per object matters.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PropMap(Vec<(Sym, Value)>);
+
+type PropIter<'a> = std::iter::Map<
+    std::slice::Iter<'a, (Sym, Value)>,
+    fn(&'a (Sym, Value)) -> (&'a Sym, &'a Value),
+>;
+
+impl PropMap {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn find(&self, k: &str) -> Result<usize, usize> {
+        self.0.binary_search_by(|(x, _)| (**x).cmp(k))
+    }
+
+    pub fn get(&self, k: &str) -> Option<&Value> {
+        self.find(k).ok().map(|i| &self.0[i].1)
+    }
+
+    pub fn contains_key(&self, k: &str) -> bool {
+        self.find(k).is_ok()
+    }
+
+    /// Sets a property, returning the previous value; an existing key keeps its stored text.
+    pub fn insert(&mut self, k: impl AsRef<str> + Into<Sym>, v: Value) -> Option<Value> {
+        match self.find(k.as_ref()) {
+            Ok(i) => Some(std::mem::replace(&mut self.0[i].1, v)),
+            Err(i) => {
+                self.0.insert(i, (k.into(), v));
+                None
+            }
+        }
+    }
+
+    pub fn remove(&mut self, k: &str) -> Option<Value> {
+        self.find(k).ok().map(|i| self.0.remove(i).1)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> PropIter<'_> {
+        self.0.iter().map(|(k, v)| (k, v))
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &Sym> {
+        self.0.iter().map(|(k, _)| k)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &Value> {
+        self.0.iter().map(|(_, v)| v)
+    }
+
+    /// Replaces every key with `f(key)` (used for interning) and drops spare capacity.
+    pub fn intern_keys(&mut self, mut f: impl FnMut(&Sym) -> Sym) {
+        for (k, _) in &mut self.0 {
+            *k = f(k);
+        }
+        self.0.shrink_to_fit();
+    }
+}
+
+impl<'a> IntoIterator for &'a PropMap {
+    type Item = (&'a Sym, &'a Value);
+    type IntoIter = PropIter<'a>;
+    fn into_iter(self) -> PropIter<'a> {
+        self.iter()
+    }
+}
+
+// ----------------------------------------------------------------------------------------
 // Storage encoding (§11)
 // ----------------------------------------------------------------------------------------
 
 /// [VAL-STORE-1] [VAL-STORE-2] Property map as stored text; `None` when empty.
-pub fn encode_props(props: &std::collections::BTreeMap<String, Value>) -> Option<String> {
+pub fn encode_props(props: &PropMap) -> Option<String> {
     if props.is_empty() {
         return None;
     }
     let map: Map<String, Json> = props
         .iter()
-        .map(|(k, v)| (k.clone(), v.to_json()))
+        .map(|(k, v)| (k.to_string(), v.to_json()))
         .collect();
     Some(Json::Object(map).to_string())
 }
 
 /// Reads a stored property map ([VAL-STORE-4]).
-pub fn decode_props(
-    text: Option<&str>,
-) -> Result<std::collections::BTreeMap<String, Value>, Reason> {
-    let mut out = std::collections::BTreeMap::new();
+pub fn decode_props(text: Option<&str>) -> Result<PropMap, Reason> {
+    let mut out = PropMap::new();
     let Some(text) = text else { return Ok(out) };
     let Json::Object(m) =
         serde_json::from_str(text).map_err(|_| Reason("storage.props_invalid"))?

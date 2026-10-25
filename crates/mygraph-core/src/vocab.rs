@@ -121,3 +121,76 @@ fn split_words(input: &str) -> Vec<String> {
     }
     words
 }
+
+// ----------------------------------------------------------------------------------------
+// Similarity — spec/algorithms/vocabulary-similarity.md
+// ----------------------------------------------------------------------------------------
+
+/// [VSIM-1] lowercase words.
+fn comparison_words(s: &str) -> Vec<Vec<char>> {
+    split_words(s)
+        .iter()
+        .map(|w| w.chars().map(simple_lower).collect())
+        .collect()
+}
+
+/// Levenshtein distance in code points.
+fn levenshtein(a: &[char], b: &[char]) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != cb);
+            cur[j + 1] = sub.min(prev[j + 1] + 1).min(cur[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// [VSIM-2] score from 0 to 1000.
+pub fn similarity(a: &str, b: &str) -> u32 {
+    let (wa, wb) = (comparison_words(a), comparison_words(b));
+    let (ja, jb): (Vec<char>, Vec<char>) = (wa.concat(), wb.concat());
+    let len = ja.len().max(jb.len());
+    let chars = (1000 * (len - levenshtein(&ja, &jb)))
+        .checked_div(len)
+        .unwrap_or(0);
+    let (sa, sb): (std::collections::BTreeSet<_>, std::collections::BTreeSet<_>) =
+        (wa.into_iter().collect(), wb.into_iter().collect());
+    let union = sa.union(&sb).count();
+    let words = (1000 * sa.intersection(&sb).count())
+        .checked_div(union)
+        .unwrap_or(0);
+    let (short, long) = if ja.len() <= jb.len() {
+        (&ja, &jb)
+    } else {
+        (&jb, &ja)
+    };
+    let prefix = if short.len() >= 3 && long.starts_with(short) {
+        700
+    } else {
+        0
+    };
+    chars.max(words).max(prefix) as u32
+}
+
+/// [VSIM-3] [VSIM-4] up to 5 similar items with their usage counts, in report order.
+pub fn similar<'a>(
+    new: &str,
+    vocabulary: impl IntoIterator<Item = (&'a str, usize)>,
+) -> Vec<(&'a str, usize)> {
+    let mut found: Vec<(u32, &str, usize)> = vocabulary
+        .into_iter()
+        .filter(|(name, count)| *count > 0 && *name != new)
+        .map(|(name, count)| (similarity(new, name), name, count))
+        .filter(|(score, _, _)| *score >= 600)
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0).then(b.2.cmp(&a.2)).then(a.1.cmp(b.1)));
+    found
+        .into_iter()
+        .take(5)
+        .map(|(_, name, count)| (name, count))
+        .collect()
+}

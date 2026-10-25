@@ -329,8 +329,8 @@ impl<S: Store> Graph<S> {
                     && l.key.is_none()
                     && self
                         .state
-                        .link_identity
-                        .contains_key(&LinkIdentity::new(&l.type_, l.directed, l.src, l.dst))
+                        .find_link(&LinkIdentity::new(&l.type_, l.directed, l.src, l.dst))
+                        .is_some()
                 {
                     return Err(OpError::new(
                         "lifecycle.identity_taken",
@@ -371,7 +371,7 @@ impl<S: Store> Graph<S> {
                     prop: c.prop.clone(),
                     role: c.role,
                 };
-                if self.state.citation_identity.contains_key(&ident) {
+                if self.state.find_citation(&ident).is_some() {
                     return Err(OpError::new(
                         "lifecycle.identity_taken",
                         "an active citation with the same identity exists",
@@ -465,7 +465,7 @@ impl<S: Store> Graph<S> {
             b.warn(
                 "TYPE_DIFFERS",
                 format!("merged node has type {}", loser.type_),
-                json!({ "id": id_string(ObjectKind::Node, l), "type": loser.type_ }),
+                json!({ "id": id_string(ObjectKind::Node, l), "type": &*loser.type_ }),
             );
         }
         // [OBJ-MERGE-1] the merged node first, so later entries can name it as their cause.
@@ -524,7 +524,7 @@ impl<S: Store> Graph<S> {
                     b.warn(
                         "PROPERTY_CONFLICT",
                         format!("{survivor_id}: props.{k} differ"),
-                        json!({ "prop": k, "kept": kept.to_json(), "dropped": dropped.to_json() }),
+                        json!({ "prop": &**k, "kept": kept.to_json(), "dropped": dropped.to_json() }),
                     );
                     sv.props.insert(k.clone(), kept);
                 }
@@ -553,7 +553,7 @@ impl<S: Store> Graph<S> {
             let ident = (!link.multi && link.key.is_none())
                 .then(|| LinkIdentity::new(&link.type_, link.directed, link.src, link.dst));
             let duplicate_of = ident
-                .and_then(|id| self.state.link_identity.get(&id).copied())
+                .and_then(|id| self.state.find_link(&id))
                 .filter(|&o| o != li);
             match duplicate_of {
                 None => {
@@ -563,7 +563,9 @@ impl<S: Store> Graph<S> {
                 Some(keep) => {
                     let mut kept = self.state.links[&keep].clone();
                     for (k, v) in &link.props {
-                        kept.props.entry(k.clone()).or_insert_with(|| v.clone());
+                        if !kept.props.contains_key(k) {
+                            kept.props.insert(k.clone(), v.clone());
+                        }
                     }
                     self.put(b, Row::Link(kept));
                     self.put_status(
@@ -593,8 +595,7 @@ impl<S: Store> Graph<S> {
     ) {
         let cites: Vec<i64> = self
             .state
-            .cites_by_target
-            .get(&(kind, from))
+            .cites_of(kind, from)
             .into_iter()
             .flatten()
             .copied()
@@ -610,12 +611,7 @@ impl<S: Store> Graph<S> {
                 prop: c.prop.clone(),
                 role: c.role,
             };
-            if self
-                .state
-                .citation_identity
-                .get(&ident)
-                .is_some_and(|&o| o != ci)
-            {
+            if self.state.find_citation(&ident).is_some_and(|o| o != ci) {
                 let mut old = self.state.citations[&ci].clone();
                 old.status = Status::Active;
                 self.put_status(

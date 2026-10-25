@@ -84,11 +84,31 @@ owner) with `outcome` ([WRITE-RESULT-1]). `counts` sums outcomes by object kind.
 
 **[OP-WRITE-5]** Warnings defined so far: `PROPERTY_CONFLICT` ([WRITE-FIELD-2]),
 `UNSUPPORTED_FACT` ([OBJ-POLICY-2]), `NEW_VOCABULARY` (the batch introduced a node type, link type
-or property key not used before in the graph; `details.similar` lists up to 5 existing items by a
-similarity defined in `algorithms/vocabulary-similarity.md`, planned).
+or property key not used before in the graph; `details` has `kind` (`node_type`, `link_type`,
+`prop_key`), `name`, and `similar`: up to 5 existing items by
+[algorithms/vocabulary-similarity.md](../../algorithms/vocabulary-similarity.md)).
 
 ## 3. Errors
 
 **[OP-WRITE-6]** A failing batch returns one error with the reason code, a message, the failing
 item (`section`, `index`), and where defined, details (candidates, current version, list of
 unsupported facts). Nothing is written.
+
+## 4. Blobs
+
+**[OP-WRITE-7]** `blob_base64` holds the bytes in the standard base64 alphabet of RFC 4648 §4, with
+padding and without whitespace or line breaks; anything else fails with `evidence.blob_invalid`.
+The decoded bytes must be at most 10 485 760 bytes (10 MiB), else `evidence.blob_too_large`. They
+are stored in the blob store ([STORE-BLOB-3]) and the item then behaves as if it had given
+`blob: {"sha256": <their SHA-256>}`.
+
+**[OP-WRITE-8]** `blob` is an object with one field `sha256`: 64 lowercase hexadecimal digits
+(otherwise `write.invalid_field`). The blob must already be in the blob store
+(`evidence.blob_missing`, [OBJ-EV-4]); the evidence records its SHA-256 and its size in bytes. An
+item gives at most one of `blob` and `blob_base64`; both fail with `evidence.blob_conflict`. A
+blob takes part in content matching ([WRITE-MATCH-EV-1]) and never changes afterwards
+([OBJ-EV-2]).
+
+**[OP-WRITE-9]** A dry run computes the SHA-256 but stores nothing; a `blob_base64` item then
+counts as present for [OBJ-EV-4]. Bytes stored for a batch that then fails stay in the blob store,
+unreferenced, until blob garbage collection ([STORE-BLOB-4]).
