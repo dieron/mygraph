@@ -36,6 +36,7 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | `WRITE` | Write processing order, matching, field combination | [algorithms/upsert-matching.md](algorithms/upsert-matching.md) |
 | `VSIM` | Similar existing vocabulary for `NEW_VOCABULARY` warnings | [algorithms/vocabulary-similarity.md](algorithms/vocabulary-similarity.md) |
 | `RANK` | Search matching and ranking: name keys, trigrams, match kinds, order | [algorithms/search-ranking.md](algorithms/search-ranking.md) |
+| `RES` | Entity resolution: candidates, scores, verdicts | [algorithms/resolve-scoring.md](algorithms/resolve-scoring.md) |
 | `OP` | Operations: requests, responses, errors | [api/operations/](api/operations/) |
 | `FIND`, `PATH`, `API`, `ERR`, `ADMIN` | Planned (M2–M3) | — |
 
@@ -83,8 +84,8 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | [storage/storage-format.md](storage/storage-format.md) — column encodings, FTS sync, change-log diff format, blob store | Draft | M1 |
 | [algorithms/upsert-matching.md](algorithms/upsert-matching.md), [api/operations/write.md](api/operations/write.md), [retract.md](api/operations/retract.md), [merge.md](api/operations/merge.md) | Draft | M1 |
 | [algorithms/vocabulary-similarity.md](algorithms/vocabulary-similarity.md) | Draft | M1 |
-| [api/operations/search.md](api/operations/search.md), [get.md](api/operations/get.md), [algorithms/search-ranking.md](algorithms/search-ranking.md) | Draft | M2 |
-| `api/operations/{resolve,neighbors,paths,find,history}.md`, other `algorithms/*` | Planned | M2 |
+| [api/operations/search.md](api/operations/search.md), [get.md](api/operations/get.md), [algorithms/search-ranking.md](algorithms/search-ranking.md), [resolve.md](api/operations/resolve.md), [algorithms/resolve-scoring.md](algorithms/resolve-scoring.md) | Draft | M2 |
+| `api/operations/{neighbors,paths,find,history}.md`, other `algorithms/*` | Planned | M2 |
 | `api/conventions.md`, `api/errors.md`, `api/schemas/`, `api/openapi.yaml`, `api/mcp-tools.json`, `admin/` | Planned | M3 |
 
 Status values: **Draft** (open for change) → **Review** (complete, being checked against the

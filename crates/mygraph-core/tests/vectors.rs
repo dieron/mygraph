@@ -114,6 +114,23 @@ fn run(function: &str, case: &Json) -> Result<Json, Reason> {
                 i[1].as_str().unwrap()
             ))
         }
+        "resolve_hint_agrees" => {
+            let v = |j: &Json| match values::parse(j).unwrap() {
+                Parsed::Value(v) => v,
+                Parsed::Remove => panic!("hint is a value"),
+            };
+            let i = &case["input"];
+            json!(mygraph_core::resolve::hint_agrees(&v(&i[0]), &v(&i[1])))
+        }
+        "resolve_verdict" => {
+            let scores: Vec<f64> = case["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_f64().unwrap())
+                .collect();
+            json!(mygraph_core::resolve::verdict(&scores))
+        }
         "vocabulary_similar" => {
             let vocabulary: Vec<(&str, usize)> = case["input"]["vocabulary"]
                 .as_array()

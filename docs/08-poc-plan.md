@@ -160,6 +160,17 @@ Every milestone follows the spec-first workflow of
 
   All `search` budget lines are now met. Not yet measured: the write-latency cost of the tantivy
   commit per batch.
+- *Progress 2026-10-25 (resolve):* **`resolve`** specified (`api/operations/resolve.md`,
+  `algorithms/resolve-scoring.md`, 17 vector cases for hint agreement and verdicts) and
+  implemented: candidates from exact name/alias and trigram similarity ≥ 0.4, name score, type
+  factor, hint agreement (partial dates compare at the coarser precision), verdict thresholds. The
+  first draft scored every weak trigram neighbour (similarity 0.3) as plausible, so on a large
+  graph almost nothing would come back `none`; the thresholds were raised before release (fuzzy
+  name score `min(0.9, s + 0.2)`, plausible ≥ 0.6). On the 1 M graph a call with 20 candidates
+  takes ~130 ms p50 (exact names) and ~90 ms (names with a typo), measured while Synology Drive and
+  OneDrive kept the CPU ~77 % busy, which roughly doubled every timing that day. Keeping `target/`
+  and benchmark data outside synced folders is needed for clean numbers.
+  Next: `neighbors`, `paths`, `find`, `history`.
   Next: `resolve`, `neighbors`, `paths`, `find`, `history`.
 
 ### M3 — APIs (M)

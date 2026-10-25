@@ -518,6 +518,30 @@ fn search_bench(
         }
         report.insert(name.to_owned(), percentiles(times));
     }
+    // `resolve` calls of 20 candidates, as an agent sends before a write: exact names with
+    // their type, and names with a typo.
+    for (name, typos) in [("resolve_20_exact", false), ("resolve_20_typo", true)] {
+        let mut times = Vec::new();
+        for chunk in ids.chunks(20) {
+            let cands: Vec<Json> = chunk
+                .iter()
+                .map(|i| {
+                    let n = &st.nodes[i];
+                    let name = if typos {
+                        typo(&n.name, &mut r)
+                    } else {
+                        n.name.clone()
+                    };
+                    json!({ "name": name, "type": &*n.type_ })
+                })
+                .collect();
+            let t = Instant::now();
+            g.resolve(&json!({ "candidates": cands }))
+                .map_err(|e| e.to_json().to_string())?;
+            times.push(t.elapsed());
+        }
+        report.insert(name.to_owned(), percentiles(times));
+    }
     report.insert("largest_hub_links".into(), json!(hubs[0].0));
     println!("{}", serde_json::to_string_pretty(&Json::Object(report))?);
     Ok(())

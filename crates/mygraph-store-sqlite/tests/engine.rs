@@ -714,3 +714,57 @@ fn get_returns_objects_with_neighbourhood_support_and_content() {
         "get.invalid_field"
     );
 }
+
+#[test]
+fn resolve_scores_names_types_and_hints() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    g.write(
+        ACTOR,
+        &json!({
+            "evidence": [{ "ref": "@o", "kind": "observation", "content": "two Babbages" }],
+            "nodes": [
+                { "id": "n_2", "props": { "born": {"$date": "1791-12-26"} } },
+                { "type": "Person", "name": "Benjamin Babbage", "props": { "born": {"$date": "1753"} }, "cite": ["@o"] }
+            ]
+        }),
+        T,
+    )
+    .unwrap();
+    let r = g
+        .resolve(&json!({ "candidates": [
+            { "name": "ada lovelace", "type": "Person" },
+            { "name": "Augusta Ada King" },
+            { "name": "C. Babbage", "type": "Person", "hints": { "born": {"$date": "1791"} } },
+            { "name": "C. Babbage", "type": "Person" },
+            { "name": "Analytical Engine", "type": "Person" },
+            { "name": "Luigi Menabrea" }
+        ] }))
+        .unwrap();
+    let res = &r["results"];
+    assert_eq!(res[0]["verdict"], "match");
+    assert_eq!(res[0]["best"]["why"], json!(["name exact"]));
+    assert_eq!(res[1]["best"]["why"], json!(["alias exact"]));
+    // Trigram similarity 9/18 -> 0.5 + 0.2 = 0.7; the date hint adds 0.1 -> match.
+    assert_eq!(res[2]["verdict"], "match");
+    assert_eq!(res[2]["best"]["id"], "n_2");
+    assert_eq!(res[2]["best"]["score"], json!(0.8));
+    assert_eq!(
+        res[2]["best"]["why"],
+        json!(["name fuzzy 0.50", "born matches"])
+    );
+    // Without the hint 0.7 is plausible but not a match.
+    assert_eq!(res[3]["verdict"], "ambiguous");
+    // Right name, wrong type: 1.0 x 0.7.
+    assert_eq!(res[4]["verdict"], "ambiguous");
+    assert_eq!(
+        res[4]["best"]["why"],
+        json!(["name exact", "type differs (Machine)"])
+    );
+    assert_eq!(res[5], json!({ "verdict": "none" }));
+    let e = g
+        .resolve(&json!({ "candidates": [{ "type": "Person" }] }))
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "resolve.invalid_field");
+}

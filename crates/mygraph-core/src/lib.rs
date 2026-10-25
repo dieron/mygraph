@@ -12,6 +12,7 @@ pub mod name_key;
 pub mod names;
 mod read;
 pub mod reason;
+pub mod resolve;
 mod search;
 pub mod state;
 pub mod store;

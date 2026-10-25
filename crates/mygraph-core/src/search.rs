@@ -175,7 +175,10 @@ impl<S: Store> Graph<S> {
                     .is_some_and(|n| status_ok(n.status) && type_ok(&n.type_))
             };
             // Whether `key` is the node's own name (otherwise one of its aliases).
-            let is_name = |n: i64, key: &str| name_key(&st.nodes[&n].name) == key;
+            let is_name = |n: i64, key: &str| {
+                let node = &st.nodes[&n];
+                node.aliases.is_empty() || name_key(&node.name) == key
+            };
             if matches!(mode, Mode::Auto | Mode::Exact | Mode::Prefix)
                 && let Some(set) = st.names.get(&q)
             {

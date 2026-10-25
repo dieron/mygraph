@@ -82,6 +82,8 @@ Functions are named by what they compute; implementations map them to their own 
 | [vocabulary-similarity.json](vectors/vocabulary-similarity.json) | `vocabulary_similar` | `{new, vocabulary: [{name, count}]}` | `[{name, count}]` in report order |
 | [search-ranking.json](vectors/search-ranking.json) | `name_trigrams` | name key | sorted list of trigrams |
 | | `trigram_similarity` | `[a, b]` name keys | number 0–1 |
+| [resolve-scoring.json](vectors/resolve-scoring.json) | `resolve_hint_agrees` | `[hint, stored]` values in write form | `true` / `false` |
+| | `resolve_verdict` | scores, highest first | `none`, `match` or `ambiguous` |
 
 Object kinds in `encode_id` / `decode_id`: `node`, `link`, `evidence`, `citation`, `batch`.
 
