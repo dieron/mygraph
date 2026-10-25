@@ -110,7 +110,7 @@ partial answer for a complete one.
 | Adjacency | per node: out-list and in-list of link indexes (undirected links in both) | O(degree) neighbourhood |
 | ID / key maps | `HashMap<key, u32>` per kind | Lookups by key; IDs are arithmetic (base32 ↔ integer) |
 | Name map | `HashMap<normalized name or alias, SmallVec<u32>>` | Exact, case/accent-insensitive lookup and entity resolution |
-| Type / label sets | `RoaringBitmap` per type, per label, per link type | Fast filter intersection, counts |
+| Type sets | Sorted id sets of active nodes per node type and active links per link type (M2; labels not yet) | `find` starts from them; counts per type without a scan |
 | Citations | by target (node/link/prop) and by evidence | "Why do we believe this?" and "what came from this source?" |
 | Evidence metadata | `Vec<EvidenceRec>` without content | Dates, kind, parent, hash — content fetched from SQLite on demand |
 | Vocabulary | type / link type / property key → count, description | Overview, normalization, similar-name hints |

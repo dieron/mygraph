@@ -119,6 +119,16 @@ pub trait Store {
     fn evidence_content(&self, idx: i64) -> Result<Option<String>, StoreFailure>;
     /// The blob store this graph's evidence refers to ([STORE-BLOB-1]).
     fn blobs(&self) -> &dyn BlobStore;
+    /// Change-log entries ([OP-HIST-2]): of one object (obj_kind code, number) newest first,
+    /// before `before` when given; or, without an object, those after `since` oldest first.
+    /// Returns at most `limit` + 1 rows, so callers can tell whether more exist.
+    fn history(
+        &self,
+        object: Option<(i64, i64)>,
+        since: Option<i64>,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<LogRecord>, StoreFailure>;
     /// Objects (obj_kind code, number) with change-log entries after `seq`.
     fn changed_since(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure>;
     /// Full-text search ([RANK-6]): objects of any status in relevance order, at most `limit`.
@@ -248,4 +258,17 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+/// A stored change-log row ([STORE-LOG-2]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogRecord {
+    pub seq: i64,
+    pub ts: i64,
+    pub actor: i64,
+    pub batch: i64,
+    pub op: String,
+    pub obj_kind: i64,
+    pub obj: Option<i64>,
+    pub diff: Option<String>,
 }

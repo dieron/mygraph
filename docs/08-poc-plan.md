@@ -170,7 +170,29 @@ Every milestone follows the spec-first workflow of
   takes ~130 ms p50 (exact names) and ~90 ms (names with a typo), measured while Synology Drive and
   OneDrive kept the CPU ~77 % busy, which roughly doubled every timing that day. Keeping `target/`
   and benchmark data outside synced folders is needed for clean numbers.
-  Next: `neighbors`, `paths`, `find`, `history`.
+- *Progress 2026-10-25 (rest of M2):* **`neighbors`**, **`paths`**, **`history`** and **`find`**
+  specified (`algorithms/traversal.md`, `api/operations/{neighbors,paths,history,find}.md`; `find`
+  also defines interval semantics for partial dates and where missing values sort, as
+  `model/values.md` promised) and implemented with engine tests. `paths` uses bidirectional BFS
+  for the distance, then walks the shortest-path layers in a defined path order; `k_shortest` goes
+  on to longer simple paths within a work budget. `find` evaluates fields as borrowed views of the
+  in-memory records, and starts from new per-type indexes of active nodes and links when a
+  condition fixes the type. Timings on the 1 M graph (laptop **on battery**, so CPU-throttled; all
+  of this day's numbers are worst-case), ms:
+
+  | Query | p50 | p99 | Budget (p99) |
+  |---|---:|---:|---:|
+  | `neighbors` 1 hop / 2 hops (≤ 200 nodes) | 0.03 / 0.42 | 0.39 / 1.07 | 5 ✓ |
+  | `paths` shortest / k = 3, max length 4 | 0.12 / 0.14 | 2.4 / 2.6 | 50 ✓ |
+  | `find` count of one node type (400 k nodes) | 1.3 | 1.8 | 50 ✓ |
+  | `find` group 5 M links / 1 M nodes by type | 0.016 / 0.009 | 0.02 / 0.44 | 50 ✓ |
+  | `find` group 400 k Persons by birth decade + avg | 111 | 128 | 50 ✗ |
+  | `find` filter + sort Organizations by a property | 97 | 112 | — |
+
+  The misses read a property of every candidate (~250 ns per object, memory-bound with records of
+  ~230 bytes). Options for the M4 gate: parallel scans (rayon, as docs/05 §4 planned) or columns
+  for frequently filtered properties. **M2 is complete** except the compact text format, which moves
+  to M3 with the MCP transport that uses it.
   Next: `resolve`, `neighbors`, `paths`, `find`, `history`.
 
 ### M3 — APIs (M)

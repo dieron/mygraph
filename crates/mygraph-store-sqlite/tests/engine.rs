@@ -768,3 +768,289 @@ fn resolve_scores_names_types_and_hints() {
         .unwrap_err();
     assert_eq!(e.reason.code(), "resolve.invalid_field");
 }
+
+/// Ada (n_1) -COLLABORATED_WITH- Babbage (n_2); Ada -WROTE_ABOUT-> Engine (n_3);
+/// Babbage -DESIGNED-> Engine; Menabrea (n_4) -WROTE_ABOUT-> Engine, valid from 1842.
+fn traversal_graph(dir: &Path) -> Graph<GraphFile> {
+    let mut g = new_graph(dir, Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    g.write(
+        ACTOR,
+        &json!({
+            "evidence": [{ "ref": "@o", "kind": "observation", "content": "more" }],
+            "nodes": [{ "ref": "@m", "type": "Person", "name": "Luigi Menabrea", "cite": ["@o"] }],
+            "links": [
+                { "type": "DESIGNED", "from": "n_2", "to": "n_3", "cite": ["@o"] },
+                { "type": "WROTE_ABOUT", "from": "@m", "to": "n_3", "valid_from": {"$date": "1842"}, "cite": ["@o"] }
+            ]
+        }),
+        T,
+    )
+    .unwrap();
+    g
+}
+
+fn ids_of(v: &Json) -> Vec<String> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn neighbors_expands_by_hop_with_limits() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = traversal_graph(dir.path());
+    let r = g.neighbors(&json!({ "start": ["n_1"] })).unwrap();
+    assert_eq!(ids_of(&r["nodes"]), ["n_1", "n_2", "n_3"]);
+    assert_eq!(ids_of(&r["links"]), ["l_1", "l_2"]);
+    assert_eq!(r["nodes"][2]["hop"], 1);
+    // [OP-NEIGH-2] hop 2 outwards: Babbage's DESIGNED link joins two known nodes.
+    let r = g
+        .neighbors(&json!({ "start": ["n_1"], "depth": 2, "direction": "out" }))
+        .unwrap();
+    assert_eq!(ids_of(&r["links"]), ["l_1", "l_2", "l_3"]);
+    assert_eq!(r["truncated"], false);
+    // Steps with types; the node limit; the per-node limit with a note.
+    let r = g
+        .neighbors(&json!({ "start": ["n_3"], "steps": [{ "link_types": ["wrote about"], "direction": "in" }], "include": { "support": true } }))
+        .unwrap();
+    assert_eq!(ids_of(&r["nodes"]), ["n_3", "n_1", "n_4"]);
+    assert_eq!(r["links"][0]["sources"], 1);
+    let r = g
+        .neighbors(&json!({ "start": ["n_1"], "limit": 2 }))
+        .unwrap();
+    assert_eq!(ids_of(&r["nodes"]), ["n_1", "n_2"]);
+    assert_eq!(r["truncated"], true);
+    let r = g
+        .neighbors(&json!({ "start": ["n_1"], "limit_per_node": 1 }))
+        .unwrap();
+    assert_eq!(
+        r["notes"],
+        json!([{ "node": "n_1", "hop": 1, "links_taken": 1, "links_total": 2 }])
+    );
+    // [TRAV-2] as_of before 1842 hides Menabrea's link.
+    let r = g
+        .neighbors(&json!({ "start": ["n_4"], "as_of": {"$date": "1800"} }))
+        .unwrap();
+    assert_eq!(ids_of(&r["nodes"]), ["n_4"]);
+    let e = g
+        .neighbors(&json!({ "start": ["n_1"], "depth": 1, "steps": [{}] }))
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "neighbors.invalid_field");
+}
+
+#[test]
+fn paths_are_shortest_first_in_path_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = traversal_graph(dir.path());
+    let lens = |r: &Json| -> Vec<u64> {
+        r["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["length"].as_u64().unwrap())
+            .collect()
+    };
+    let r = g.paths(&json!({ "from": "n_1", "to": "n_3" })).unwrap();
+    assert_eq!(lens(&r), [1]);
+    assert_eq!(ids_of(&r["paths"][0]["links"]), ["l_2"]);
+    assert_eq!(r["paths"][0]["min_sources"], 1);
+    let r = g
+        .paths(&json!({ "from": "n_1", "to": "n_3", "mode": "k_shortest", "k": 5 }))
+        .unwrap();
+    assert_eq!(lens(&r), [1, 2]);
+    assert_eq!(ids_of(&r["paths"][1]["nodes"]), ["n_1", "n_2", "n_3"]);
+    assert_eq!(r["truncated"], false);
+    // Direction is read from `from` to `to`: nothing leaves the Engine outwards.
+    let r = g
+        .paths(&json!({ "from": "n_3", "to": "n_1", "direction": "out" }))
+        .unwrap();
+    assert_eq!(r["paths"], json!([]));
+    // Menabrea reaches Ada through the Engine, but not as of 1800, nor within one step.
+    let r = g.paths(&json!({ "from": "n_4", "to": "n_1" })).unwrap();
+    assert_eq!(ids_of(&r["paths"][0]["nodes"]), ["n_4", "n_3", "n_1"]);
+    let r = g
+        .paths(&json!({ "from": "n_4", "to": "n_1", "as_of": {"$date": "1800"} }))
+        .unwrap();
+    assert_eq!(r["paths"], json!([]));
+    let r = g
+        .paths(&json!({ "from": "n_4", "to": "n_1", "max_length": 1 }))
+        .unwrap();
+    assert_eq!(r["paths"], json!([]));
+    let r = g.paths(&json!({ "from": "n_2", "to": "n_2" })).unwrap();
+    assert_eq!(lens(&r), [0]);
+    // all_shortest: Ada to Babbage has one direct path.
+    let r = g
+        .paths(&json!({ "from": "n_1", "to": "n_2", "mode": "all_shortest" }))
+        .unwrap();
+    assert_eq!(lens(&r), [1]);
+}
+
+#[test]
+fn history_by_object_and_since_seq() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    g.write(
+        ACTOR,
+        &json!({ "updates": [{ "target": { "node": "n_1" }, "summary": "mathematician" }] }),
+        T + 5,
+    )
+    .unwrap();
+    let r = g.history(&json!({ "target": "n_1" })).unwrap();
+    let e = r["entries"].as_array().unwrap();
+    assert_eq!(e.len(), 2, "created, then updated");
+    assert_eq!(e[0]["op"], "update", "newest first");
+    assert_eq!(e[0]["diff"]["after"]["summary"], "mathematician");
+    assert_eq!(e[0]["actor"], ACTOR);
+    assert_eq!(e[1]["op"], "create");
+    assert_eq!(r["more"], false);
+    // Paging by before_seq.
+    let first = g.history(&json!({ "target": "n_1", "limit": 1 })).unwrap();
+    assert_eq!(first["more"], true);
+    let seq = first["entries"][0]["seq"].as_i64().unwrap();
+    let rest = g
+        .history(&json!({ "target": "n_1", "before_seq": seq }))
+        .unwrap();
+    assert_eq!(rest["entries"][0]["op"], "create");
+    // since_seq: oldest first, resumable with last_seq.
+    let all = g.history(&json!({ "since_seq": 0, "limit": 500 })).unwrap();
+    let last = all["last_seq"].as_i64().unwrap();
+    assert_eq!(
+        all["entries"].as_array().unwrap().last().unwrap()["seq"],
+        last
+    );
+    let none = g.history(&json!({ "since_seq": last })).unwrap();
+    assert_eq!(none["entries"], json!([]));
+    let e = g
+        .history(&json!({ "target": "n_1", "since_seq": 0 }))
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "history.invalid_field");
+}
+
+#[test]
+fn find_filters_groups_and_aggregates() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    g.write(
+        ACTOR,
+        &json!({ "evidence": [{ "ref": "@o", "kind": "observation", "content": "dates" }],
+                 "updates": [
+                     { "target": { "node": "n_2" }, "set": { "born": {"$date": "1791-12-26"}, "country": "Britain" }, "cite": ["@o"] },
+                     { "target": { "node": "n_4" }, "set": { "born": {"$date": "1809"}, "country": "Italy" }, "cite": ["@o"] }
+                 ] }),
+        T,
+    )
+    .unwrap();
+    let ids = |r: &Json| -> Vec<String> {
+        r["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    // Ada born 1815-12-10, Babbage 1791-12-26, Menabrea 1809 (year precision).
+    let r = g
+        .find(&json!({ "target": "nodes", "where": { "all": [
+            { "field": "type", "op": "eq", "value": "Person" },
+            { "field": "prop:born", "op": "lt", "value": {"$date": "1810"} } ] },
+            "fields": ["prop:born.year"] }))
+        .unwrap();
+    assert_eq!(ids(&r), ["n_2", "n_4"]);
+    assert_eq!(r["rows"][1]["values"]["prop:born.year"], 1809);
+    // [OP-FIND-4] interval semantics: 1809 is inside 1809, not before 1809-06.
+    let r = g.find(&json!({ "target": "nodes", "where": { "field": "prop:born", "op": "eq", "value": {"$date": "1815"} } })).unwrap();
+    assert_eq!(ids(&r), ["n_1"]);
+    let r = g.find(&json!({ "target": "nodes", "where": { "field": "prop:born", "op": "lt", "value": {"$date": "1809-06"} } })).unwrap();
+    assert_eq!(ids(&r), ["n_2"]);
+    // Missing values satisfy only missing / ne / not_in.
+    let r = g.find(&json!({ "target": "nodes", "where": { "field": "prop:country", "op": "ne", "value": "Italy" } })).unwrap();
+    assert_eq!(ids(&r), ["n_1", "n_2", "n_3"]);
+    let r = g.find(&json!({ "target": "nodes", "where": { "field": "name", "op": "contains", "value": "BABB" } })).unwrap();
+    assert_eq!(ids(&r), ["n_2"]);
+    // Computed values, linked, sorting with missing last.
+    let r = g.find(&json!({ "target": "nodes", "where": { "field": "degree(WROTE_ABOUT, out)", "op": "gte", "value": 1 } })).unwrap();
+    assert_eq!(ids(&r), ["n_1", "n_4"]);
+    let r = g.find(&json!({ "target": "nodes", "where": { "linked": { "link_type": "DESIGNED", "direction": "out", "node": "n_3" } } })).unwrap();
+    assert_eq!(ids(&r), ["n_2"]);
+    let r = g.find(&json!({ "target": "nodes", "sort": [{ "by": "prop:born", "order": "desc" }], "limit": 2 })).unwrap();
+    assert_eq!(ids(&r), ["n_1", "n_4"]);
+    assert_eq!(r["total"], 4);
+    assert_eq!(r["next_cursor"], "2");
+    let r2 = g.find(&json!({ "target": "nodes", "sort": [{ "by": "prop:born", "order": "desc" }], "limit": 2, "cursor": "2" })).unwrap();
+    assert_eq!(ids(&r2), ["n_2", "n_3"]);
+    // Groups: links per type; aggregates over node properties.
+    let r = g
+        .find(&json!({ "target": "links", "group_by": ["type"] }))
+        .unwrap();
+    assert_eq!(
+        r["groups"][0],
+        json!({ "key": { "type": "WROTE_ABOUT" }, "count": 2 })
+    );
+    assert_eq!(r["total"], 3);
+    let r = g
+        .find(&json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Person" },
+                       "aggregate": [{ "fn": "count" }, { "fn": "avg", "of": "prop:born.year" },
+                                     { "fn": "min", "of": "prop:born" }, { "fn": "count_distinct", "of": "prop:country" },
+                                     { "fn": "median", "of": "degree" }] }))
+        .unwrap();
+    let g0 = &r["groups"][0];
+    assert_eq!(g0["count"], 3);
+    assert_eq!(
+        g0["avg(prop:born.year)"],
+        json!((1815.0 + 1791.0 + 1809.0) / 3.0)
+    );
+    assert_eq!(g0["min(prop:born)"], json!({ "$date": "1791-12-26" }));
+    assert_eq!(g0["count_distinct(prop:country)"], 2);
+    assert_eq!(g0["median(degree)"], json!(2.0));
+    let r = g
+        .find(&json!({ "target": "citations", "group_by": ["evidence"], "sort": [{ "by": "count", "order": "desc" }], "limit": 1 }))
+        .unwrap();
+    assert_eq!(r["groups"][0]["key"]["evidence"], "e_2");
+    let e = g
+        .find(
+            &json!({ "target": "nodes", "where": { "field": "prop:x", "op": "near", "value": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "find.invalid_field");
+}
+
+#[test]
+fn find_uses_the_type_index_with_canonical_type_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    let count = |g: &Graph<GraphFile>, q: Json| g.find(&q).unwrap()["groups"][0]["count"].clone();
+    assert_eq!(
+        count(
+            &g,
+            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "person" }, "aggregate": [{ "fn": "count" }] })
+        ),
+        3
+    );
+    // Type plus another condition: candidates from the index, then the rest of the test.
+    let q = json!({ "target": "nodes", "where": { "all": [
+        { "field": "type", "op": "in", "value": ["Person", "Machine"] },
+        { "field": "name", "op": "starts_with", "value": "a" } ] } });
+    let ids: Vec<Json> = g.find(&q).unwrap()["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].clone())
+        .collect();
+    assert_eq!(ids, [json!("n_1"), json!("n_3")]);
+    // The index follows retractions.
+    g.retract(ACTOR, &json!({ "targets": ["n_4"] }), T).unwrap();
+    assert_eq!(
+        count(&g, json!({ "target": "nodes", "group_by": ["type"] })),
+        2
+    );
+    assert_eq!(
+        count(
+            &g,
+            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Person" }, "aggregate": [{ "fn": "count" }] })
+        ),
+        2
+    );
+}

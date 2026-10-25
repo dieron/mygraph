@@ -44,7 +44,7 @@ fn include_limit(
     }
 }
 
-const BRIEF: [(&str, &[&str]); 4] = [
+pub(crate) const BRIEF: [(&str, &[&str]); 4] = [
     ("node", &["id", "type", "name", "status"]),
     ("link", &["id", "type", "from", "to", "directed", "status"]),
     ("evidence", &["id", "kind", "title", "uri", "status"]),
@@ -171,7 +171,10 @@ impl<S: Store> Graph<S> {
     }
 
     /// Any reference: (kind, number, merged-from ID).
-    fn resolve_any(&self, r: &Json) -> Result<(ObjectKind, i64, Option<String>), OpError> {
+    pub(crate) fn resolve_any(
+        &self,
+        r: &Json,
+    ) -> Result<(ObjectKind, i64, Option<String>), OpError> {
         let not_found = || OpError::new("ref.not_found", format!("nothing matches {r}"));
         match r {
             Json::String(s) => {

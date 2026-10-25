@@ -7,7 +7,8 @@ use mygraph_core::model::{
     Actor, Citation, Evidence, Link, Node, PropMap, RecordMeta, Role, Row, Status, TargetKind,
 };
 use mygraph_core::store::{
-    BlobStore, ChangeSet, Counters, LoadSink, RowOp, Store, StoreFailure, TextHit, TextTarget,
+    BlobStore, ChangeSet, Counters, LoadSink, LogRecord, RowOp, Store, StoreFailure, TextHit,
+    TextTarget,
 };
 use mygraph_core::values::{self, Value};
 use rusqlite::{OptionalExtension, Row as SqlRow, Transaction, params};
@@ -477,6 +478,47 @@ impl Store for GraphFile {
         let mut st = self.connection().prepare(sql)?;
         let rows = st.query_map([batch], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    fn history(
+        &self,
+        object: Option<(i64, i64)>,
+        since: Option<i64>,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<LogRecord>, StoreFailure> {
+        const COLS: &str = "seq, ts, actor, batch, op, obj_kind, obj, diff";
+        let take = (limit + 1) as i64;
+        let c = self.connection();
+        let row = |r: &rusqlite::Row| {
+            Ok(LogRecord {
+                seq: r.get(0)?,
+                ts: r.get(1)?,
+                actor: r.get(2)?,
+                batch: r.get(3)?,
+                op: r.get(4)?,
+                obj_kind: r.get(5)?,
+                obj: r.get(6)?,
+                diff: r.get(7)?,
+            })
+        };
+        let rows = match object {
+            Some((kind, obj)) => {
+                let mut st = c.prepare_cached(&format!(
+                    "SELECT {COLS} FROM changelog WHERE obj_kind = ?1 AND obj = ?2 AND seq < ?3 ORDER BY seq DESC LIMIT ?4"
+                ))?;
+                st.query_map((kind, obj, before.unwrap_or(i64::MAX), take), row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+            None => {
+                let mut st = c.prepare_cached(&format!(
+                    "SELECT {COLS} FROM changelog WHERE seq > ?1 ORDER BY seq LIMIT ?2"
+                ))?;
+                st.query_map((since.unwrap_or(0), take), row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        Ok(rows)
     }
 
     fn changed_since(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure> {

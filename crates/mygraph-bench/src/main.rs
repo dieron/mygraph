@@ -542,6 +542,86 @@ fn search_bench(
         }
         report.insert(name.to_owned(), percentiles(times));
     }
+    // Traversal from random nodes and between random pairs.
+    let node_id = |i: i64| mygraph_core::model::id_string(mygraph_core::ids::ObjectKind::Node, i);
+    let mut timed = |name: &str,
+                     reqs: Vec<Json>,
+                     f: &dyn Fn(&Json) -> Result<Json, mygraph_core::engine::OpError>|
+     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut times = Vec::with_capacity(reqs.len());
+        for q in &reqs {
+            let t = Instant::now();
+            f(q).map_err(|e| e.to_json().to_string())?;
+            times.push(t.elapsed());
+        }
+        report.insert(name.to_owned(), percentiles(times));
+        Ok(())
+    };
+    let starts: Vec<i64> = ids.iter().copied().take(100).collect();
+    let pairs: Vec<(i64, i64)> = ids
+        .chunks(2)
+        .filter(|c| c.len() == 2)
+        .map(|c| (c[0], c[1]))
+        .take(100)
+        .collect();
+    timed(
+        "neighbors_1hop",
+        starts
+            .iter()
+            .map(|&i| json!({ "start": [node_id(i)] }))
+            .collect(),
+        &|q| g.neighbors(q),
+    )?;
+    timed(
+        "neighbors_2hop_200",
+        starts
+            .iter()
+            .map(|&i| json!({ "start": [node_id(i)], "depth": 2, "limit": 200 }))
+            .collect(),
+        &|q| g.neighbors(q),
+    )?;
+    timed(
+        "paths_shortest_max4",
+        pairs
+            .iter()
+            .map(|&(a, b)| json!({ "from": node_id(a), "to": node_id(b) }))
+            .collect(),
+        &|q| g.paths(q),
+    )?;
+    timed("paths_k3_max4", pairs.iter().take(30).map(|&(a, b)| json!({ "from": node_id(a), "to": node_id(b), "mode": "k_shortest", "k": 3 })).collect(), &|q| g.paths(q))?;
+    // find over whole tables.
+    let rep = |q: Json| vec![q; 10];
+    timed(
+        "find_count_persons",
+        rep(
+            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Person" }, "aggregate": [{ "fn": "count" }] }),
+        ),
+        &|q| g.find(q),
+    )?;
+    timed(
+        "find_group_nodes_by_type",
+        rep(json!({ "target": "nodes", "group_by": ["type"] })),
+        &|q| g.find(q),
+    )?;
+    timed(
+        "find_group_5m_links_by_type",
+        rep(json!({ "target": "links", "group_by": ["type"] })),
+        &|q| g.find(q),
+    )?;
+    timed(
+        "find_persons_born_by_decade",
+        rep(
+            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Person" }, "group_by": ["prop:born.decade"], "aggregate": [{ "fn": "count" }, { "fn": "avg", "of": "prop:score" }] }),
+        ),
+        &|q| g.find(q),
+    )?;
+    timed(
+        "find_rows_filter_sort_20",
+        rep(
+            json!({ "target": "nodes", "where": { "all": [{ "field": "type", "op": "eq", "value": "Organization" }, { "field": "prop:employees", "op": "gt", "value": 100000 }] }, "sort": [{ "by": "prop:employees", "order": "desc" }] }),
+        ),
+        &|q| g.find(q),
+    )?;
     report.insert("largest_hub_links".into(), json!(hubs[0].0));
     println!("{}", serde_json::to_string_pretty(&Json::Object(report))?);
     Ok(())

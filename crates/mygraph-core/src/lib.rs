@@ -5,6 +5,8 @@
 //! are the tests (see `tests/vectors.rs`).
 
 pub mod engine;
+mod find;
+mod history;
 pub mod ids;
 mod lifecycle;
 pub mod model;
@@ -18,6 +20,7 @@ pub mod state;
 pub mod store;
 pub mod table;
 pub mod text;
+mod traverse;
 mod ucd;
 pub mod values;
 pub mod vocab;

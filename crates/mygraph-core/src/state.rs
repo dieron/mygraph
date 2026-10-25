@@ -114,6 +114,10 @@ pub struct State {
     pub evidence_keys: HashMap<String, i64>,
     /// name key -> active nodes (any type) with that name or alias.
     pub names: NameIndex,
+    /// Active nodes and links by type ([OP-FIND-*] starts from these when a condition fixes
+    /// the type).
+    pub nodes_by_type: HashMap<Sym, IdSet>,
+    pub links_by_type: HashMap<Sym, IdSet>,
     /// node -> links (any status) with that node as an endpoint.
     pub adjacency: DenseIndex,
     /// Hash of an [`EvidenceIdentity`] -> active evidence with that hash.
@@ -279,6 +283,7 @@ impl State {
             for name in std::iter::once(&n.name).chain(&n.aliases) {
                 self.names.add(name_key(name), n.idx);
             }
+            set_add(&mut self.nodes_by_type, n.type_.clone(), n.idx);
         }
         add(&mut self.node_types, n.type_.clone());
         for k in n.props.keys() {
@@ -290,6 +295,7 @@ impl State {
 
     pub fn remove_node(&mut self, idx: i64) -> Option<Node> {
         let n = self.nodes.remove(&idx)?;
+        set_remove(&mut self.nodes_by_type, &n.type_, idx);
         if let Some(k) = &n.key {
             self.node_keys.remove(k);
         }
@@ -312,6 +318,9 @@ impl State {
         if let Some(k) = &l.key {
             self.link_keys.insert(k.clone(), l.idx);
         }
+        if l.status == Status::Active {
+            set_add(&mut self.links_by_type, l.type_.clone(), l.idx);
+        }
         self.adjacency.add(l.src, l.idx);
         self.adjacency.add(l.dst, l.idx);
         add(&mut self.link_types, l.type_.clone());
@@ -324,6 +333,7 @@ impl State {
 
     pub fn remove_link(&mut self, idx: i64) -> Option<Link> {
         let l = self.links.remove(&idx)?;
+        set_remove(&mut self.links_by_type, &l.type_, idx);
         if let Some(k) = &l.key {
             self.link_keys.remove(k);
         }

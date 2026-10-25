@@ -186,8 +186,8 @@ bytes. Reason code: `value.props.too_large`.
 6. Lists: element by element using this order; a list that is a prefix of another comes first.
 
 *(informative)* Filter operators on partial dates (`born < 1850` when `born` is `1849-12`) are
-defined with interval semantics in `algorithms/aggregation.md` (planned M2); where missing
-properties sort is defined there too.
+defined with interval semantics in [api/operations/find.md](../api/operations/find.md) [OP-FIND-4];
+where missing values sort is defined there too ([OP-FIND-7]).
 
 ## 11. Storage encoding
 
