@@ -61,7 +61,7 @@ The operation layer is the product. Transports stay thin so a gRPC or a native l
 | Seam | Contract |
 |---|---|
 | `Store` | `load_into` (streams actors and rows into a `LoadSink`, which the in-memory state implements; `load` collects them into a snapshot), `counters` (last used internal numbers), `apply` (one `ChangeSet` — rows, batch, change-log entries — in one transaction), plus change-log queries for restore and retract-by-batch. The engine assigns internal numbers and change-log sequence numbers itself, so a change set is complete before it reaches the store |
-| `TextIndex` | External full-text index (`mygraph-core::store::TextIndex`): `index` (replace documents, then durably record the change-log seq they cover), `clear`, `applied_seq`, `search` (tokens → ranked object numbers). A rebuildable cache ([STORE-TEXT-1]); implementation `TantivyText` in `mygraph-text-tantivy`. Without one, the store's FTS5 tables answer |
+| `TextIndex` | External full-text index (`mygraph-core::store::TextIndex`): `index` (replace documents; searchable at once), `commit` (make them durable and record the change-log seq they cover; slow, so the server commits in the background about once a second and writes never wait for it), `pending`, `clear`, `applied_seq`, `search` (tokens → ranked object numbers; uncommitted documents are matched from memory). A rebuildable cache ([STORE-TEXT-1]); implementation `TantivyText` in `mygraph-text-tantivy`. Without one, the store's FTS5 tables answer |
 | `BlobStore` | `put` (bytes → sha256, written and synced before it returns), `size` (also answers "exists"), `get`; delete only by admin GC. Reached through `Store::blobs()`; local implementation `BlobDir` in `mygraph-store-sqlite` |
 | `VectorIndex` (phase 2) | Upsert/remove vector for an object; k-nearest query with an optional allowed-set filter |
 
@@ -201,7 +201,7 @@ own recovery logic.
   connect.
 - **REST**: the same operations as `POST /v1/graphs/{graph}/{operation}` with JSON bodies, plus
   conventional `GET` for single objects; the OpenAPI document from `spec/api/openapi.yaml` is
-  served at `/openapi.json`.
+  served at `/openapi.yaml`.
 
 ## 9. Security (PoC baseline)
 

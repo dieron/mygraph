@@ -6,7 +6,10 @@ from. Designed for AI agents (MCP and REST APIs, no query language), with a sepa
 **Status:** 2026-10-25 · language **Rust**, specification-first so it can be re-written in another
 language · **M0 done, M1 (core model and storage) done**: write, retract/restore, merge, blobs and
 vocabulary hints on SQLite, with property-based and kill tests; synthetic data generator and
-memory measurements · **M2 done** (all 11 agent operations except the transports): `search`, `get`, `resolve`, `neighbors`, `paths`, `find`, `history`, benchmarked at 1 M nodes · next: **M3** (MCP and REST APIs). See
+memory measurements · **M2 done**: `search`, `get`, `resolve`, `neighbors`, `paths`, `find`,
+`history`, benchmarked at 1 M nodes · **M3 in progress**: the **REST API** is done (all 11 operations,
+resource shorthands, API keys with roles, admin API, metrics, OpenAPI); MCP comes next, on top of
+it. See
 [docs/08-poc-plan.md](docs/08-poc-plan.md).
 
 ## In one paragraph
@@ -30,7 +33,7 @@ cargo run -p mygraph-server -- serve
 ```
 
 The server listens on `127.0.0.1:7420`; `GET /health` reports the spec and storage format
-versions. `crates/mygraph-core/tests/vectors.rs` runs every vector in `conformance/vectors/`.
+versions. See "Using the REST API" below. `crates/mygraph-core/tests/vectors.rs` runs every vector in `conformance/vectors/`.
 
 Synthetic data and memory measurements (keep the data directory outside synced folders):
 
@@ -45,6 +48,45 @@ cargo run --release -p mygraph-bench -- load --data ../mygraph-data --graph g100
 Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest Visual Studio
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
+
+## Using the REST API
+
+Every operation is `POST /v1/graphs/{graph}/{operation}` with the JSON request of its spec file
+(`spec/api/operations/`); `GET`/`DELETE` shorthands cover single objects, search and history. The
+rules are in [spec/api/conventions.md](spec/api/conventions.md), errors in
+[spec/api/errors.md](spec/api/errors.md), the admin routes in [spec/api/admin.md](spec/api/admin.md),
+and the server serves [spec/api/openapi.yaml](spec/api/openapi.yaml) at `/openapi.yaml`.
+
+Without API keys the server accepts local requests as the admin `local`. With keys, put them in a
+configuration file and pass `--config server.toml`:
+
+```toml
+data_dir = "../mygraph-data"
+
+[[keys]]
+key_sha256 = "…"          # `mygraph hash-key <key>` prints it; or `key = "…"`
+actor = "claude-research"
+role = "agent-write"      # agent-read, agent-write or admin
+graphs = ["research"]     # optional; default all graphs
+```
+
+A first session (`curl` with `-H "Authorization: Bearer <key>"` when keys are configured):
+
+```bash
+curl -s -X POST localhost:7420/admin/graphs -d '{"name": "research"}'
+```
+
+```bash
+curl -s -X POST localhost:7420/v1/graphs/research/write -d '{"evidence": [{"ref": "@e", "kind": "text", "content": "Ada Lovelace wrote about the Analytical Engine."}], "nodes": [{"ref": "@ada", "type": "Person", "name": "Ada Lovelace", "cite": ["@e"]}, {"ref": "@ae", "type": "Machine", "name": "Analytical Engine", "cite": ["@e"]}], "links": [{"type": "WROTE_ABOUT", "from": "@ada", "to": "@ae", "cite": ["@e"]}]}'
+```
+
+```bash
+curl -s "localhost:7420/v1/graphs/research/search?q=lovelace"
+```
+
+```bash
+curl -s "localhost:7420/v1/graphs/research/nodes/n_1?include=links,support,evidence"
+```
 
 ## Documents
 

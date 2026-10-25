@@ -7,8 +7,8 @@ use mygraph_core::model::{
     Actor, Citation, Evidence, Link, Node, PropMap, RecordMeta, Role, Row, Status, TargetKind,
 };
 use mygraph_core::store::{
-    BlobStore, ChangeSet, Counters, LoadSink, LogRecord, RowOp, Store, StoreFailure, TextHit,
-    TextTarget,
+    BatchSummary, BlobStore, ChangeSet, Counters, LoadSink, LogRecord, RowOp, Store, StoreFailure,
+    TextHit, TextTarget, VocabularyNote,
 };
 use mygraph_core::values::{self, Value};
 use rusqlite::{OptionalExtension, Row as SqlRow, Transaction, params};
@@ -398,9 +398,8 @@ impl Store for GraphFile {
 
     fn counters(&self) -> Result<Counters, StoreFailure> {
         let mut c = Counters::default();
-        let mut st = self
-            .connection()
-            .prepare("SELECT name, seq FROM sqlite_sequence")?;
+        let conn = self.connection();
+        let mut st = conn.prepare("SELECT name, seq FROM sqlite_sequence")?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
             let (name, seq): (String, i64) = (r.get(0)?, r.get(1)?);
@@ -462,7 +461,8 @@ impl Store for GraphFile {
     }
 
     fn cascaded_from(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure> {
-        let mut st = self.connection().prepare(
+        let c = self.connection();
+        let mut st = c.prepare(
             "SELECT obj_kind, obj FROM changelog WHERE op = 'retract' AND json_extract(diff, '$.cascade_of') = ?1 ORDER BY seq",
         )?;
         let rows = st.query_map([seq], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -475,7 +475,8 @@ impl Store for GraphFile {
         } else {
             "SELECT obj_kind, obj FROM changelog WHERE batch = ?1 AND op = 'create' AND obj IS NOT NULL ORDER BY seq"
         };
-        let mut st = self.connection().prepare(sql)?;
+        let c = self.connection();
+        let mut st = c.prepare(sql)?;
         let rows = st.query_map([batch], |r| Ok((r.get(0)?, r.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
@@ -522,7 +523,8 @@ impl Store for GraphFile {
     }
 
     fn changed_since(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure> {
-        let mut st = self.connection().prepare(
+        let c = self.connection();
+        let mut st = c.prepare(
             "SELECT DISTINCT obj_kind, obj FROM changelog WHERE seq > ?1 AND obj IS NOT NULL",
         )?;
         let rows = st.query_map([seq], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -568,11 +570,44 @@ impl Store for GraphFile {
                 "SELECT rowid, snippet(fts_evidence, -1, '«', '»', '…', 12) FROM fts_evidence WHERE fts_evidence MATCH ?1 ORDER BY rank LIMIT ?2"
             }
         };
-        let mut st = self.connection().prepare_cached(sql)?;
+        let c = self.connection();
+        let mut st = c.prepare_cached(sql)?;
         let rows = st.query_map((query, limit as i64), |r| {
             Ok(TextHit {
                 idx: r.get(0)?,
                 snippet: r.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    fn recent_batches(&self, limit: usize) -> Result<Vec<BatchSummary>, StoreFailure> {
+        let c = self.connection();
+        let mut st = c.prepare_cached(
+            "SELECT b.idx, b.actor, b.op, b.created_at, b.note, (SELECT count(*) FROM changelog l WHERE l.batch = b.idx) FROM batch b ORDER BY b.idx DESC LIMIT ?1",
+        )?;
+        let rows = st.query_map([limit as i64], |r| {
+            Ok(BatchSummary {
+                idx: r.get(0)?,
+                actor: r.get(1)?,
+                op: r.get(2)?,
+                created_at: r.get(3)?,
+                note: r.get(4)?,
+                changes: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    fn vocabulary_notes(&self) -> Result<Vec<VocabularyNote>, StoreFailure> {
+        let c = self.connection();
+        let mut st =
+            c.prepare_cached("SELECT kind, name, description FROM type_info ORDER BY kind, name")?;
+        let rows = st.query_map([], |r| {
+            Ok(VocabularyNote {
+                kind: r.get(0)?,
+                name: r.get(1)?,
+                description: r.get(2)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

@@ -204,6 +204,47 @@ Every milestone follows the spec-first workflow of
 - Admin API (PoC subset); Prometheus metrics; slow-op log.
 - **Done when:** Claude Code connects over stdio and over HTTP, lists the tools, and completes a
   scripted smoke scenario; OpenAPI validates.
+- *Progress 2026-10-25 (REST first):* REST comes first and MCP will be built on top of it once
+  REST does what agents need. **Spec:** `api/conventions.md` ([API-*]: transport, Bearer keys with
+  roles `agent-read` / `agent-write` / `admin` and optional graph lists, keyless local mode bound
+  to loopback, warm-up, read-your-writes, routes and shorthands), `api/errors.md` ([ERR-*]: error
+  object, HTTP status by reason code, hints for agents), `api/admin.md` ([ADMIN-*]), the new
+  operation `api/operations/overview.md` ([OP-OVER-*]) and `api/openapi.yaml` (validated with
+  Redocly; served at `/openapi.yaml`). **Server:** every operation at
+  `POST /v1/graphs/{graph}/{operation}`; shorthands `GET /v1/graphs/{graph}` (overview),
+  `…/search?q=`, `…/changes?since_seq=`, `GET`/`DELETE …/{collection}/{id}`, `…/history`,
+  `…/restore`, evidence `…/content` (text) and `…/blob` (bytes, media type, ETag); admin create /
+  list / drop (to trash) / snapshot (`VACUUM INTO`) / check, stats, keys, config; `/health`,
+  `/ready`, Prometheus `/metrics`, slow-request log. Graphs load in the background at start (or
+  on first use); requests wait up to 2 s, then get `503 graph.warming_up` with `Retry-After`.
+  Reads run in parallel under a per-graph `RwLock`; writes are exclusive (the SQLite connection
+  sits behind a mutex, so only reads that reach SQLite take turns). 8 end-to-end tests drive the
+  router. Not yet: per-request time budgets, full JSON Schemas per operation, policy changes and
+  vocabulary notes over the admin API, JSONL export/import.
+
+  **Smoke run over HTTP** on the 1 M / 5 M / 1 M graph (release build, `curl` from the same
+  laptop, median of 20 calls, HTTP and JSON included; a bare `/health` takes ~1.4 ms this way):
+
+  | Call | Median ms |
+  |---|---:|
+  | `GET /v1/graphs/g1m` (overview) / `?type=Person` | 1.6 / 54 |
+  | search: exact name (GET) / fuzzy / evidence full text | 6.5 / 6.9 / 2.3 |
+  | `GET …/nodes/{id}` default / brief | 4.9 / 1.4 |
+  | resolve (1 candidate) | 6.7 |
+  | neighbors depth 2 / paths (2 hops) / paths k-shortest 3 | 4.1 / 6.2 / 21 |
+  | find (group by type) / history of a node / changes | 1.4 / 1.6 / 3.5 |
+  | write: unchanged (idempotent) / new (9 objects, fsync) | 1.5 / 4.1 |
+
+  Three problems found by this run and fixed: (1) `overview` scanned all evidence and citations
+  (105 ms) — active counts are now kept in memory (1.6 ms); type statistics sampled the first
+  10 000 objects, which are the hubs, and now sample at equal steps. (2) Every write committed the
+  tantivy index (50–150 ms per write at 1 M). Writes now only queue documents; searches match the
+  queue from memory, and the server commits the index in the background once a second without
+  holding the graph lock. (3) SQLite's automatic WAL checkpoint ran inside whichever commit crossed
+  the threshold, stalling it on the 8.7 GB file; the server turns it off and runs passive
+  checkpoints from a second connection. Sustained writes (3 nodes/links + evidence each, 300 in a
+  row, warm): p50 4.0 ms, p90 7.2 ms, p99 16 ms (before: p99 95 ms); the first writes after a
+  start still see cold-cache outliers of up to ~0.9 s.
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

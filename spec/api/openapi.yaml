@@ -1,0 +1,768 @@
+openapi: 3.1.0
+info:
+  title: MyGraph API
+  version: 0.1.0-draft
+  summary: Graph database with evidence, for AI agents.
+  description: |
+    The agent REST API (`/v1`) and the admin API (`/admin`). Rules: `spec/api/conventions.md`,
+    errors: `spec/api/errors.md`, admin: `spec/api/admin.md`. Each operation's request and
+    response are specified in `spec/api/operations/<operation>.md`; the schemas below name the
+    main members and allow the rest.
+  license:
+    name: MIT OR Apache-2.0
+    identifier: MIT OR Apache-2.0
+servers:
+  - url: http://127.0.0.1:7420
+security:
+  - bearer: []
+
+tags:
+  - name: operations
+    description: "`POST /v1/graphs/{graph}/{operation}` — every operation with its JSON request."
+  - name: shorthands
+    description: Resource-style routes mapped onto operations ([API-SHORT-1]).
+  - name: admin
+    description: Operator routes; role admin (admin.md).
+  - name: service
+    description: Unauthenticated health, readiness, metrics and this document.
+
+paths:
+  /v1/graphs:
+    get:
+      tags: [shorthands]
+      summary: Graphs this key may use
+      operationId: listGraphs
+      responses:
+        "200":
+          description: Graphs by name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphList" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    get:
+      tags: [shorthands]
+      summary: Overview of the graph (operation `overview`)
+      operationId: getGraph
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+        - { name: recent, in: query, schema: { type: integer, minimum: 0, maximum: 50 } }
+        - { name: types_limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200": { $ref: "#/components/responses/Overview" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/overview:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Counts, vocabulary, policies, recent activity (overview.md)
+      operationId: overview
+      requestBody: { $ref: "#/components/requestBodies/Overview" }
+      responses:
+        "200": { $ref: "#/components/responses/Overview" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/search:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    get:
+      tags: [shorthands]
+      summary: Search (operation `search`)
+      operationId: searchGet
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: in, in: query, description: "Comma-separated: nodes, links, evidence", schema: { type: string } }
+        - { name: types, in: query, description: Comma-separated types, schema: { type: string } }
+        - { name: mode, in: query, schema: { type: string, enum: [auto, exact, prefix, fuzzy, text] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: include_retracted, in: query, schema: { type: boolean } }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [operations]
+      summary: Ranked search over names, aliases and text (search.md)
+      operationId: search
+      requestBody:
+        $ref: "#/components/requestBodies/Search"
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/resolve:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Existing matches for candidate entities (resolve.md)
+      operationId: resolve
+      requestBody: { $ref: "#/components/requestBodies/Resolve" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/get:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Objects by reference, with neighbourhood, support, evidence (get.md)
+      operationId: get
+      requestBody: { $ref: "#/components/requestBodies/Get" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/write:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Atomic batch of evidence, nodes, links, citations, updates (write.md)
+      operationId: write
+      requestBody: { $ref: "#/components/requestBodies/Write" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/retract:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Retract or restore objects, or what a batch did (retract.md)
+      operationId: retract
+      requestBody: { $ref: "#/components/requestBodies/Retract" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/merge:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Merge duplicate nodes (merge.md)
+      operationId: merge
+      requestBody: { $ref: "#/components/requestBodies/Merge" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/neighbors:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: k-hop expansion into a subgraph (neighbors.md)
+      operationId: neighbors
+      requestBody: { $ref: "#/components/requestBodies/Neighbors" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/paths:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Shortest and k-shortest paths (paths.md)
+      operationId: paths
+      requestBody: { $ref: "#/components/requestBodies/Paths" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/find:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Filters, group-by, aggregates, sorting (find.md)
+      operationId: find
+      requestBody: { $ref: "#/components/requestBodies/Find" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/history:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [operations]
+      summary: Change history of an object, or changes since a sequence number (history.md)
+      operationId: history
+      requestBody: { $ref: "#/components/requestBodies/History" }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/changes:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    get:
+      tags: [shorthands]
+      summary: Changes since a sequence number (operation `history`)
+      operationId: changes
+      parameters:
+        - { name: since_seq, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/{collection}/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/graph" }
+      - { $ref: "#/components/parameters/collection" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      tags: [shorthands]
+      summary: One object (operation `get`, unwrapped)
+      operationId: getObject
+      parameters:
+        - { name: detail, in: query, schema: { type: string, enum: [brief, normal, full] } }
+        - { name: include, in: query, description: "Comma-separated: links, support, evidence, content", schema: { type: string } }
+        - { name: links_limit, in: query, schema: { type: integer, minimum: 0, maximum: 500 } }
+        - { name: link_types, in: query, description: Comma-separated link types, schema: { type: string } }
+        - { name: evidence_limit, in: query, schema: { type: integer, minimum: 0, maximum: 100 } }
+        - { name: include_retracted, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: The object (get.md §2, one item).
+          content:
+            application/json:
+              schema: { type: object }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [shorthands]
+      summary: Retract the object (operation `retract`)
+      operationId: deleteObject
+      parameters:
+        - { name: reason, in: query, schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/{collection}/{id}/history:
+    parameters:
+      - { $ref: "#/components/parameters/graph" }
+      - { $ref: "#/components/parameters/collection" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      tags: [shorthands]
+      summary: The object's change history (operation `history`)
+      operationId: objectHistory
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: before_seq, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/{collection}/{id}/restore:
+    parameters:
+      - { $ref: "#/components/parameters/graph" }
+      - { $ref: "#/components/parameters/collection" }
+      - { $ref: "#/components/parameters/id" }
+    post:
+      tags: [shorthands]
+      summary: Restore a retracted object (operation `retract`, action restore)
+      operationId: restoreObject
+      parameters:
+        - { name: reason, in: query, schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/evidence/{id}/content:
+    parameters:
+      - { $ref: "#/components/parameters/graph" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      tags: [shorthands]
+      summary: Inline content of an evidence, as text
+      operationId: evidenceContent
+      parameters:
+        - { name: from, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: max_chars, in: query, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: The content or the requested range of it.
+          content:
+            text/plain:
+              schema: { type: string }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /v1/graphs/{graph}/evidence/{id}/blob:
+    parameters:
+      - { $ref: "#/components/parameters/graph" }
+      - { $ref: "#/components/parameters/id" }
+    get:
+      tags: [shorthands]
+      summary: The evidence's blob
+      operationId: evidenceBlob
+      responses:
+        "200":
+          description: The bytes, with the evidence's media type and `ETag` = SHA-256.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/octet-stream:
+              schema: { type: string, contentEncoding: binary }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs:
+    get:
+      tags: [admin]
+      summary: All graphs
+      operationId: adminListGraphs
+      responses:
+        "200":
+          description: Graphs by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  graphs: { type: array, items: { $ref: "#/components/schemas/GraphInfo" } }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [admin]
+      summary: Create a graph
+      operationId: adminCreateGraph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                policies: { $ref: "#/components/schemas/Policies" }
+      responses:
+        "201":
+          description: Created and loaded.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphInfo" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs/{graph}:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    get:
+      tags: [admin]
+      summary: One graph
+      operationId: adminGetGraph
+      responses:
+        "200":
+          description: The graph.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GraphInfo" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [admin]
+      summary: Close a graph and move its files to the trash folder
+      operationId: adminDeleteGraph
+      parameters:
+        - { name: confirm, in: query, required: true, description: The graph name again, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: string }
+                  moved_to: { type: string }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs/{graph}/snapshot:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [admin]
+      summary: Consistent online copy of the database
+      operationId: adminSnapshot
+      responses:
+        "200":
+          description: Where the snapshot was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+                  bytes: { type: integer }
+                  last_seq: { type: integer }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/graphs/{graph}/check:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    post:
+      tags: [admin]
+      summary: Storage integrity checks
+      operationId: adminCheck
+      responses:
+        "200":
+          description: Problems found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  problems: { type: array, items: { type: string } }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/stats:
+    get:
+      tags: [admin]
+      summary: Uptime, graph states, request statistics
+      operationId: adminStats
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/keys:
+    get:
+      tags: [admin]
+      summary: Configured API keys, redacted
+      operationId: adminKeys
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/config:
+    get:
+      tags: [admin]
+      summary: Effective configuration without key material
+      operationId: adminConfig
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /health:
+    get:
+      tags: [service]
+      summary: Liveness and versions
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The process runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { const: ok }
+                  server_version: { type: string }
+                  spec_version: { type: string }
+                  storage_format_version: { type: integer }
+
+  /ready:
+    get:
+      tags: [service]
+      summary: Every graph found at start is loaded
+      operationId: ready
+      security: []
+      responses:
+        "200": { $ref: "#/components/responses/Ready" }
+        "503": { $ref: "#/components/responses/Ready" }
+
+  /metrics:
+    get:
+      tags: [service]
+      summary: Prometheus metrics
+      operationId: metrics
+      security: []
+      responses:
+        "200":
+          description: Prometheus text format.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /openapi.yaml:
+    get:
+      tags: [service]
+      summary: This document
+      operationId: openapi
+      security: []
+      responses:
+        "200":
+          description: OpenAPI 3.1 document.
+          content:
+            application/yaml:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: An API key from the server configuration ([API-AUTH-1]).
+
+  parameters:
+    graph:
+      name: graph
+      in: path
+      required: true
+      description: Graph name ([GRAPH-NAME-1]).
+      schema: { type: string }
+    collection:
+      name: collection
+      in: path
+      required: true
+      schema: { type: string, enum: [nodes, links, evidence, citations] }
+    id:
+      name: id
+      in: path
+      required: true
+      description: Object ID of the collection's kind, e.g. `n_3kq`.
+      schema: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: "Reason code, e.g. ref.not_found" }
+            message: { type: string }
+            section: { type: [string, "null"] }
+            index: { type: [integer, "null"] }
+            details: {}
+            hint: { type: [string, "null"] }
+    GraphList:
+      type: object
+      properties:
+        graphs:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              status: { type: string, enum: [ready, loading, unloaded, failed] }
+    GraphInfo:
+      type: object
+      required: [name, status, file_bytes, wal_bytes]
+      properties:
+        name: { type: string }
+        status: { type: string, enum: [ready, loading, unloaded, failed] }
+        file_bytes: { type: integer }
+        wal_bytes: { type: integer }
+        counts: { $ref: "#/components/schemas/Counts" }
+        policies: { $ref: "#/components/schemas/Policies" }
+        last_seq: { type: integer }
+        text_index: { type: string, enum: [current, stale, none] }
+    Counts:
+      type: object
+      properties:
+        nodes: { type: integer }
+        links: { type: integer }
+        evidence: { type: integer }
+        citations: { type: integer }
+    Policies:
+      type: object
+      properties:
+        require_evidence: { type: string, enum: [enforce, warn, "off"] }
+        inline_text_limit: { type: integer }
+        normalize_types: { type: boolean }
+    Reference:
+      description: An object ID, a keyed reference, or a node by type and name (get.md).
+      oneOf:
+        - type: string
+        - type: object
+          properties:
+            key: { type: string }
+            kind: { type: string, enum: [node, link, evidence] }
+        - type: object
+          properties:
+            type: { type: string }
+            name: { type: string }
+
+  requestBodies:
+    Overview:
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              type: { type: string }
+              recent: { type: integer, minimum: 0, maximum: 50 }
+              types_limit: { type: integer, minimum: 1, maximum: 1000 }
+    Search:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [query]
+            properties:
+              query: { type: string }
+              in: { type: array, items: { type: string, enum: [nodes, links, evidence] } }
+              types: { type: array, items: { type: string } }
+              mode: { type: string, enum: [auto, exact, prefix, fuzzy, text] }
+              limit: { type: integer, minimum: 1, maximum: 500 }
+              include_retracted: { type: boolean }
+    Resolve:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [candidates]
+            properties:
+              candidates: { type: array, items: { type: object } }
+    Get:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [refs]
+            properties:
+              refs: { type: array, items: { $ref: "#/components/schemas/Reference" } }
+              detail: { type: string, enum: [brief, normal, full] }
+              include: { type: object }
+              include_retracted: { type: boolean }
+    Write:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              evidence: { type: array, items: { type: object } }
+              nodes: { type: array, items: { type: object } }
+              links: { type: array, items: { type: object } }
+              citations: { type: array, items: { type: object } }
+              updates: { type: array, items: { type: object } }
+              options: { type: object }
+    Retract:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              action: { type: string, enum: [retract, restore] }
+              targets: { type: array, items: { $ref: "#/components/schemas/Reference" } }
+              batch: { type: string }
+              reason: { type: string }
+    Merge:
+      required: true
+      content:
+        application/json:
+          schema: { type: object }
+    Neighbors:
+      required: true
+      content:
+        application/json:
+          schema: { type: object }
+    Paths:
+      required: true
+      content:
+        application/json:
+          schema: { type: object }
+    Find:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [target]
+            properties:
+              target: { type: string, enum: [nodes, links, evidence, citations] }
+              where: { type: object }
+              fields: { type: array, items: { type: string } }
+              group_by: { type: array, items: { type: string } }
+              aggregate: { type: array, items: { type: object } }
+              sort: { type: array, items: { type: object } }
+              limit: { type: integer, minimum: 1, maximum: 1000 }
+              cursor: { type: string }
+              include_retracted: { type: boolean }
+    History:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              target: { $ref: "#/components/schemas/Reference" }
+              since_seq: { type: integer, minimum: 0 }
+              before_seq: { type: integer, minimum: 0 }
+              limit: { type: integer, minimum: 1, maximum: 500 }
+
+  responses:
+    Error:
+      description: An error ([ERR-1]); the status follows from the code ([ERR-3]).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Operation:
+      description: The operation's response, as specified in its file.
+      content:
+        application/json:
+          schema: { type: object }
+    Overview:
+      description: overview.md §2.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              graph: { type: string }
+              spec_version: { type: string }
+              counts: { $ref: "#/components/schemas/Counts" }
+              node_types: { type: array, items: { type: object } }
+              link_types: { type: array, items: { type: object } }
+              types_truncated: { type: boolean }
+              evidence_kinds: { type: object }
+              policies: { $ref: "#/components/schemas/Policies" }
+              last_seq: { type: integer }
+              recent: { type: array, items: { type: object } }
+              conventions: { type: string }
+              type_detail: { type: object }
+    Ready:
+      description: Readiness by graph.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ready: { type: boolean }
+              graphs: { type: object, additionalProperties: { type: string } }

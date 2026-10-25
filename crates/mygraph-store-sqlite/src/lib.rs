@@ -13,6 +13,7 @@ pub use mygraph_core::model::{Policies, RequireEvidence};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// [STORE-FILE-3] "MYGR"
 pub const APPLICATION_ID: i32 = 0x4D59_4752;
@@ -77,9 +78,35 @@ pub fn graph_path(data_dir: &Path, name: &str) -> PathBuf {
 
 /// One open graph database file.
 pub struct GraphFile {
-    conn: Connection,
+    /// Behind a mutex so a `GraphFile` can be shared between threads (reads run in parallel on
+    /// the in-memory state; only reads that reach SQLite take turns).
+    conn: Mutex<Connection>,
     name: String,
     blobs: BlobDir,
+    checkpointer: Arc<Checkpointer>,
+}
+
+/// Copies the write-ahead log back into the database file from a connection of its own, so
+/// checkpoints run beside writes instead of inside one (see [`GraphFile::background_checkpoints`]).
+pub struct Checkpointer {
+    path: PathBuf,
+    conn: Mutex<Option<Connection>>,
+}
+
+impl Checkpointer {
+    /// A passive checkpoint: copies what it can without waiting for or blocking anyone.
+    pub fn run(&self) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
+        if conn.is_none() {
+            *conn = Some(Connection::open_with_flags(
+                &self.path,
+                OpenFlags::SQLITE_OPEN_READ_WRITE,
+            )?);
+        }
+        let c = conn.as_ref().expect("opened");
+        c.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
+        Ok(())
+    }
 }
 
 impl GraphFile {
@@ -117,9 +144,13 @@ impl GraphFile {
         }
         tx.commit()?;
         Ok(Self {
-            conn,
+            conn: Mutex::new(conn),
             name: name.to_owned(),
             blobs: BlobDir::new(data_dir),
+            checkpointer: Arc::new(Checkpointer {
+                path: path.clone(),
+                conn: Mutex::new(None),
+            }),
         })
     }
 
@@ -149,9 +180,13 @@ impl GraphFile {
             tx.commit()?;
         }
         Ok(Self {
-            conn,
+            conn: Mutex::new(conn),
             name: name.to_owned(),
             blobs: BlobDir::new(data_dir),
+            checkpointer: Arc::new(Checkpointer {
+                path: path.clone(),
+                conn: Mutex::new(None),
+            }),
         })
     }
 
@@ -162,7 +197,7 @@ impl GraphFile {
     /// Value of a `meta` row ([STORE-META-1]).
     pub fn meta(&self, key: &str) -> Result<Option<String>, StoreError> {
         Ok(self
-            .conn
+            .connection()
             .query_row("SELECT v FROM meta WHERE k = ?1", [key], |r| r.get(0))
             .optional()?)
     }
@@ -179,16 +214,69 @@ impl GraphFile {
     /// Format version from the database header.
     pub fn format_version(&self) -> Result<u32, StoreError> {
         Ok(self
-            .conn
+            .connection()
             .query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
-    pub fn connection(&self) -> &Connection {
-        &self.conn
+    /// The connection, for this thread until the guard is dropped.
+    pub fn connection(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn conn_mut(&mut self) -> &mut Connection {
-        &mut self.conn
+        self.conn.get_mut().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Turns off SQLite's automatic checkpoints, which run inside the commit that crosses the
+    /// threshold (on a large file that write then stalls); the caller runs
+    /// [`Checkpointer::run`] periodically instead.
+    pub fn background_checkpoints(&self) -> Result<Arc<Checkpointer>, StoreError> {
+        self.connection()
+            .pragma_update(None, "wal_autocheckpoint", 0)?;
+        Ok(self.checkpointer.clone())
+    }
+
+    /// Writes a consistent copy of the database to `target` (a new file) while the graph stays
+    /// online (`VACUUM INTO`).
+    pub fn snapshot_to(&self, target: &Path) -> Result<(), StoreError> {
+        let target = target.to_str().ok_or(Reason("storage.path_invalid"))?;
+        self.connection().execute("VACUUM INTO ?1", [target])?;
+        Ok(())
+    }
+
+    /// SQLite's own consistency checks: `integrity_check` and `foreign_key_check`. Returns the
+    /// problems found; empty when the file is sound.
+    pub fn sqlite_check(&self) -> Result<Vec<String>, StoreError> {
+        let c = self.connection();
+        let mut problems = Vec::new();
+        let mut st = c.prepare("PRAGMA integrity_check")?;
+        for r in st.query_map([], |r| r.get::<_, String>(0))? {
+            let r = r?;
+            if r != "ok" {
+                problems.push(r);
+            }
+        }
+        let mut st = c.prepare("PRAGMA foreign_key_check")?;
+        for r in st.query_map([], |r| {
+            Ok(format!(
+                "foreign key: {} row {} -> {}",
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                r.get::<_, String>(2)?
+            ))
+        })? {
+            problems.push(r?);
+        }
+        Ok(problems)
+    }
+
+    /// Sizes in bytes of the database file and its write-ahead log.
+    pub fn file_sizes(data_dir: &Path, name: &str) -> (u64, u64) {
+        let db = graph_path(data_dir, name);
+        let size = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
+        let mut wal = db.clone().into_os_string();
+        wal.push("-wal");
+        (size(&db), size(Path::new(&wal)))
     }
 }
 
@@ -245,7 +333,7 @@ mod tests {
                 .map(Result::unwrap)
                 .collect()
         };
-        assert_eq!(rows(g.connection()), rows(&spec));
+        assert_eq!(rows(&g.connection()), rows(&spec));
     }
 
     #[test]

@@ -1,11 +1,8 @@
-//! The `mygraph` binary. M0: `serve` starts the HTTP listener with `/health`.
+//! The `mygraph` binary: `serve` runs the HTTP server (REST and admin API).
 
-mod config;
-
-use axum::{Json, Router, routing::get};
 use clap::{Parser, Subcommand};
-use config::Config;
-use serde_json::{Value, json};
+use mygraph_server::config::Config;
+use mygraph_server::{App, serve, versions};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -30,7 +27,12 @@ enum Command {
         /// Override `listen` from the configuration, e.g. 127.0.0.1:7420.
         #[arg(long)]
         listen: Option<std::net::SocketAddr>,
+        /// Override `data_dir` from the configuration.
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
+    /// Print the SHA-256 of an API key, for `key_sha256` in the configuration.
+    HashKey { key: String },
     /// Print the implemented spec and storage format versions.
     Versions,
 }
@@ -49,13 +51,26 @@ fn main() -> ExitCode {
             println!("{}", versions());
             ExitCode::SUCCESS
         }
-        Command::Serve { listen } => {
+        Command::HashKey { key } => {
+            println!("{}", mygraph_core::store::sha256_hex(key.as_bytes()));
+            ExitCode::SUCCESS
+        }
+        Command::Serve { listen, data_dir } => {
             if let Some(addr) = listen {
                 config.listen = addr;
             }
-            init_tracing(&config.log);
+            if let Some(dir) = data_dir {
+                config.data_dir = dir;
+            }
+            if let Err(e) = config.validate() {
+                eprintln!("mygraph: {e}");
+                return ExitCode::FAILURE;
+            }
+            tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::new(&config.log))
+                .init();
             let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-            match runtime.block_on(serve(config)) {
+            match runtime.block_on(async { serve(App::new(config)).await }) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!("{e}");
@@ -63,78 +78,5 @@ fn main() -> ExitCode {
                 }
             }
         }
-    }
-}
-
-fn init_tracing(filter: &str) {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
-        .init();
-}
-
-fn versions() -> Value {
-    json!({
-        "server_version": env!("CARGO_PKG_VERSION"),
-        "spec_version": mygraph_core::SPEC_VERSION,
-        "storage_format_version": mygraph_core::STORAGE_FORMAT_VERSION,
-    })
-}
-
-fn router() -> Router {
-    Router::new().route("/health", get(health))
-}
-
-/// Liveness (docs/07-admin-api.md §5). No authentication.
-async fn health() -> Json<Value> {
-    let mut body = versions();
-    body["status"] = json!("ok");
-    Json(body)
-}
-
-async fn serve(config: Config) -> std::io::Result<()> {
-    let listener = tokio::net::TcpListener::bind(config.listen).await?;
-    tracing::info!(
-        listen = %listener.local_addr()?,
-        data_dir = %config.data_dir.display(),
-        "mygraph serving"
-    );
-    axum::serve(listener, router())
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn health_reports_versions() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, router()).await.unwrap() });
-
-        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        stream
-            .write_all(b"GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-            .await
-            .unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).await.unwrap();
-
-        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-        let body = response.split("\r\n\r\n").nth(1).unwrap();
-        let json: Value = serde_json::from_str(body).unwrap();
-        assert_eq!(json["status"], "ok");
-        assert_eq!(json["spec_version"], mygraph_core::SPEC_VERSION);
-        assert_eq!(json["storage_format_version"], 1);
-    }
-
-    #[test]
-    fn default_config_is_local_only() {
-        let c = Config::load(None).unwrap();
-        assert!(c.listen.ip().is_loopback());
     }
 }

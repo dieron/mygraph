@@ -15,6 +15,8 @@ use crate::store::{
 use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// An operation error: reason code, message, failing item, details ([OP-WRITE-6]).
 #[derive(Debug, Clone, PartialEq)]
@@ -146,8 +148,8 @@ pub struct Graph<S: Store> {
     name: String,
     /// External full-text index; `search` falls back to the store's own full text when it is
     /// absent or stale (an update failed after a commit; reopening catches it up).
-    text: Option<Box<dyn TextIndex>>,
-    text_stale: bool,
+    text: Option<Arc<dyn TextIndex>>,
+    text_stale: AtomicBool,
 }
 
 impl<S: Store> Graph<S> {
@@ -161,13 +163,14 @@ impl<S: Store> Graph<S> {
             counters,
             name: name.to_owned(),
             text: None,
-            text_stale: false,
+            text_stale: AtomicBool::new(false),
         })
     }
 
     /// Attaches an external full-text index, first bringing it up to date: catching up from the
     /// change log, or rebuilding it when it is new or ahead of the store.
-    pub fn attach_text_index(&mut self, mut index: Box<dyn TextIndex>) -> Result<(), StoreFailure> {
+    pub fn attach_text_index(&mut self, index: Box<dyn TextIndex>) -> Result<(), StoreFailure> {
+        let index: Arc<dyn TextIndex> = Arc::from(index);
         let seq = self.counters.seq;
         match index.applied_seq() {
             Some(s) if s == seq => {}
@@ -185,6 +188,7 @@ impl<S: Store> Graph<S> {
                     .map(|(kind, idx)| self.text_doc_of(kind, idx))
                     .collect::<Result<Vec<_>, _>>()?;
                 index.index(docs.into_iter().flatten().collect(), seq)?;
+                index.commit()?;
             }
             _ => {
                 // Rebuild in chunks; only the last chunk records `seq`, so an interrupted
@@ -207,14 +211,16 @@ impl<S: Store> Graph<S> {
                         .collect::<Result<Vec<_>, _>>()?;
                     let mark = if n + 1 == chunks.len() { seq } else { -1 };
                     index.index(docs.into_iter().flatten().collect(), mark)?;
+                    index.commit()?;
                 }
                 if chunks.is_empty() {
                     index.index(Vec::new(), seq)?;
+                    index.commit()?;
                 }
             }
         }
         self.text = Some(index);
-        self.text_stale = false;
+        self.text_stale.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -229,9 +235,38 @@ impl<S: Store> Graph<S> {
         Ok(text_doc(&row, content.as_deref()))
     }
 
+    /// Makes recent full-text index updates durable, when there are any. A failure marks the
+    /// index stale (search falls back to the store's full text until the graph is reopened).
+    pub fn commit_text(&self) -> Result<(), StoreFailure> {
+        if let Some(t) = self.text_index()
+            && t.pending() > 0
+            && let Err(e) = t.commit()
+        {
+            self.text_stale.store(true, Ordering::Relaxed);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// A handle on the full-text index (when attached and up to date), so it can be committed
+    /// without holding the graph: writes then never wait for a commit.
+    pub fn text_handle(&self) -> Option<Arc<dyn TextIndex>> {
+        self.text
+            .clone()
+            .filter(|_| !self.text_stale.load(Ordering::Relaxed))
+    }
+
+    /// After a failed commit through [`Graph::text_handle`]: search falls back to the store's
+    /// full text until the graph is reopened.
+    pub fn mark_text_stale(&self) {
+        self.text_stale.store(true, Ordering::Relaxed);
+    }
+
     /// The external full-text index, when attached and up to date.
     pub(crate) fn text_index(&self) -> Option<&dyn TextIndex> {
-        self.text.as_deref().filter(|_| !self.text_stale)
+        self.text
+            .as_deref()
+            .filter(|_| !self.text_stale.load(Ordering::Relaxed))
     }
 
     pub fn name(&self) -> &str {
@@ -248,6 +283,21 @@ impl<S: Store> Graph<S> {
 
     pub fn policies(&self) -> &Policies {
         &self.policies
+    }
+
+    /// The latest change-log sequence number (0 for an empty graph).
+    pub fn last_seq(&self) -> i64 {
+        self.counters.seq
+    }
+
+    /// State of the external full-text index: `current`, `stale` (an update failed; search uses
+    /// the store's own full text) or `none`.
+    pub fn text_index_status(&self) -> &'static str {
+        match (&self.text, self.text_stale.load(Ordering::Relaxed)) {
+            (None, _) => "none",
+            (Some(_), true) => "stale",
+            (Some(_), false) => "current",
+        }
     }
 
     pub(crate) fn begin(
@@ -576,7 +626,7 @@ impl<S: Store> Graph<S> {
 impl<S: Store> Graph<S> {
     /// After a commit: re-index every node, link and evidence the batch wrote.
     fn update_text(&mut self, changes: &ChangeSet) {
-        if self.text.is_none() || self.text_stale {
+        if self.text.is_none() || self.text_stale.load(Ordering::Relaxed) {
             return;
         }
         let seq = changes.log.last().map_or(self.counters.seq, |e| e.seq);
@@ -592,10 +642,10 @@ impl<S: Store> Graph<S> {
         }
         let ok = self
             .text
-            .as_mut()
+            .as_ref()
             .is_some_and(|t| t.index(docs, seq).is_ok());
         if !ok {
-            self.text_stale = true;
+            self.text_stale.store(true, Ordering::Relaxed);
         }
     }
 }

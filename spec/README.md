@@ -39,7 +39,9 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | `RES` | Entity resolution: candidates, scores, verdicts | [algorithms/resolve-scoring.md](algorithms/resolve-scoring.md) |
 | `TRAV` | Following links, link and path order | [algorithms/traversal.md](algorithms/traversal.md) |
 | `OP` | Operations: requests, responses, errors | [api/operations/](api/operations/) |
-| `API`, `ERR`, `ADMIN` | Planned (M3) | — |
+| `API` | REST transport: HTTP, keys and roles, routes, shorthands, limits | [api/conventions.md](api/conventions.md) |
+| `ERR` | Error object, HTTP status by reason code, hints | [api/errors.md](api/errors.md) |
+| `ADMIN` | Admin routes: graphs, snapshots, checks, server information | [api/admin.md](api/admin.md) |
 
 ## 3. Common definitions
 
@@ -86,7 +88,8 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | [algorithms/upsert-matching.md](algorithms/upsert-matching.md), [api/operations/write.md](api/operations/write.md), [retract.md](api/operations/retract.md), [merge.md](api/operations/merge.md) | Draft | M1 |
 | [algorithms/vocabulary-similarity.md](algorithms/vocabulary-similarity.md) | Draft | M1 |
 | [api/operations/search.md](api/operations/search.md), [get.md](api/operations/get.md), [algorithms/search-ranking.md](algorithms/search-ranking.md), [resolve.md](api/operations/resolve.md), [algorithms/resolve-scoring.md](algorithms/resolve-scoring.md), [neighbors.md](api/operations/neighbors.md), [paths.md](api/operations/paths.md), [algorithms/traversal.md](algorithms/traversal.md), [find.md](api/operations/find.md), [history.md](api/operations/history.md) | Draft | M2 |
-| `api/conventions.md`, `api/errors.md`, `api/schemas/`, `api/openapi.yaml`, `api/mcp-tools.json`, `admin/` | Planned | M3 |
+| [api/operations/overview.md](api/operations/overview.md), [api/conventions.md](api/conventions.md), [api/errors.md](api/errors.md), [api/admin.md](api/admin.md), [api/openapi.yaml](api/openapi.yaml) | Draft | M3 |
+| `api/mcp-tools.json`, server instructions, `api/compact-format.md`, `api/schemas/` (full JSON Schemas per operation) | Planned | M3 |
 
 Status values: **Draft** (open for change) → **Review** (complete, being checked against the
 implementation and conformance suite) → **Stable** (changes only through a new spec version).

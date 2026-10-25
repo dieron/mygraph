@@ -130,6 +130,10 @@ pub struct State {
     pub node_types: HashMap<Sym, usize>,
     pub link_types: HashMap<Sym, usize>,
     pub prop_keys: HashMap<Sym, usize>,
+    /// Active evidence by kind and the number of active citations, kept up to date so
+    /// `overview` need not scan ([OP-OVER-2]).
+    pub active_evidence_kinds: HashMap<String, usize>,
+    pub active_citations: usize,
     pub symmetric_link_types: HashSet<String>,
     /// One shared copy of every type name and property key in use or used before.
     syms: HashSet<Sym>,
@@ -357,6 +361,14 @@ impl State {
         if let Some(id) = EvidenceIdentity::of(&e) {
             set_add(&mut self.evidence_identity, id.hash64(), e.idx);
         }
+        if e.status == Status::Active {
+            match self.active_evidence_kinds.get_mut(&e.kind) {
+                Some(n) => *n += 1,
+                None => {
+                    self.active_evidence_kinds.insert(e.kind.clone(), 1);
+                }
+            }
+        }
         self.evidence.insert(e.idx, e);
         old
     }
@@ -368,6 +380,9 @@ impl State {
         }
         if let Some(id) = EvidenceIdentity::of(&e) {
             set_remove(&mut self.evidence_identity, &id.hash64(), idx);
+        }
+        if e.status == Status::Active {
+            sub(&mut self.active_evidence_kinds, &e.kind);
         }
         Some(e)
     }
@@ -385,6 +400,9 @@ impl State {
         let old = self.remove_citation(c.idx);
         self.cites_index(c.target_kind).add(c.target, c.idx);
         self.cites_by_evidence.add(c.evidence, c.idx);
+        if c.status == Status::Active {
+            self.active_citations += 1;
+        }
         self.citations.insert(c.idx, c);
         old
     }
@@ -393,6 +411,9 @@ impl State {
         let c = self.citations.remove(&idx)?;
         self.cites_index(c.target_kind).remove(c.target, idx);
         self.cites_by_evidence.remove(c.evidence, idx);
+        if c.status == Status::Active {
+            self.active_citations -= 1;
+        }
         Some(c)
     }
 

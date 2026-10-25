@@ -139,18 +139,28 @@ pub trait Store {
         tokens: &[String],
         limit: usize,
     ) -> Result<Vec<TextHit>, StoreFailure>;
+    /// The most recent batches, newest first.
+    fn recent_batches(&self, limit: usize) -> Result<Vec<BatchSummary>, StoreFailure>;
+    /// Every vocabulary note.
+    fn vocabulary_notes(&self) -> Result<Vec<VocabularyNote>, StoreFailure>;
 }
 
 /// A full-text index kept outside the store (docs/05 §2, `TextIndex` seam): a rebuildable cache
 /// derived from the records ([STORE-TEXT-1]). It remembers the change-log sequence number up to
-/// which it holds every change, so it can catch up after a restart or a crash.
-pub trait TextIndex: Send {
-    /// Sequence number of the last change the index holds; `None` for a new, empty index.
+/// which it durably holds every change, so it can catch up after a restart or a crash.
+pub trait TextIndex: Send + Sync {
+    /// Sequence number of the last change the index durably holds; `None` for a new, empty index.
     fn applied_seq(&self) -> Option<i64>;
-    /// Adds or replaces documents (one per object), then durably records `seq`.
-    fn index(&mut self, docs: Vec<TextDoc>, seq: i64) -> Result<(), StoreFailure>;
-    /// Removes every document.
-    fn clear(&mut self) -> Result<(), StoreFailure>;
+    /// Adds or replaces documents (one per object), covering changes up to `seq`. They are
+    /// searchable at once and durable after the next [`TextIndex::commit`].
+    fn index(&self, docs: Vec<TextDoc>, seq: i64) -> Result<(), StoreFailure>;
+    /// Makes everything indexed so far durable and records its `seq`. Committing is slow, so
+    /// callers batch it (the server commits in the background).
+    fn commit(&self) -> Result<(), StoreFailure>;
+    /// Number of documents indexed since the last commit.
+    fn pending(&self) -> usize;
+    /// Removes every document (durably).
+    fn clear(&self) -> Result<(), StoreFailure>;
     /// Same contract as [`Store::text_search`].
     fn search(
         &self,
@@ -271,4 +281,23 @@ pub struct LogRecord {
     pub obj_kind: i64,
     pub obj: Option<i64>,
     pub diff: Option<String>,
+}
+
+/// A batch with the number of change-log entries it wrote ([OP-OVER-4]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchSummary {
+    pub idx: i64,
+    pub actor: i64,
+    pub op: String,
+    pub created_at: i64,
+    pub note: Option<String>,
+    pub changes: i64,
+}
+
+/// A vocabulary note ([STORE] `type_info`): kind 0 node type, 1 link type, 2 property key.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VocabularyNote {
+    pub kind: i64,
+    pub name: String,
+    pub description: Option<String>,
 }

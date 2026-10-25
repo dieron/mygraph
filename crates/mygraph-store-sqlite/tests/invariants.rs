@@ -181,6 +181,15 @@ fn check(g: &Graph<GraphFile>, dir: &Path) {
     assert_eq!(st.names, fresh.names);
     assert_eq!(st.adjacency, fresh.adjacency);
     assert_eq!(st.cites_by_evidence, fresh.cites_by_evidence);
+    assert_eq!(st.active_evidence_kinds, fresh.active_evidence_kinds);
+    assert_eq!(st.active_citations, fresh.active_citations);
+    assert_eq!(
+        st.active_citations,
+        st.citations
+            .values()
+            .filter(|c| c.status == Status::Active)
+            .count()
+    );
 }
 
 proptest! {
