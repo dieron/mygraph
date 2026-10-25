@@ -5,8 +5,10 @@
 pub mod admin;
 pub mod api;
 pub mod auth;
+pub mod compact;
 pub mod config;
 pub mod error;
+pub mod mcp;
 pub mod metrics;
 pub mod registry;
 
@@ -70,6 +72,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/ready", get(ready))
         .route("/metrics", get(metrics))
         .route("/openapi.yaml", get(openapi))
+        .route("/mcp", post(mcp_http))
         .route("/v1/graphs", get(api::list_graphs))
         .route("/v1/graphs/{graph}", get(api::get_graph))
         .route(
@@ -182,15 +185,7 @@ pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
     if app.config.preload {
         app.preload();
     }
-    let registry = app.registry.clone();
-    let every = Duration::from_millis(app.config.maintenance_ms.max(10));
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(every).await;
-            let r = registry.clone();
-            let _ = tokio::task::spawn_blocking(move || r.maintain()).await;
-        }
-    });
+    spawn_maintenance(&app);
     let registry = app.registry.clone();
     let result = axum::serve(listener, router(app))
         .with_graceful_shutdown(async {
@@ -201,4 +196,44 @@ pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
         .await
         .ok();
     result
+}
+
+/// [MCP-HTTP-1] Streamable HTTP: one JSON-RPC message per POST, answered as JSON.
+async fn mcp_http(State(app): State<Arc<App>>, caller: auth::Caller, body: api::Body) -> Response {
+    let start = Instant::now();
+    let msg = match api::parse_body(body) {
+        Ok(m) => m,
+        Err(_) => json!(null),
+    };
+    let backend = mcp::Backend::Local {
+        app: app.clone(),
+        caller,
+    };
+    let reply = if msg.is_null() {
+        Some(
+            json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "parse error" } }),
+        )
+    } else {
+        mcp::handle(&backend, msg).await
+    };
+    let resp = match reply {
+        Some(r) => Json(r).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
+    };
+    app.metrics
+        .record("mcp", resp.status().as_u16(), start.elapsed());
+    resp
+}
+
+/// Background maintenance (full-text commits, WAL checkpoints) every `maintenance_ms`.
+pub fn spawn_maintenance(app: &App) {
+    let registry = app.registry.clone();
+    let every = Duration::from_millis(app.config.maintenance_ms.max(10));
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(every).await;
+            let r = registry.clone();
+            let _ = tokio::task::spawn_blocking(move || r.maintain()).await;
+        }
+    });
 }

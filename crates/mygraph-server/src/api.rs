@@ -175,7 +175,7 @@ pub async fn run(
     .await
 }
 
-fn operation(name: &str) -> Option<&'static str> {
+pub fn operation(name: &str) -> Option<&'static str> {
     READS
         .iter()
         .chain(WRITES.iter())
@@ -330,6 +330,7 @@ pub async fn post_op(
     State(app): State<Arc<App>>,
     Path((graph, name)): Path<(String, String)>,
     caller: Caller,
+    headers: axum::http::HeaderMap,
     body: Body,
 ) -> Response {
     let start = Instant::now();
@@ -338,7 +339,23 @@ pub async fn post_op(
     };
     let r = async {
         let req = strip_graph(parse_body(body)?, &graph)?;
-        ok(&run(&app, &caller, &graph, op, req).await?)
+        let resp = run(&app, &caller, &graph, op, req).await?;
+        // [compact-format.md] on request.
+        let text = headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|a| a.starts_with("text/plain"));
+        if text {
+            return Ok((
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/plain; charset=utf-8"),
+                )],
+                crate::compact::render(op, &resp),
+            )
+                .into_response());
+        }
+        ok(&resp)
     }
     .await;
     finish(&app, op, Some(&graph), start, r)

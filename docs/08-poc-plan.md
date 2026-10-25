@@ -245,6 +245,16 @@ Every milestone follows the spec-first workflow of
   checkpoints from a second connection. Sustained writes (3 nodes/links + evidence each, 300 in a
   row, warm): p50 4.0 ms, p90 7.2 ms, p99 16 ms (before: p99 95 ms); the first writes after a
   start still see cold-cache outliers of up to ~0.9 s.
+- *Progress 2026-10-25 (MCP):* **Spec:** `api/mcp.md` ([MCP-*]), `api/mcp-tools.json` (11 tools, the
+  operation requests as arguments plus `graph` and `format`), `api/server-instructions.md`,
+  `api/compact-format.md` ([CMP-*]). **Server:** MCP is a thin layer over the REST operations: a
+  hand-written JSON-RPC handler (initialize, ping, tools/list, tools/call; stateless) instead of
+  `rmcp`, served as Streamable HTTP at `POST /mcp` (same keys) and over stdio by `mygraph mcp`,
+  which forwards tool calls to a running server's REST API (`--url`, so one process owns the
+  data) or opens a data folder itself (`--data-dir`). Tool results are compact text by default;
+  REST returns it with `Accept: text/plain`. Tests: protocol, tools, compact output and errors over
+  HTTP; stdio with a data folder; forwarding checked by hand against a running server. Not yet:
+  connecting Claude Code itself (the M3 "done when").
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

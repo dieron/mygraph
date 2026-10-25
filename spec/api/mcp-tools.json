@@ -1,0 +1,126 @@
+{
+  "common": {
+    "graph": { "type": "string", "description": "Graph name; optional when the key or server has a default." },
+    "format": { "type": "string", "enum": ["compact", "json"], "description": "Result format; default compact text." }
+  },
+  "tools": [
+    {
+      "name": "overview",
+      "description": "What the graph holds: counts, node and link types in use, evidence kinds, policies, recent batches, naming conventions. Call first. With `type`, details of one node or link type (property keys and fill rates, link patterns, examples).",
+      "inputSchema": { "type": "object", "properties": {
+        "type": { "type": "string", "description": "A node type or link type to describe." },
+        "recent": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Recent batches to list (default 5)." }
+      } }
+    },
+    {
+      "name": "search",
+      "description": "Ranked search over node names and aliases (exact, prefix, fuzzy) and full text of nodes, links and evidence.",
+      "inputSchema": { "type": "object", "required": ["query"], "properties": {
+        "query": { "type": "string" },
+        "in": { "type": "array", "items": { "enum": ["nodes", "links", "evidence"] }, "description": "Default [\"nodes\"]." },
+        "types": { "type": "array", "items": { "type": "string" }, "description": "Only these node or link types." },
+        "mode": { "enum": ["auto", "exact", "prefix", "fuzzy", "text"], "description": "Default auto." },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "include_retracted": { "type": "boolean" }
+      } }
+    },
+    {
+      "name": "resolve",
+      "description": "Does this already exist? For up to 100 described entities, existing matching nodes with scores and a verdict (match, ambiguous, none). Use before writing new nodes.",
+      "inputSchema": { "type": "object", "required": ["candidates"], "properties": {
+        "candidates": { "type": "array", "items": { "type": "object", "required": ["name"], "properties": {
+          "name": { "type": "string" }, "type": { "type": "string" },
+          "hints": { "type": "object", "description": "Property values that should agree, e.g. {\"born\": {\"$date\": \"1815\"}}." }
+        } } }
+      } }
+    },
+    {
+      "name": "get",
+      "description": "Fetch nodes, links, evidence or citations by ID, key or {type, name}: fields, links of a node, support counts, citing evidence, evidence content.",
+      "inputSchema": { "type": "object", "required": ["refs"], "properties": {
+        "refs": { "type": "array", "items": {}, "description": "IDs like \"n_3kq\", {\"key\": …, \"kind\": …}, or {\"type\": \"Person\", \"name\": \"Ada Lovelace\"}." },
+        "detail": { "enum": ["brief", "normal", "full"] },
+        "include": { "type": "object", "description": "links {limit, types} | false, support bool, evidence {limit} | false, content true | {from, max_chars}." },
+        "include_retracted": { "type": "boolean" }
+      } }
+    },
+    {
+      "name": "write",
+      "description": "One atomic, idempotent batch: evidence, nodes, links, citations and updates. Give each item a `ref` (\"@x\") to refer to it within the batch; facts cite evidence with `cite: [\"@src\"]`. Matching nodes are reused, not duplicated.",
+      "inputSchema": { "type": "object", "properties": {
+        "evidence": { "type": "array", "items": { "type": "object" }, "description": "{ref, kind: text|url|file|image|document|observation|…, content, uri, title, parent, source_date, author, …}" },
+        "nodes": { "type": "array", "items": { "type": "object" }, "description": "{ref, type, name, aliases, labels, summary, props, key, create_new, cite}" },
+        "links": { "type": "array", "items": { "type": "object" }, "description": "{ref, type, from, to, directed, props, valid_from, valid_to, cite}" },
+        "citations": { "type": "array", "items": { "type": "object" }, "description": "{evidence, target, prop, role: supports|contradicts|mentions|derived_from, confidence, quote}" },
+        "updates": { "type": "array", "items": { "type": "object" }, "description": "{target: {node|link|evidence|citation: ref}, if_version, changes…}" },
+        "options": { "type": "object", "description": "{on_conflict: keep|overwrite|error, dry_run}" }
+      } }
+    },
+    {
+      "name": "retract",
+      "description": "Soft-delete (retract) or restore objects, or everything a batch created. Cascades to dependent links and citations; nothing is lost.",
+      "inputSchema": { "type": "object", "properties": {
+        "action": { "enum": ["retract", "restore"] },
+        "targets": { "type": "array", "items": {} },
+        "batch": { "type": "string" },
+        "reason": { "type": "string" }
+      } }
+    },
+    {
+      "name": "merge",
+      "description": "Merge duplicate nodes into one; links, citations, aliases and properties move to the surviving node and old IDs keep resolving.",
+      "inputSchema": { "type": "object", "required": ["into", "merge"], "properties": {
+        "into": {}, "merge": { "type": "array", "items": {} },
+        "prop_conflicts": { "enum": ["keep_into", "prefer_merged"] }
+      } }
+    },
+    {
+      "name": "neighbors",
+      "description": "Subgraph around start nodes: k hops (depth or per-hop steps) with link-type, direction and node-type filters.",
+      "inputSchema": { "type": "object", "required": ["start"], "properties": {
+        "start": { "type": "array", "items": {} },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "steps": { "type": "array", "items": { "type": "object" }, "description": "[{link_types, direction, node_types}] per hop." },
+        "link_types": { "type": "array", "items": { "type": "string" } },
+        "direction": { "enum": ["out", "in", "both"] },
+        "node_types": { "type": "array", "items": { "type": "string" } },
+        "limit_per_node": { "type": "integer" }, "limit": { "type": "integer" },
+        "as_of": {}, "include": { "type": "object" }
+      } }
+    },
+    {
+      "name": "paths",
+      "description": "How two nodes connect: shortest, all shortest or k shortest paths, with the evidence count of each link.",
+      "inputSchema": { "type": "object", "required": ["from", "to"], "properties": {
+        "from": {}, "to": {},
+        "max_length": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "mode": { "enum": ["shortest", "all_shortest", "k_shortest"] },
+        "k": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "link_types": { "type": "array", "items": { "type": "string" } },
+        "direction": { "enum": ["out", "in", "both"] }, "as_of": {}
+      } }
+    },
+    {
+      "name": "find",
+      "description": "Structured query without a query language: filter by field conditions, group by expressions, aggregate (count, count_distinct, sum, avg, min, max, median), sort and page. Fields: id, type, name, status, prop:<key>, degree(TYPE), dates with .year/.decade, …",
+      "inputSchema": { "type": "object", "required": ["target"], "properties": {
+        "target": { "enum": ["nodes", "links", "evidence", "citations"] },
+        "where": { "type": "object", "description": "{field, op, value} or {all|any: [...]}, {not: …}, {linked: {link_type, direction, node}}. Ops: eq ne lt lte gt gte between in not_in exists missing contains starts_with." },
+        "fields": { "type": "array", "items": { "type": "string" } },
+        "group_by": { "type": "array", "items": { "type": "string" } },
+        "aggregate": { "type": "array", "items": { "type": "object" }, "description": "[{fn, of}]" },
+        "sort": { "type": "array", "items": { "type": "object" }, "description": "[{by, order: asc|desc}]" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "cursor": { "type": "string" }, "include_retracted": { "type": "boolean" }
+      } }
+    },
+    {
+      "name": "history",
+      "description": "Change history of one object (newest first), or every change after a sequence number (oldest first) to catch up.",
+      "inputSchema": { "type": "object", "properties": {
+        "target": {}, "since_seq": { "type": "integer", "minimum": 0 },
+        "before_seq": { "type": "integer" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+      } }
+    }
+  ]
+}

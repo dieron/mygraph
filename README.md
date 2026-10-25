@@ -8,8 +8,8 @@ language · **M0 done, M1 (core model and storage) done**: write, retract/restor
 vocabulary hints on SQLite, with property-based and kill tests; synthetic data generator and
 memory measurements · **M2 done**: `search`, `get`, `resolve`, `neighbors`, `paths`, `find`,
 `history`, benchmarked at 1 M nodes · **M3 in progress**: the **REST API** is done (all 11 operations,
-resource shorthands, API keys with roles, admin API, metrics, OpenAPI); MCP comes next, on top of
-it. See
+resource shorthands, API keys with roles, admin API, metrics, OpenAPI) and **MCP** (11 tools, compact
+text results, Streamable HTTP at `/mcp` and stdio). See
 [docs/08-poc-plan.md](docs/08-poc-plan.md).
 
 ## In one paragraph
@@ -48,6 +48,20 @@ cargo run --release -p mygraph-bench -- load --data ../mygraph-data --graph g100
 Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest Visual Studio
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
+
+## Connecting an agent over MCP
+
+With the server running, register the stdio bridge in Claude Code (it forwards every tool call to
+the server, which owns the data):
+
+```bash
+claude mcp add mygraph -- mygraph mcp --url http://127.0.0.1:7420 --graph research
+```
+
+Add `--key <key>` (or set `MYGRAPH_KEY`) when the server has API keys. Clients that speak
+Streamable HTTP can use `http://127.0.0.1:7420/mcp` directly with `Authorization: Bearer <key>`.
+Without a server, `mygraph mcp --data-dir <dir>` opens the data folder itself. Tool results are
+compact text ([spec/api/compact-format.md](spec/api/compact-format.md)); pass `format: "json"` for JSON.
 
 ## Using the REST API
 
