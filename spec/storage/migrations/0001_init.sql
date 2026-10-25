@@ -203,6 +203,7 @@ CREATE TABLE citation (
   quote       TEXT,
   note        TEXT,
   status      INTEGER NOT NULL DEFAULT 0 CHECK (status IN (0, 1)),
+  version     INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at  INTEGER NOT NULL,
   created_by  INTEGER NOT NULL REFERENCES actor (idx),
   updated_at  INTEGER NOT NULL,

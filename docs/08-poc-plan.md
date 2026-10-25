@@ -80,6 +80,19 @@ Every milestone follows the spec-first workflow of
   `mygraph-store-sqlite` creates and opens graph files (migrations from `spec/`, header checks,
   WAL, policies), 4 tests including "created schema equals spec schema". Next: record writes and
   change log, RAM indexes, the write path, then retract/merge and property tests.
+- *Progress 2026-10-25:* engine implemented in `mygraph-core` (`engine.rs`, `state.rs`, `write.rs`,
+  `lifecycle.rs`, `store.rs`) and the `Store` trait on SQLite (`records.rs`): write with batch
+  references, matching, field combination, evidence policy, dry run; retract/restore with
+  cascades; merge; change log with cascade causes. Tests: 11 engine integration tests, a
+  randomized test (24 cases by default, also passed at 200) checking invariants, SQLite integrity
+  and memory-equals-disk after every step, and a kill-during-write test. Spec fixes found while
+  implementing: citations gained a `version` column; [OP-RETRACT-7] restore order.
+  **Known gaps (still M1):** blob upload (`evidence.blob_unsupported` for now); vocabulary
+  similarity for `NEW_VOCABULARY` (`similar` is empty until `algorithms/vocabulary-similarity.md`
+  exists); HTTP conformance cases; synthetic data generator and the 1 M-node load measurement.
+  **Deviations from docs/05 (PoC simplifications):** the graph's write lock is held for the whole
+  batch, not only while applying to memory; in-memory records are in hash maps rather than dense
+  vectors.
 
 ### M2 — Reads, search and analytics (L)
 - **Spec:** operations `get`, `search`, `resolve`, `neighbors`, `paths`, `find`, `history`;

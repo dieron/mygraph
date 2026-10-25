@@ -20,6 +20,10 @@ object IDs or keyed references `{"kind": "node", "key": "…"}`) or `batch` (a b
 that batch that are still active. With `batch` and `action: restore`, the targets are all objects
 **retracted** by that batch (directly, not by cascade) that are still retracted.
 
+**[OP-RETRACT-7]** When restoring several targets, they are processed in the order nodes, links,
+evidence, citations (each group in request or batch order), so that endpoints and citation
+targets are active before the objects that depend on them are restored.
+
 **[OP-RETRACT-3]** Targets already in the requested state are reported as `unchanged`, not as errors.
 A merged node as target fails with `lifecycle.invalid_transition`.
 

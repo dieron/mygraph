@@ -1,0 +1,462 @@
+//! The engine on a real SQLite graph file: write, matching, policy, retract/restore, merge,
+//! change log and reopen.
+
+use mygraph_core::engine::Graph;
+use mygraph_core::model::Status;
+use mygraph_store_sqlite::{GraphFile, Policies, RequireEvidence};
+use serde_json::{Value as Json, json};
+use std::path::Path;
+
+const T: i64 = 1_761_300_000_000;
+const ACTOR: &str = "test-agent";
+
+fn open(dir: &Path) -> Graph<GraphFile> {
+    let file = GraphFile::open(dir, "g").unwrap();
+    let policies = file.policies().unwrap();
+    Graph::open(file, "g", policies).unwrap()
+}
+
+fn new_graph(dir: &Path, policies: Policies) -> Graph<GraphFile> {
+    GraphFile::create(dir, "g", &policies, T).unwrap();
+    open(dir)
+}
+
+fn ada_batch() -> Json {
+    json!({
+        "evidence": [
+            { "ref": "@art", "kind": "url", "uri": "https://example.org/ada", "title": "Ada", "source_date": {"$date": "2024-03-02"} },
+            { "ref": "@frag", "kind": "text", "parent": "@art", "content": "In 1843 Lovelace published her notes on Babbage's Analytical Engine." }
+        ],
+        "nodes": [
+            { "ref": "@ada", "type": "person", "name": "Ada Lovelace", "aliases": ["Augusta Ada King"],
+              "props": { "born": {"$date": "1815-12-10"} }, "cite": ["@frag"] },
+            { "ref": "@bab", "type": "Person", "name": "Charles Babbage", "cite": ["@frag"] },
+            { "ref": "@ae", "type": "Machine", "name": "Analytical Engine", "cite": ["@frag"] }
+        ],
+        "links": [
+            { "type": "collaborated with", "from": "@ada", "to": "@bab", "directed": false,
+              "cite": [{ "evidence": "@frag", "confidence": 0.9 }] },
+            { "type": "WROTE_ABOUT", "from": "@ada", "to": "@ae", "props": { "year": 1843 }, "cite": ["@frag"] }
+        ]
+    })
+}
+
+fn count(g: &Graph<GraphFile>, sql: &str) -> i64 {
+    g.store()
+        .connection()
+        .query_row(sql, [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn write_creates_everything_and_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    let r = g.write(ACTOR, &ada_batch(), T).unwrap();
+    assert_eq!(r["batch"], "b_1");
+    assert_eq!(
+        r["counts"]["created"],
+        json!({ "evidence": 2, "node": 3, "link": 2, "citation": 5 })
+    );
+    assert_eq!(r["refs"]["@ada"], "n_1");
+    // Vocabulary was canonicalized and announced.
+    assert_eq!(g.state().nodes[&1].type_, "Person");
+    assert_eq!(g.state().links[&1].type_, "COLLABORATED_WITH");
+    assert!(
+        r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["code"] == "NEW_VOCABULARY")
+    );
+
+    // The same write again changes nothing and creates no batch.
+    let r2 = g.write(ACTOR, &ada_batch(), T + 1).unwrap();
+    assert_eq!(r2["batch"], Json::Null);
+    assert_eq!(r2["counts"]["created"], json!({}));
+    assert_eq!(count(&g, "SELECT count(*) FROM node"), 3);
+    assert_eq!(count(&g, "SELECT count(*) FROM batch"), 1);
+    assert_eq!(count(&g, "SELECT count(*) FROM changelog"), 12);
+}
+
+#[test]
+fn state_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let before: Vec<_> = {
+        let mut v: Vec<_> = g.state().nodes.values().cloned().collect();
+        v.sort_by_key(|n| n.idx);
+        v
+    };
+    drop(g);
+    let mut g = open(dir.path());
+    let mut after: Vec<_> = g.state().nodes.values().cloned().collect();
+    after.sort_by_key(|n| n.idx);
+    assert_eq!(before, after);
+    assert_eq!(g.state().links.len(), 2);
+    assert_eq!(g.state().citations.len(), 5);
+    // Counters continue after reopen.
+    let r = g
+        .write(
+            ACTOR,
+            &json!({ "evidence": [{ "kind": "observation", "content": "x" }] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["id"], "e_3");
+    // Evidence content is on disk, not in memory.
+    assert_eq!(g.state().evidence[&2].content, None);
+    assert!(
+        g.store()
+            .connection()
+            .query_row("SELECT content FROM evidence WHERE idx = 2", [], |r| r
+                .get::<_, String>(
+                0
+            ))
+            .unwrap()
+            .starts_with("In 1843")
+    );
+}
+
+#[test]
+fn name_matching_merges_aliases_and_detects_ambiguity() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(
+        dir.path(),
+        Policies {
+            require_evidence: RequireEvidence::Off,
+            ..Policies::default()
+        },
+    );
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    // Different spelling of an alias matches by name key; the new spelling becomes an alias.
+    let r = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "Person", "name": "augusta ada king" }] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["outcome"], "matched");
+    let r = g.write(ACTOR, &json!({ "nodes": [{ "type": "Person", "name": "ADA LOVELACE", "summary": "Mathematician" }] }), T).unwrap();
+    assert_eq!(r["items"][0]["outcome"], "updated");
+    assert_eq!(
+        g.state().nodes[&1].summary.as_deref(),
+        Some("Mathematician")
+    );
+    assert_eq!(
+        g.state().nodes[&1].aliases,
+        vec!["Augusta Ada King".to_string()]
+    );
+
+    g.write(ACTOR, &json!({ "nodes": [{ "type": "Person", "name": "John Smith" }, { "type": "Person", "name": "John Smith", "create_new": true }] }), T).unwrap();
+    let e = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "Person", "name": "john smith" }] }),
+            T,
+        )
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "write.ambiguous_match");
+    assert_eq!(e.details["candidates"].as_array().unwrap().len(), 2);
+    assert_eq!((e.section.as_deref(), e.index), (Some("nodes"), Some(0)));
+}
+
+#[test]
+fn property_conflicts_follow_on_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let w = |born: &str, mode: &str| {
+        json!({
+            "nodes": [{ "id": "n_1", "props": { "born": {"$date": born} } }],
+            "options": { "on_conflict": mode }
+        })
+    };
+    let r = g.write(ACTOR, &w("1816", "keep"), T).unwrap();
+    assert_eq!(r["items"][0]["outcome"], "matched");
+    assert_eq!(r["warnings"][0]["code"], "PROPERTY_CONFLICT");
+    let e = g.write(ACTOR, &w("1816", "error"), T).unwrap_err();
+    assert_eq!(e.reason.code(), "write.property_conflict");
+    let r = g.write(ACTOR, &w("1816", "overwrite"), T).unwrap();
+    assert_eq!(r["items"][0]["outcome"], "updated");
+    assert_eq!(
+        g.node_props_json(1).unwrap()["born"],
+        json!({"$date": "1816"})
+    );
+    assert_eq!(g.state().nodes[&1].meta.version, 2);
+}
+
+#[test]
+fn evidence_policy_is_enforced_and_failed_batches_leave_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    let e = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "Person", "name": "Nobody" }] }),
+            T,
+        )
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "write.evidence_required");
+    assert_eq!(e.details["unsupported"], json!(["n_1"]));
+    assert!(g.state().nodes.is_empty());
+    assert!(g.state().actors.is_empty());
+    // A contradicting citation alone is not support.
+    let e = g.write(ACTOR, &json!({
+        "evidence": [{ "ref": "@o", "kind": "observation", "content": "doubt" }],
+        "nodes": [{ "type": "Person", "name": "Nobody", "cite": [{ "evidence": "@o", "role": "contradicts" }] }]
+    }), T).unwrap_err();
+    assert_eq!(e.reason.code(), "write.evidence_required");
+    // Numbers of failed batches are not consumed.
+    let r = g
+        .write(
+            ACTOR,
+            &json!({
+                "evidence": [{ "ref": "@o", "kind": "observation", "content": "I met them" }],
+                "nodes": [{ "type": "Person", "name": "Somebody", "cite": ["@o"] }]
+            }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["refs"]["@o"], "e_1");
+    assert_eq!(r["refs"]["n_1"], Json::Null);
+    assert_eq!(r["items"][1]["id"], "n_1");
+}
+
+#[test]
+fn dry_run_reports_but_does_not_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    let mut req = ada_batch();
+    req["options"] = json!({ "dry_run": true });
+    let r = g.write(ACTOR, &req, T).unwrap();
+    assert_eq!(r["batch"], Json::Null);
+    assert_eq!(r["counts"]["created"]["node"], 3);
+    assert_eq!(r["refs"]["@ada"], Json::Null);
+    assert!(g.state().nodes.is_empty());
+    assert_eq!(count(&g, "SELECT count(*) FROM node"), 0);
+    // A real write afterwards starts numbering at 1.
+    assert_eq!(
+        g.write(ACTOR, &ada_batch(), T).unwrap()["refs"]["@ada"],
+        "n_1"
+    );
+}
+
+#[test]
+fn undirected_links_match_in_either_order_and_evidence_is_reused() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let r = g.write(ACTOR, &json!({
+        "evidence": [{ "kind": "text", "parent": "e_1", "content": "In 1843 Lovelace published her notes on Babbage's Analytical Engine." }],
+        "links": [{ "type": "COLLABORATED_WITH", "from": "n_2", "to": "n_1", "directed": false, "props": { "since": 1833 } }]
+    }), T).unwrap();
+    assert_eq!(r["items"][0]["outcome"], "matched");
+    assert_eq!(r["items"][0]["id"], "e_2");
+    assert_eq!(r["items"][1]["outcome"], "updated");
+    assert_eq!(r["items"][1]["id"], "l_1");
+}
+
+#[test]
+fn retract_cascades_and_restore_brings_back_exactly_the_cascade() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    // Retract one link directly, then the node: only the other link is in the node's cascade.
+    g.retract(ACTOR, &json!({ "targets": ["l_2"], "reason": "unsure" }), T)
+        .unwrap();
+    let r = g.retract(ACTOR, &json!({ "targets": ["n_1"] }), T).unwrap();
+    assert_eq!(
+        r["items"],
+        json!([
+            { "id": "n_1", "outcome": "retracted" },
+            { "id": "l_1", "outcome": "retracted", "cascade_of": "n_1" }
+        ])
+    );
+    assert!(
+        !g.state()
+            .names
+            .contains_key(&("Person".into(), "ada lovelace".into()))
+    );
+    let e = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "id": "n_1", "summary": "x" }] }),
+            T,
+        )
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "lifecycle.retracted");
+
+    let r = g
+        .retract(
+            ACTOR,
+            &json!({ "action": "restore", "targets": ["n_1"] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(
+        r["items"],
+        json!([
+            { "id": "n_1", "outcome": "restored" },
+            { "id": "l_1", "outcome": "restored", "cascade_of": "n_1" }
+        ])
+    );
+    assert_eq!(g.state().links[&2].status, Status::Retracted);
+    assert_eq!(g.state().nodes[&1].meta.version, 3);
+
+    // Retracting evidence warns about facts that lose their only support.
+    let r = g.retract(ACTOR, &json!({ "targets": ["e_2"] }), T).unwrap();
+    let unsupported: Vec<_> = r["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["code"] == "UNSUPPORTED_FACT")
+        .collect();
+    assert_eq!(unsupported.len(), 4);
+}
+
+#[test]
+fn retract_by_batch_and_change_log_records_causes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let r = g
+        .retract(
+            ACTOR,
+            &json!({ "batch": "b_1", "reason": "wrong article" }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["batch"], "b_2");
+    assert_eq!(
+        g.state()
+            .nodes
+            .values()
+            .filter(|n| n.status == Status::Active)
+            .count(),
+        0
+    );
+    // Cascaded entries point at the entry that caused them.
+    let n: i64 = count(
+        &g,
+        "SELECT count(*) FROM changelog c JOIN changelog p ON json_extract(c.diff, '$.cascade_of') = p.seq WHERE c.op = 'retract'",
+    );
+    assert!(n > 0);
+    let r = g
+        .retract(ACTOR, &json!({ "action": "restore", "batch": "b_2" }), T)
+        .unwrap();
+    assert!(
+        r["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["outcome"] != "unchanged" || i.get("cascade_of").is_some())
+    );
+    assert_eq!(
+        g.state()
+            .nodes
+            .values()
+            .filter(|n| n.status == Status::Active)
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn merge_moves_links_and_citations_and_old_ids_resolve() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    g.write(ACTOR, &json!({
+        "evidence": [{ "ref": "@o", "kind": "observation", "content": "duplicate" }],
+        "nodes": [{ "ref": "@dup", "type": "Person", "name": "C. Babbage", "props": { "born": 1791 }, "cite": ["@o"] }],
+        "links": [{ "type": "COLLABORATED_WITH", "from": "@dup", "to": "n_1", "directed": false, "cite": ["@o"] }]
+    }), T).unwrap();
+    let r = g
+        .merge(ACTOR, &json!({ "into": "n_2", "merge": ["n_4"] }), T)
+        .unwrap();
+    assert_eq!(r["combined"]["links"], 1);
+    let sv = &g.state().nodes[&2];
+    assert!(sv.aliases.contains(&"C. Babbage".to_string()));
+    assert_eq!(g.node_props_json(2).unwrap()["born"], 1791);
+    assert_eq!(g.state().nodes[&4].status, Status::Merged);
+    // The old ID and name now resolve to the survivor.
+    let r = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "id": "n_4", "summary": "Mathematician" }] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["id"], "n_2");
+    let r = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "Person", "name": "C. BABBAGE" }] }),
+            T,
+        )
+        .unwrap();
+    assert_eq!(r["items"][0]["id"], "n_2");
+    assert_eq!(
+        g.merge(ACTOR, &json!({ "into": "n_2", "merge": ["n_2"] }), T)
+            .unwrap_err()
+            .reason
+            .code(),
+        "merge.self"
+    );
+}
+
+#[test]
+fn reference_and_validation_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    let code =
+        |g: &mut Graph<GraphFile>, req: Json| g.write(ACTOR, &req, T).unwrap_err().reason.code();
+    assert_eq!(
+        code(
+            &mut g,
+            json!({ "links": [{ "type": "X", "from": "@a", "to": "@b" }] })
+        ),
+        "ref.undefined"
+    );
+    assert_eq!(
+        code(
+            &mut g,
+            json!({ "links": [{ "type": "X", "from": "n_9", "to": "n_8" }] })
+        ),
+        "ref.not_found"
+    );
+    assert_eq!(
+        code(&mut g, json!({ "evidence": [{ "kind": "text" }] })),
+        "evidence.empty"
+    );
+    assert_eq!(
+        code(
+            &mut g,
+            json!({ "evidence": [{ "kind": "url", "uri": "not a uri" }] })
+        ),
+        "evidence.uri_invalid"
+    );
+    assert_eq!(
+        code(&mut g, json!({ "nodes": [{ "type": "3D", "name": "x" }] })),
+        "vocab.bad_start"
+    );
+    assert_eq!(
+        code(
+            &mut g,
+            json!({ "nodes": [{ "type": "Person", "name": "'" }] })
+        ),
+        "name.empty_key"
+    );
+    assert_eq!(
+        code(
+            &mut g,
+            json!({ "evidence": [
+        { "ref": "@a", "kind": "observation", "content": "a" },
+        { "ref": "@a", "kind": "observation", "content": "b" }] })
+        ),
+        "ref.duplicate"
+    );
+}

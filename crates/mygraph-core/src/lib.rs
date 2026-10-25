@@ -4,13 +4,19 @@
 //! the spec file and code comments cite rule IDs. The shared vectors in `conformance/vectors/`
 //! are the tests (see `tests/vectors.rs`).
 
+pub mod engine;
 pub mod ids;
+mod lifecycle;
+pub mod model;
 pub mod name_key;
 pub mod reason;
+pub mod state;
+pub mod store;
 pub mod text;
 mod ucd;
 pub mod values;
 pub mod vocab;
+mod write;
 
 pub use reason::Reason;
 

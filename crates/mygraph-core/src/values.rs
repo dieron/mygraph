@@ -252,6 +252,92 @@ fn parse_object(m: &Map<String, Json>) -> Result<Value, Reason> {
 }
 
 // ----------------------------------------------------------------------------------------
+// Storage encoding (§11)
+// ----------------------------------------------------------------------------------------
+
+/// [VAL-STORE-1] [VAL-STORE-2] Property map as stored text; `None` when empty.
+pub fn encode_props(props: &std::collections::BTreeMap<String, Value>) -> Option<String> {
+    if props.is_empty() {
+        return None;
+    }
+    let map: Map<String, Json> = props
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_json()))
+        .collect();
+    Some(Json::Object(map).to_string())
+}
+
+/// Reads a stored property map ([VAL-STORE-4]).
+pub fn decode_props(
+    text: Option<&str>,
+) -> Result<std::collections::BTreeMap<String, Value>, Reason> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(text) = text else { return Ok(out) };
+    let Json::Object(m) =
+        serde_json::from_str(text).map_err(|_| Reason("storage.props_invalid"))?
+    else {
+        return Err(Reason("storage.props_invalid"));
+    };
+    for (k, v) in m {
+        if let Parsed::Value(v) = parse(&v)? {
+            out.insert(k, v);
+        }
+    }
+    Ok(out)
+}
+
+/// Canonical text of a `date` or `datetime` value ([STORE-COL-3]).
+pub fn temporal_text(v: &Value) -> Option<String> {
+    match v {
+        Value::Date(d) => Some(d.canonical()),
+        Value::DateTime(t) => Some(t.canonical()),
+        _ => None,
+    }
+}
+
+/// Parses [`temporal_text`] output: text containing `T` is a date-time.
+pub fn parse_temporal_text(s: &str) -> Result<Value, Reason> {
+    if s.contains('T') {
+        DateTime::parse(s).map(Value::DateTime)
+    } else {
+        Date::parse(s).map(Value::Date)
+    }
+}
+
+/// Interval start and end in UTC milliseconds ([VAL-DATE-5]; a date-time is a point).
+pub fn temporal_bounds(v: &Value) -> Option<(i64, i64)> {
+    match v {
+        Value::DateTime(t) => Some((t.ms, t.ms)),
+        Value::Date(d) => {
+            let start = d.start_ms();
+            let next = match d.precision() {
+                Precision::Year => Date {
+                    year: d.year + 1,
+                    month: 1,
+                    day: 1,
+                }
+                .start_ms(),
+                Precision::Month if d.month == 12 => Date {
+                    year: d.year + 1,
+                    month: 1,
+                    day: 1,
+                }
+                .start_ms(),
+                Precision::Month => Date {
+                    year: d.year,
+                    month: d.month + 1,
+                    day: 1,
+                }
+                .start_ms(),
+                Precision::Day => start + MS_PER_DAY,
+            };
+            Some((start, next - 1))
+        }
+        _ => None,
+    }
+}
+
+// ----------------------------------------------------------------------------------------
 // Dates and date-times
 // ----------------------------------------------------------------------------------------
 

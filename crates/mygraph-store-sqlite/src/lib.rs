@@ -1,11 +1,13 @@
 //! Storage format v1 on SQLite — spec/storage/schema.sql and spec/storage/storage-format.md.
 //!
-//! This crate opens and creates graph files. Record reads and writes follow in M1.
+//! Opens and creates graph files; `records.rs` implements the engine's `Store` trait.
+
+mod records;
 
 use mygraph_core::Reason;
 use mygraph_core::ids::validate_graph_name;
+pub use mygraph_core::model::{Policies, RequireEvidence};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
-use serde_json::json;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -17,78 +19,6 @@ const MIGRATIONS: &[(u32, &str)] = &[(
     1,
     include_str!("../../../spec/storage/migrations/0001_init.sql"),
 )];
-
-/// [OBJ-GRAPH-1] graph policies.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Policies {
-    pub require_evidence: RequireEvidence,
-    pub inline_text_limit: u32,
-    pub normalize_types: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequireEvidence {
-    Enforce,
-    Warn,
-    Off,
-}
-
-impl RequireEvidence {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Enforce => "enforce",
-            Self::Warn => "warn",
-            Self::Off => "off",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "enforce" => Some(Self::Enforce),
-            "warn" => Some(Self::Warn),
-            "off" => Some(Self::Off),
-            _ => None,
-        }
-    }
-}
-
-impl Default for Policies {
-    fn default() -> Self {
-        Self {
-            require_evidence: RequireEvidence::Enforce,
-            inline_text_limit: 65_536,
-            normalize_types: true,
-        }
-    }
-}
-
-impl Policies {
-    /// [OBJ-GRAPH-1] value ranges.
-    pub fn validate(&self) -> Result<(), Reason> {
-        if !(1024..=1_048_576).contains(&self.inline_text_limit) {
-            return Err(Reason("graph.policy_invalid"));
-        }
-        Ok(())
-    }
-
-    fn to_json(&self) -> String {
-        json!({
-            "require_evidence": self.require_evidence.as_str(),
-            "inline_text_limit": self.inline_text_limit,
-            "normalize_types": self.normalize_types,
-        })
-        .to_string()
-    }
-
-    fn from_json(text: &str) -> Option<Self> {
-        let v: serde_json::Value = serde_json::from_str(text).ok()?;
-        Some(Self {
-            require_evidence: RequireEvidence::parse(v["require_evidence"].as_str()?)?,
-            inline_text_limit: u32::try_from(v["inline_text_limit"].as_u64()?).ok()?,
-            normalize_types: v["normalize_types"].as_bool()?,
-        })
-    }
-}
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -176,7 +106,7 @@ impl GraphFile {
             ("graph_name", name.to_owned()),
             ("created_at", now_ms.to_string()),
             ("spec_version", mygraph_core::SPEC_VERSION.to_owned()),
-            ("policies", policies.to_json()),
+            ("policies", policies.to_json().to_string()),
         ];
         for (k, v) in meta {
             tx.execute("INSERT INTO meta (k, v) VALUES (?1, ?2)", (k, v))?;
@@ -235,7 +165,9 @@ impl GraphFile {
         let text = self
             .meta("policies")?
             .ok_or(Reason("storage.meta_missing"))?;
-        Ok(Policies::from_json(&text).ok_or(Reason("storage.meta_invalid"))?)
+        let json: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| Reason("storage.meta_invalid"))?;
+        Ok(Policies::from_json(&json).ok_or(Reason("storage.meta_invalid"))?)
     }
 
     /// Format version from the database header.
@@ -247,6 +179,10 @@ impl GraphFile {
 
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 }
 

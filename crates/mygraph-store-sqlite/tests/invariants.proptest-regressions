@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 940982b348e1baa03a19373e989c7c6b8c7ee0e6329c8459830d2ec983a503df # shrinks to ops = [Node { name: 0, type_: 0 }, Link { a: 0, b: 0, type_: 0, directed: false }, Retract { kind: 0, pick: 0 }]

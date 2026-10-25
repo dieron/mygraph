@@ -13,6 +13,8 @@ mygraph-core = { path = "crates/mygraph-core" }
 mygraph-store-sqlite = { path = "crates/mygraph-store-sqlite" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = "3"
+sha2 = "0.10"
+proptest = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 unicode-normalization = "0.1"

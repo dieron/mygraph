@@ -59,7 +59,7 @@ The operation layer is the product. Transports stay thin so a gRPC or a native l
 
 | Seam | Contract |
 |---|---|
-| `Store` | Transactional read/write of records and change log in the storage format of `spec/storage/`; one writer per graph |
+| `Store` | `load` (snapshot for the in-memory indexes), `counters` (last used internal numbers), `apply` (one `ChangeSet` — rows, batch, change-log entries — in one transaction), plus change-log queries for restore and retract-by-batch. The engine assigns internal numbers and change-log sequence numbers itself, so a change set is complete before it reaches the store |
 | `TextIndex` | Index/unindex text fields of an object inside the caller's transaction; query → ranked object references with scores and snippets |
 | `BlobStore` | Put bytes → sha256; get by sha256; exists; delete (admin GC only) |
 | `VectorIndex` (phase 2) | Upsert/remove vector for an object; k-nearest query with an optional allowed-set filter |
