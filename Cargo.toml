@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/mygraph-core", "crates/mygraph-store-sqlite", "crates/mygraph-server", "crates/mygraph-bench"]
+members = [
+  "crates/mygraph-core",
+  "crates/mygraph-store-sqlite",
+  "crates/mygraph-text-tantivy",
+  "crates/mygraph-server",
+  "crates/mygraph-bench",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +17,7 @@ publish = false
 [workspace.dependencies]
 mygraph-core = { path = "crates/mygraph-core" }
 mygraph-store-sqlite = { path = "crates/mygraph-store-sqlite" }
+mygraph-text-tantivy = { path = "crates/mygraph-text-tantivy" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = "3"
 sha2 = "0.10"

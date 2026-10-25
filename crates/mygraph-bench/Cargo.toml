@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 mygraph-core.workspace = true
 mygraph-store-sqlite.workspace = true
+mygraph-text-tantivy.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 memory-stats = "1"

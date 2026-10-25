@@ -1,0 +1,19 @@
+[package]
+name = "mygraph-text-tantivy"
+description = "MyGraph full-text index on tantivy (a rebuildable cache of the records)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mygraph-core.workspace = true
+tantivy = "0.27"
+
+[dev-dependencies]
+tempfile.workspace = true
+mygraph-store-sqlite.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

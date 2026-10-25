@@ -101,6 +101,19 @@ fn run(function: &str, case: &Json) -> Result<Json, Reason> {
         "validate_vocabulary_verbatim" => Json::String(vocab::validate_verbatim(
             case["input"]["value"].as_str().unwrap(),
         )?),
+        "name_trigrams" => json!(
+            mygraph_core::names::trigrams(&s())
+                .iter()
+                .map(|t| t.iter().collect::<String>())
+                .collect::<Vec<_>>()
+        ),
+        "trigram_similarity" => {
+            let i = &case["input"];
+            json!(mygraph_core::names::trigram_similarity(
+                i[0].as_str().unwrap(),
+                i[1].as_str().unwrap()
+            ))
+        }
         "vocabulary_similar" => {
             let vocabulary: Vec<(&str, usize)> = case["input"]["vocabulary"]
                 .as_array()

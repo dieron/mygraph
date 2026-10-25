@@ -32,7 +32,7 @@ meet the spec. Observable behaviour and stored data are defined normatively in `
  │                                                                                                        │
  │  Storage traits                                                                                        │
  │   ├─ Store      → SQLite (WAL): records, change log, vocabulary          (PoC)                         │
- │   ├─ TextIndex  → SQLite FTS5 (unicode61 + trigram)                      (PoC)  → tantivy (option)     │
+ │   ├─ TextIndex  → tantivy (fallback: SQLite FTS5 tables, still written)  (PoC)                        │
  │   ├─ BlobStore  → local content-addressed files                          (PoC)  → S3 (later)           │
  │   └─ VectorIndex→ —                                                      (phase 2: usearch + ONNX)     │
  └────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -43,7 +43,8 @@ meet the spec. Observable behaviour and stored data are defined normatively in `
 | Crate | Responsibility |
 |---|---|
 | `mygraph-core` | Model types, validation, engine, in-memory indexes, query executor, storage traits. No HTTP/MCP dependencies. |
-| `mygraph-store-sqlite` | `Store` + `TextIndex` implementations, schema migrations, local blob store |
+| `mygraph-store-sqlite` | `Store` implementation (with FTS5 full text), schema migrations, local blob store |
+| `mygraph-text-tantivy` | `TextIndex` on tantivy: the full-text index used for search |
 | `mygraph-api` | Request/response DTOs for every operation, matching `spec/api/schemas`; embeds the spec's MCP tool definitions and OpenAPI document and serves them unchanged |
 | `mygraph-server` | The binary: `serve` (HTTP: REST + MCP), `mcp` (stdio), `import`, `export`, `check`, `bench-data` subcommands; config; auth; metrics |
 | `mygraph-bench` | Synthetic data generator, load scenarios, latency reports |
@@ -60,7 +61,7 @@ The operation layer is the product. Transports stay thin so a gRPC or a native l
 | Seam | Contract |
 |---|---|
 | `Store` | `load_into` (streams actors and rows into a `LoadSink`, which the in-memory state implements; `load` collects them into a snapshot), `counters` (last used internal numbers), `apply` (one `ChangeSet` — rows, batch, change-log entries — in one transaction), plus change-log queries for restore and retract-by-batch. The engine assigns internal numbers and change-log sequence numbers itself, so a change set is complete before it reaches the store |
-| `TextIndex` | Index/unindex text fields of an object inside the caller's transaction; query → ranked object references with scores and snippets |
+| `TextIndex` | External full-text index (`mygraph-core::store::TextIndex`): `index` (replace documents, then durably record the change-log seq they cover), `clear`, `applied_seq`, `search` (tokens → ranked object numbers). A rebuildable cache ([STORE-TEXT-1]); implementation `TantivyText` in `mygraph-text-tantivy`. Without one, the store's FTS5 tables answer |
 | `BlobStore` | `put` (bytes → sha256, written and synced before it returns), `size` (also answers "exists"), `get`; delete only by admin GC. Reached through `Store::blobs()`; local implementation `BlobDir` in `mygraph-store-sqlite` |
 | `VectorIndex` (phase 2) | Upsert/remove vector for an object; k-nearest query with an optional allowed-set filter |
 

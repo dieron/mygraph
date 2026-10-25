@@ -123,6 +123,44 @@ Every milestone follows the spec-first workflow of
 - `history` by object and `since_seq`.
 - Compact text formatter.
 - **Done when:** every operation has golden-response tests; micro-benchmarks exist for each.
+- *Progress 2026-10-25:* **`search`** and **`get`** specified (`api/operations/search.md`,
+  `get.md`, `algorithms/search-ranking.md` + 11 vector cases) and implemented. Name matching runs in
+  RAM: an ordered name-key index (exact, prefix) and a trigram index (fuzzy, pg_trgm-style
+  similarity with prefix filtering); full text uses SQLite FTS5. `mygraph-bench search` times them
+  on the 1 M-node graph (300 queries each, ms):
+
+  | Query | p50 | p99 | Budget (p99) |
+  |---|---:|---:|---:|
+  | exact name | 0.007 | 0.014 | 0.5 ✓ |
+  | prefix (4 characters) | 0.63 | 2.6 | — |
+  | fuzzy (one typo) | 3.4 | 11.2 | 15 ✓ |
+  | auto (full name / with a typo) | 3.6 / 2.9 | 12.0 / 10.7 | 15 ✓ |
+  | full text, one word (nodes) | 1.2 | 71 | 10 ✗ |
+  | full text, one word (evidence) | 2.7 | 671 | 10 ✗ |
+  | `get` node with default includes | 0.06 | 0.09 | 1 ✓ |
+  | `get` of the 20 largest hubs (≤ 9 833 links) | 0.6 | 3.7 | 1 ✗ |
+
+  Full text misses on frequent words: FTS5 computes BM25 for every matching row before taking the
+  top 20. Hub `get` sorts all of a hub's links per call; caching per-node type counts would fix it
+  if needed.
+- *Progress 2026-10-25 (later):* the tantivy decision of the M4 gate was taken early: full-text
+  queries now go to **tantivy** (crate `mygraph-text-tantivy`) behind the new `TextIndex` seam.
+  The index is a rebuildable cache ([STORE-TEXT-1]) in `<data_dir>/text/<graph>/`; each commit
+  records the change-log sequence it covers, so attaching catches up from the change log or
+  rebuilds (53 s for the 1 M / 5 M / 1 M graph, 196 MB). Writes update it after the SQLite commit;
+  if that fails, search falls back to FTS5 until the next attach. FTS5 tables are still written
+  (format v1 unchanged). Design choices that mattered for speed: one text field per object kind
+  (a one-word query is a bare term query, so block-max skipping applies) and prefix expansion of
+  the last word only when whole-word hits do not fill the limit. Results (ms):
+
+  | Full text, one word | FTS5 p50 / p99 | tantivy p50 / p99 | Budget (p99) |
+  |---|---:|---:|---:|
+  | nodes | 1.2 / 71 | 5.6 / 9.8 | 10 ✓ |
+  | evidence (with snippets) | 2.7 / 671 | 5.5 / 7.5 | 10 ✓ |
+
+  All `search` budget lines are now met. Not yet measured: the write-latency cost of the tantivy
+  commit per batch.
+  Next: `resolve`, `neighbors`, `paths`, `find`, `history`.
 
 ### M3 — APIs (M)
 - **Spec:** `api/conventions.md`, `errors.md`, complete `schemas/`, `openapi.yaml`,

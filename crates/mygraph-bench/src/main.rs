@@ -57,6 +57,20 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
     },
+    /// Times `search` on names taken from the graph: exact, prefix, one typo, one word.
+    Search {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value = "bench")]
+        graph: String,
+        #[arg(long, default_value_t = 300)]
+        queries: usize,
+        #[arg(long, default_value_t = 7)]
+        seed: u64,
+        /// Full text from SQLite FTS5 instead of the tantivy index.
+        #[arg(long)]
+        fts5: bool,
+    },
     /// Opens a graph and reports load time, memory and index sizes.
     Load {
         #[arg(long)]
@@ -86,6 +100,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             seed,
             replace,
         ),
+        Cmd::Search {
+            data,
+            graph,
+            queries,
+            seed,
+            fts5,
+        } => search_bench(&data, &graph, queries, seed, fts5),
         Cmd::Load {
             data,
             graph,
@@ -378,4 +399,126 @@ fn breakdown_of(file: &GraphFile) -> Result<Json, Box<dyn std::error::Error + Se
         );
     }
     Ok(Json::Object(out))
+}
+
+/// p50 / p95 / p99 / max in milliseconds.
+fn percentiles(mut d: Vec<Duration>) -> Json {
+    d.sort();
+    let at = |p: f64| d[((d.len() - 1) as f64 * p).round() as usize].as_secs_f64() * 1000.0;
+    let r = |x: f64| (x * 1000.0).round() / 1000.0;
+    json!({ "p50": r(at(0.5)), "p95": r(at(0.95)), "p99": r(at(0.99)), "max": r(at(1.0)), "n": d.len() })
+}
+
+fn search_bench(
+    data: &Path,
+    graph: &str,
+    queries: usize,
+    seed: u64,
+    fts5: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let t = Instant::now();
+    let file = GraphFile::open(data, graph)?;
+    let mut g = Graph::open(file, graph, Policies::default())?;
+    eprintln!("loaded in {:.1}s", t.elapsed().as_secs_f64());
+    if !fts5 {
+        let t = Instant::now();
+        let index = mygraph_text_tantivy::TantivyText::open(data, graph)?;
+        g.attach_text_index(Box::new(index))?;
+        eprintln!("text index ready in {:.1}s", t.elapsed().as_secs_f64());
+    }
+    let g = g;
+    let st = g.state();
+    let max = st.nodes.iter().map(|(i, _)| i).max().unwrap_or(0);
+    let mut r = Rng::new(seed);
+    let names: Vec<String> = (0..queries)
+        .filter_map(|_| st.nodes.get(&(1 + r.below(max as usize) as i64)))
+        .map(|n| n.name.clone())
+        .collect();
+    let typo = |s: &str, r: &mut Rng| {
+        let mut cs: Vec<char> = s.chars().collect();
+        let i = 1 + r.below(cs.len().saturating_sub(2).max(1));
+        if i < cs.len() {
+            cs.remove(i);
+        }
+        cs.into_iter().collect::<String>()
+    };
+    let word = |s: &str, r: &mut Rng| {
+        let ws: Vec<&str> = s.split(' ').filter(|w| w.chars().count() >= 3).collect();
+        if ws.is_empty() {
+            s.to_owned()
+        } else {
+            (*r.pick(&ws)).to_owned()
+        }
+    };
+    type MakeQuery = Box<dyn Fn(&str, &mut Rng) -> Json>;
+    let cases: Vec<(&str, MakeQuery)> = vec![
+        (
+            "exact",
+            Box::new(|s, _| json!({ "query": s, "mode": "exact" })),
+        ),
+        (
+            "prefix_4",
+            Box::new(
+                |s, _| json!({ "query": s.chars().take(4).collect::<String>(), "mode": "prefix" }),
+            ),
+        ),
+        (
+            "fuzzy_typo",
+            Box::new(move |s, r| json!({ "query": typo(s, r), "mode": "fuzzy" })),
+        ),
+        (
+            "text_word",
+            Box::new(move |s, r| json!({ "query": word(s, r), "mode": "text" })),
+        ),
+        ("auto_full_name", Box::new(|s, _| json!({ "query": s }))),
+        (
+            "auto_typo",
+            Box::new(move |s, r| json!({ "query": typo(s, r) })),
+        ),
+        (
+            "evidence_text",
+            Box::new(move |s, r| json!({ "query": word(s, r), "in": ["evidence"] })),
+        ),
+    ];
+    let mut report = serde_json::Map::new();
+    for (name, make) in &cases {
+        let reqs: Vec<Json> = names.iter().map(|s| make(s, &mut r)).collect();
+        let mut times = Vec::with_capacity(reqs.len());
+        let mut found = 0usize;
+        for q in &reqs {
+            let t = Instant::now();
+            let res = g.search(q).map_err(|e| e.to_json().to_string())?;
+            times.push(t.elapsed());
+            found += usize::from(!res["hits"].as_array().unwrap().is_empty());
+        }
+        let mut p = percentiles(times);
+        p["found_share"] = json!(found as f64 / reqs.len() as f64);
+        report.insert((*name).to_owned(), p);
+    }
+    // `get` with the default includes, on random nodes and on the 20 nodes with most links.
+    let ids: Vec<i64> = (0..queries)
+        .map(|_| 1 + r.below(max as usize) as i64)
+        .filter(|i| st.nodes.contains_key(i))
+        .collect();
+    let mut hubs: Vec<(usize, i64)> = st
+        .nodes
+        .iter()
+        .map(|(i, _)| (st.adjacency.get(&i).map_or(0, |s| s.len()), i))
+        .collect();
+    hubs.sort_unstable_by(|a, b| b.cmp(a));
+    let hub_ids: Vec<i64> = hubs.iter().take(20).map(|h| h.1).collect();
+    for (name, set) in [("get_node", &ids), ("get_hub_node", &hub_ids)] {
+        let mut times = Vec::new();
+        for &i in set {
+            let id = mygraph_core::model::id_string(mygraph_core::ids::ObjectKind::Node, i);
+            let t = Instant::now();
+            g.get(&json!({ "refs": [id] }))
+                .map_err(|e| e.to_json().to_string())?;
+            times.push(t.elapsed());
+        }
+        report.insert(name.to_owned(), percentiles(times));
+    }
+    report.insert("largest_hub_links".into(), json!(hubs[0].0));
+    println!("{}", serde_json::to_string_pretty(&Json::Object(report))?);
+    Ok(())
 }

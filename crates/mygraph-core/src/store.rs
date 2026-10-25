@@ -119,6 +119,116 @@ pub trait Store {
     fn evidence_content(&self, idx: i64) -> Result<Option<String>, StoreFailure>;
     /// The blob store this graph's evidence refers to ([STORE-BLOB-1]).
     fn blobs(&self) -> &dyn BlobStore;
+    /// Objects (obj_kind code, number) with change-log entries after `seq`.
+    fn changed_since(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure>;
+    /// Full-text search ([RANK-6]): objects of any status in relevance order, at most `limit`.
+    /// `tokens` all match; the last one also as a word prefix.
+    fn text_search(
+        &self,
+        target: TextTarget,
+        tokens: &[String],
+        limit: usize,
+    ) -> Result<Vec<TextHit>, StoreFailure>;
+}
+
+/// A full-text index kept outside the store (docs/05 §2, `TextIndex` seam): a rebuildable cache
+/// derived from the records ([STORE-TEXT-1]). It remembers the change-log sequence number up to
+/// which it holds every change, so it can catch up after a restart or a crash.
+pub trait TextIndex: Send {
+    /// Sequence number of the last change the index holds; `None` for a new, empty index.
+    fn applied_seq(&self) -> Option<i64>;
+    /// Adds or replaces documents (one per object), then durably records `seq`.
+    fn index(&mut self, docs: Vec<TextDoc>, seq: i64) -> Result<(), StoreFailure>;
+    /// Removes every document.
+    fn clear(&mut self) -> Result<(), StoreFailure>;
+    /// Same contract as [`Store::text_search`].
+    fn search(
+        &self,
+        target: TextTarget,
+        tokens: &[String],
+        limit: usize,
+    ) -> Result<Vec<TextHit>, StoreFailure>;
+}
+
+/// The searchable text of one object, as in [STORE-FTSYNC-1].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextDoc {
+    pub target: TextTarget,
+    pub idx: i64,
+    pub text: String,
+}
+
+/// Text of a node, link or evidence for a [`TextIndex`]; `content` is the evidence's inline text,
+/// which the in-memory rows do not keep.
+pub fn text_doc(row: &Row, content: Option<&str>) -> Option<TextDoc> {
+    fn props(p: &crate::model::PropMap, out: &mut String) {
+        for v in p.values() {
+            match v {
+                crate::values::Value::String(s) => {
+                    out.push_str(s);
+                    out.push('\n');
+                }
+                crate::values::Value::List(items) => {
+                    for i in items {
+                        if let crate::values::Value::String(s) = i {
+                            out.push_str(s);
+                            out.push('\n');
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut text = String::new();
+    let (target, idx) = match row {
+        Row::Node(n) => {
+            text.push_str(&n.name);
+            for a in &n.aliases {
+                text.push('\n');
+                text.push_str(a);
+            }
+            text.push('\n');
+            if let Some(s) = &n.summary {
+                text.push_str(s);
+                text.push('\n');
+            }
+            props(&n.props, &mut text);
+            (TextTarget::Nodes, n.idx)
+        }
+        Row::Link(l) => {
+            text.push_str(&l.type_.replace('_', " "));
+            text.push('\n');
+            props(&l.props, &mut text);
+            (TextTarget::Links, l.idx)
+        }
+        Row::Evidence(e) => {
+            if let Some(t) = &e.title {
+                text.push_str(t);
+                text.push('\n');
+            }
+            if let Some(c) = content {
+                text.push_str(c);
+            }
+            (TextTarget::Evidence, e.idx)
+        }
+        Row::Citation(_) => return None,
+    };
+    Some(TextDoc { target, idx, text })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextTarget {
+    Nodes,
+    Links,
+    Evidence,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextHit {
+    pub idx: i64,
+    /// Evidence only ([OP-SEARCH-4]).
+    pub snippet: Option<String>,
 }
 
 /// Content-addressed bytes shared by all graphs ([STORE-BLOB-1] .. [STORE-BLOB-5]). Hashes are

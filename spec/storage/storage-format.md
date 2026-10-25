@@ -108,3 +108,12 @@ only by the admin blob garbage collection.
 
 **[STORE-BLOB-5]** Temporary files ([STORE-BLOB-3]) have names starting with `.tmp`. Readers
 ignore them; blob garbage collection deletes them.
+
+
+## 6. Derived indexes
+
+**[STORE-TEXT-1]** An implementation may answer full-text queries from its own index derived
+from the records (for example under `<data_dir>/text/<graph>/`). Such an index is a cache, not
+part of the format: the FTS tables of [STORE-FTS-1] are still maintained, the derived index can be
+deleted and rebuilt at any time, and after a crash it is brought up to date from the change log
+before it answers queries.

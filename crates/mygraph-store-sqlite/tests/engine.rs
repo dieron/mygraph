@@ -275,11 +275,7 @@ fn retract_cascades_and_restore_brings_back_exactly_the_cascade() {
             { "id": "l_1", "outcome": "retracted", "cascade_of": "n_1" }
         ])
     );
-    assert!(
-        !g.state()
-            .names
-            .contains_key(&("Person".into(), "ada lovelace".into()))
-    );
+    assert!(!g.state().names.contains_key("ada lovelace"));
     let e = g
         .write(
             ACTOR,
@@ -576,4 +572,145 @@ fn new_vocabulary_lists_similar_items() {
         json!([{ "name": "WROTE_ABOUT", "count": 1 }])
     );
     assert_eq!(similar("prop_key"), json!([{ "name": "born", "count": 1 }]));
+}
+
+#[test]
+fn search_ranks_names_then_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let ids = |r: &Json| -> Vec<(String, String)> {
+        r["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                (
+                    h["id"].as_str().unwrap().to_owned(),
+                    h["matched"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    };
+    let s = |g: &Graph<GraphFile>, q: Json| g.search(&q).unwrap();
+    let pair = |id: &str, m: &str| (id.to_owned(), m.to_owned());
+
+    // [RANK-4] exact name, alias, prefix and fuzzy.
+    let r = s(&g, json!({ "query": "ADA LOVELACE" }));
+    assert_eq!(ids(&r)[0], pair("n_1", "name:exact"));
+    assert_eq!(r["hits"][0]["score"], json!(1.0));
+    let r = s(&g, json!({ "query": "augusta ada king" }));
+    assert_eq!(ids(&r)[0], pair("n_1", "alias:exact"));
+    let r = s(&g, json!({ "query": "charles bab" }));
+    assert_eq!(ids(&r)[0], pair("n_2", "name:prefix"));
+    let r = s(&g, json!({ "query": "Charles Babage" }));
+    assert_eq!(ids(&r)[0], pair("n_2", "name:fuzzy"));
+    // One word of a name: trigram similarity 8/16, above full text.
+    let r = s(&g, json!({ "query": "babbage" }));
+    assert_eq!(ids(&r), vec![pair("n_2", "name:fuzzy")]);
+    let r = s(&g, json!({ "query": "babbage", "mode": "text" }));
+    assert_eq!(ids(&r), vec![pair("n_2", "text")]);
+    // Type filter and modes.
+    let r = s(
+        &g,
+        json!({ "query": "analytical engine", "types": ["machine"] }),
+    );
+    assert_eq!(ids(&r), vec![pair("n_3", "name:exact")]);
+    let r = s(
+        &g,
+        json!({ "query": "analytical engine", "types": ["Person"] }),
+    );
+    assert_eq!(r["hits"], json!([]));
+    let r = s(&g, json!({ "query": "babbage", "mode": "exact" }));
+    assert_eq!(r["hits"], json!([]));
+    // Evidence by full text, with a snippet; links by type words.
+    let r = s(&g, json!({ "query": "analytical", "in": ["evidence"] }));
+    assert_eq!(ids(&r), vec![pair("e_2", "text")]);
+    assert!(
+        r["hits"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("«Analytical»")
+    );
+    let r = s(&g, json!({ "query": "wrote", "in": ["links"] }));
+    assert_eq!(ids(&r), vec![pair("l_2", "text")]);
+    // Limit and truncation.
+    let r = s(&g, json!({ "query": "a", "limit": 1 }));
+    assert_eq!(r["truncated"], json!(true));
+    // Retracted nodes leave name search.
+    g.retract(ACTOR, &json!({ "targets": ["n_2"] }), T).unwrap();
+    let r = s(&g, json!({ "query": "charles babbage" }));
+    assert_eq!(r["hits"], json!([]));
+    let r = s(&g, json!({ "query": "babbage", "include_retracted": true }));
+    assert_eq!(r["hits"][0]["status"], "retracted");
+    let e = g.search(&json!({ "query": "" })).unwrap_err();
+    assert_eq!(e.reason.code(), "search.query_invalid");
+}
+
+#[test]
+fn get_returns_objects_with_neighbourhood_support_and_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(dir.path(), Policies::default());
+    g.write(ACTOR, &ada_batch(), T).unwrap();
+    let r = g
+        .get(&json!({ "refs": ["n_1", { "type": "Person", "name": "charles babbage" }, "nope", "e_2"],
+                      "include": { "content": { "from": 3, "max_chars": 4 } } }))
+        .unwrap();
+    let ada = &r["items"][0];
+    assert_eq!(ada["name"], "Ada Lovelace");
+    assert!(
+        ada.get("version").is_none(),
+        "normal detail has no record-time fields"
+    );
+    // [OP-GET-4] COLLABORATED_WITH is undirected, WROTE_ABOUT directed.
+    assert_eq!(
+        ada["links"]["counts"],
+        json!([{ "type": "COLLABORATED_WITH", "direction": "both", "count": 1 },
+               { "type": "WROTE_ABOUT", "direction": "out", "count": 1 }])
+    );
+    assert_eq!(
+        ada["links"]["items"][1]["other"],
+        json!({ "id": "n_3", "type": "Machine", "name": "Analytical Engine" })
+    );
+    // [OP-GET-5] one supporting citation from e_2.
+    assert_eq!(ada["support"], json!({ "supports": 1, "sources": 1 }));
+    assert_eq!(ada["evidence"]["items"][0]["id"], "e_2");
+    assert_eq!(r["items"][1]["id"], "n_2");
+    assert_eq!(r["items"][2]["error"]["code"], "ref.not_found");
+    // [OP-GET-7] content range in code points.
+    assert_eq!(r["items"][3]["content"], "1843");
+    assert_eq!(r["items"][3]["content_truncated"], true);
+
+    let r = g
+        .get(&json!({ "refs": ["l_1"], "detail": "brief" }))
+        .unwrap();
+    assert_eq!(
+        r["items"][0],
+        json!({ "id": "l_1", "type": "COLLABORATED_WITH", "from": "n_1", "to": "n_2", "directed": false, "status": "active" })
+    );
+    let r = g.get(&json!({ "refs": ["n_1"], "detail": "full", "include": { "links": { "limit": 1, "types": ["wrote about"] } } })).unwrap();
+    assert_eq!(r["items"][0]["version"], 1);
+    assert_eq!(
+        r["items"][0]["links"]["counts"].as_array().unwrap().len(),
+        1
+    );
+    // A merged node's ID resolves to the survivor.
+    g.write(
+        ACTOR,
+        &json!({ "evidence": [{ "ref": "@o", "kind": "observation", "content": "dup" }],
+        "nodes": [{ "type": "Person", "name": "A. Lovelace", "cite": ["@o"] }] }),
+        T,
+    )
+    .unwrap();
+    g.merge(ACTOR, &json!({ "into": "n_1", "merge": ["n_4"] }), T)
+        .unwrap();
+    let r = g
+        .get(&json!({ "refs": ["n_4"], "detail": "brief" }))
+        .unwrap();
+    assert_eq!(r["items"][0]["id"], "n_1");
+    assert_eq!(r["items"][0]["merged_from"], "n_4");
+    assert_eq!(
+        g.get(&json!({ "refs": [] })).unwrap_err().reason.code(),
+        "get.invalid_field"
+    );
 }

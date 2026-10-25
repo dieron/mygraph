@@ -1,0 +1,32 @@
+{
+  "format": "mygraph-vectors/1",
+  "spec_version": "0.1.0-draft",
+  "spec": "spec/algorithms/search-ranking.md",
+  "groups": [
+    {
+      "function": "name_trigrams",
+      "rules": ["RANK-2"],
+      "description": "Name key -> its trigram set, sorted in code point order.",
+      "cases": [
+        { "input": "ada", "output": ["  a", " ad", "ada", "da "] },
+        { "input": "ab", "output": ["  a", " ab", "ab "] },
+        { "input": "a", "output": ["  a", " a "] },
+        { "note": "Repeated words add nothing.", "input": "ada ada", "output": ["  a", " ad", "ada", "da "] },
+        { "input": "ab cd", "output": ["  a", "  c", " ab", " cd", "ab ", "cd "] },
+        { "input": "", "output": [] }
+      ]
+    },
+    {
+      "function": "trigram_similarity",
+      "rules": ["RANK-3"],
+      "description": "Two name keys -> |A n B| / |A u B|.",
+      "cases": [
+        { "input": ["ada", "ada"], "output": 1.0 },
+        { "note": "3 shared of 6.", "input": ["ada", "adam"], "output": 0.5 },
+        { "input": ["ab", "ba"], "output": 0.0 },
+        { "note": "4 shared of 13: just above the fuzzy threshold 0.3.", "input": ["ada lovelace", "ada"], "output": 0.3076923076923077 },
+        { "input": ["", ""], "output": 0.0 }
+      ]
+    }
+  ]
+}

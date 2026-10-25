@@ -5,6 +5,7 @@
 use crate::ids::ObjectKind;
 use crate::model::{Actor, Citation, Evidence, Link, Node, Role, Row, Status, TargetKind};
 use crate::name_key::name_key;
+use crate::names::NameIndex;
 use crate::store::{Counters, LoadSink, Snapshot, Store, StoreFailure};
 use crate::table::{DenseIndex, IdSet, Table};
 use crate::values::Sym;
@@ -111,8 +112,8 @@ pub struct State {
     pub node_keys: HashMap<String, i64>,
     pub link_keys: HashMap<String, i64>,
     pub evidence_keys: HashMap<String, i64>,
-    /// (node type, name key) -> active nodes with that name or alias.
-    pub names: HashMap<(Sym, Box<str>), IdSet>,
+    /// name key -> active nodes (any type) with that name or alias.
+    pub names: NameIndex,
     /// node -> links (any status) with that node as an endpoint.
     pub adjacency: DenseIndex,
     /// Hash of an [`EvidenceIdentity`] -> active evidence with that hash.
@@ -276,11 +277,7 @@ impl State {
         }
         if n.status == Status::Active {
             for name in std::iter::once(&n.name).chain(&n.aliases) {
-                set_add(
-                    &mut self.names,
-                    (n.type_.clone(), name_key(name).into_boxed_str()),
-                    n.idx,
-                );
+                self.names.add(name_key(name), n.idx);
             }
         }
         add(&mut self.node_types, n.type_.clone());
@@ -297,11 +294,7 @@ impl State {
             self.node_keys.remove(k);
         }
         for name in std::iter::once(&n.name).chain(&n.aliases) {
-            set_remove(
-                &mut self.names,
-                &(n.type_.clone(), name_key(name).into_boxed_str()),
-                idx,
-            );
+            self.names.remove(&name_key(name), idx);
         }
         sub(&mut self.node_types, &n.type_);
         for k in n.props.keys() {

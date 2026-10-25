@@ -80,6 +80,8 @@ Functions are named by what they compute; implementations map them to their own 
 | | `compare_values` | JSON text of `[a, b]` | `-1`, `0` or `1` |
 | | `values_equal` | JSON text of `[a, b]` | `true` / `false` |
 | [vocabulary-similarity.json](vectors/vocabulary-similarity.json) | `vocabulary_similar` | `{new, vocabulary: [{name, count}]}` | `[{name, count}]` in report order |
+| [search-ranking.json](vectors/search-ranking.json) | `name_trigrams` | name key | sorted list of trigrams |
+| | `trigram_similarity` | `[a, b]` name keys | number 0–1 |
 
 Object kinds in `encode_id` / `decode_id`: `node`, `link`, `evidence`, `citation`, `batch`.
 

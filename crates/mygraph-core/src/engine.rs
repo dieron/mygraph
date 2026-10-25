@@ -8,7 +8,10 @@ use crate::model::{
     record_json,
 };
 use crate::state::State;
-use crate::store::{BatchRow, ChangeSet, Counters, LogEntry, RowOp, Store, StoreFailure};
+use crate::store::{
+    BatchRow, ChangeSet, Counters, LogEntry, RowOp, Store, StoreFailure, TextDoc, TextIndex,
+    text_doc,
+};
 use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
 use std::fmt;
@@ -141,6 +144,10 @@ pub struct Graph<S: Store> {
     pub(crate) policies: Policies,
     pub(crate) counters: Counters,
     name: String,
+    /// External full-text index; `search` falls back to the store's own full text when it is
+    /// absent or stale (an update failed after a commit; reopening catches it up).
+    text: Option<Box<dyn TextIndex>>,
+    text_stale: bool,
 }
 
 impl<S: Store> Graph<S> {
@@ -153,7 +160,78 @@ impl<S: Store> Graph<S> {
             policies,
             counters,
             name: name.to_owned(),
+            text: None,
+            text_stale: false,
         })
+    }
+
+    /// Attaches an external full-text index, first bringing it up to date: catching up from the
+    /// change log, or rebuilding it when it is new or ahead of the store.
+    pub fn attach_text_index(&mut self, mut index: Box<dyn TextIndex>) -> Result<(), StoreFailure> {
+        let seq = self.counters.seq;
+        match index.applied_seq() {
+            Some(s) if s == seq => {}
+            Some(s) if s >= 0 && s < seq => {
+                let docs = self
+                    .store
+                    .changed_since(s)?
+                    .into_iter()
+                    .filter_map(|(kind, idx)| match kind {
+                        0 => Some((ObjectKind::Node, idx)),
+                        1 => Some((ObjectKind::Link, idx)),
+                        2 => Some((ObjectKind::Evidence, idx)),
+                        _ => None,
+                    })
+                    .map(|(kind, idx)| self.text_doc_of(kind, idx))
+                    .collect::<Result<Vec<_>, _>>()?;
+                index.index(docs.into_iter().flatten().collect(), seq)?;
+            }
+            _ => {
+                // Rebuild in chunks; only the last chunk records `seq`, so an interrupted
+                // rebuild (recorded as -1) is redone on the next attach.
+                index.clear()?;
+                let mut all: Vec<(ObjectKind, i64)> = Vec::new();
+                all.extend(self.state.nodes.iter().map(|(i, _)| (ObjectKind::Node, i)));
+                all.extend(self.state.links.iter().map(|(i, _)| (ObjectKind::Link, i)));
+                all.extend(
+                    self.state
+                        .evidence
+                        .iter()
+                        .map(|(i, _)| (ObjectKind::Evidence, i)),
+                );
+                let chunks: Vec<_> = all.chunks(100_000).collect();
+                for (n, chunk) in chunks.iter().enumerate() {
+                    let docs = chunk
+                        .iter()
+                        .map(|&(kind, idx)| self.text_doc_of(kind, idx))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mark = if n + 1 == chunks.len() { seq } else { -1 };
+                    index.index(docs.into_iter().flatten().collect(), mark)?;
+                }
+                if chunks.is_empty() {
+                    index.index(Vec::new(), seq)?;
+                }
+            }
+        }
+        self.text = Some(index);
+        self.text_stale = false;
+        Ok(())
+    }
+
+    fn text_doc_of(&self, kind: ObjectKind, idx: i64) -> Result<Option<TextDoc>, StoreFailure> {
+        let Some(row) = self.state.get(kind, idx) else {
+            return Ok(None);
+        };
+        let content = match kind {
+            ObjectKind::Evidence => self.store.evidence_content(idx)?,
+            _ => None,
+        };
+        Ok(text_doc(&row, content.as_deref()))
+    }
+
+    /// The external full-text index, when attached and up to date.
+    pub(crate) fn text_index(&self) -> Option<&dyn TextIndex> {
+        self.text.as_deref().filter(|_| !self.text_stale)
     }
 
     pub fn name(&self) -> &str {
@@ -486,10 +564,38 @@ impl<S: Store> Graph<S> {
             return Err(storage_error(e));
         }
         self.counters = b.counters;
+        self.update_text(&changes);
         Ok((Some(id_string(ObjectKind::Batch, batch_idx)), b.warnings))
     }
 
     pub(crate) fn store_query<T>(&self, r: Result<T, StoreFailure>) -> Result<T, OpError> {
         r.map_err(storage_error)
+    }
+}
+
+impl<S: Store> Graph<S> {
+    /// After a commit: re-index every node, link and evidence the batch wrote.
+    fn update_text(&mut self, changes: &ChangeSet) {
+        if self.text.is_none() || self.text_stale {
+            return;
+        }
+        let seq = changes.log.last().map_or(self.counters.seq, |e| e.seq);
+        let mut docs = Vec::new();
+        for op in &changes.ops {
+            let (RowOp::Insert(row) | RowOp::Update(row)) = op;
+            let content = match row {
+                Row::Evidence(e) if e.content.is_some() => e.content.clone(),
+                Row::Evidence(e) => self.store.evidence_content(e.idx).ok().flatten(),
+                _ => None,
+            };
+            docs.extend(text_doc(row, content.as_deref()));
+        }
+        let ok = self
+            .text
+            .as_mut()
+            .is_some_and(|t| t.index(docs, seq).is_ok());
+        if !ok {
+            self.text_stale = true;
+        }
     }
 }

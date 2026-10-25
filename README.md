@@ -6,7 +6,7 @@ from. Designed for AI agents (MCP and REST APIs, no query language), with a sepa
 **Status:** 2026-10-25 · language **Rust**, specification-first so it can be re-written in another
 language · **M0 done, M1 (core model and storage) done**: write, retract/restore, merge, blobs and
 vocabulary hints on SQLite, with property-based and kill tests; synthetic data generator and
-memory measurements · next: **M2** (reads, search, aggregations). See
+memory measurements · **M2 in progress**: `search` (names in RAM, full text on tantivy) and `get` done, all search budgets met at 1 M nodes. See
 [docs/08-poc-plan.md](docs/08-poc-plan.md).
 
 ## In one paragraph

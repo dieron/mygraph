@@ -538,9 +538,12 @@ impl<S: Store> Graph<S> {
     fn name_matches(&self, type_: &str, name: &str) -> Vec<i64> {
         self.state
             .names
-            .get(&(Sym::from(type_), name_key(name).into_boxed_str()))
-            .map(|s| s.iter().copied().collect())
-            .unwrap_or_default()
+            .get(&name_key(name))
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|n| *self.state.nodes[n].type_ == *type_)
+            .collect()
     }
 
     fn ambiguous(&self, type_: &str, name: &str, many: &[i64]) -> OpError {

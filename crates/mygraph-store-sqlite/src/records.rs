@@ -6,7 +6,9 @@ use mygraph_core::Reason;
 use mygraph_core::model::{
     Actor, Citation, Evidence, Link, Node, PropMap, RecordMeta, Role, Row, Status, TargetKind,
 };
-use mygraph_core::store::{BlobStore, ChangeSet, Counters, LoadSink, RowOp, Store, StoreFailure};
+use mygraph_core::store::{
+    BlobStore, ChangeSet, Counters, LoadSink, RowOp, Store, StoreFailure, TextHit, TextTarget,
+};
 use mygraph_core::values::{self, Value};
 use rusqlite::{OptionalExtension, Row as SqlRow, Transaction, params};
 use serde_json::{Map, Value as Json};
@@ -477,17 +479,60 @@ impl Store for GraphFile {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    fn changed_since(&self, seq: i64) -> Result<Vec<(i64, i64)>, StoreFailure> {
+        let mut st = self.connection().prepare(
+            "SELECT DISTINCT obj_kind, obj FROM changelog WHERE seq > ?1 AND obj IS NOT NULL",
+        )?;
+        let rows = st.query_map([seq], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     fn evidence_content(&self, idx: i64) -> Result<Option<String>, StoreFailure> {
         Ok(self
             .connection()
-            .query_row("SELECT content FROM evidence WHERE idx = ?1", [idx], |r| {
-                r.get(0)
-            })
+            .prepare_cached("SELECT content FROM evidence WHERE idx = ?1")?
+            .query_row([idx], |r| r.get(0))
             .optional()?
             .flatten())
     }
 
     fn blobs(&self) -> &dyn BlobStore {
         &self.blobs
+    }
+
+    fn text_search(
+        &self,
+        target: TextTarget,
+        tokens: &[String],
+        limit: usize,
+    ) -> Result<Vec<TextHit>, StoreFailure> {
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Tokens are letters, marks and numbers only, so quoting them is enough.
+        let mut query: Vec<String> = tokens.iter().map(|t| format!("\"{t}\"")).collect();
+        if let Some(last) = query.last_mut() {
+            last.push('*');
+        }
+        let query = query.join(" ");
+        let sql = match target {
+            TextTarget::Nodes => {
+                "SELECT rowid, NULL FROM fts_node WHERE fts_node MATCH ?1 ORDER BY rank LIMIT ?2"
+            }
+            TextTarget::Links => {
+                "SELECT rowid, NULL FROM fts_link WHERE fts_link MATCH ?1 ORDER BY rank LIMIT ?2"
+            }
+            TextTarget::Evidence => {
+                "SELECT rowid, snippet(fts_evidence, -1, '«', '»', '…', 12) FROM fts_evidence WHERE fts_evidence MATCH ?1 ORDER BY rank LIMIT ?2"
+            }
+        };
+        let mut st = self.connection().prepare_cached(sql)?;
+        let rows = st.query_map((query, limit as i64), |r| {
+            Ok(TextHit {
+                idx: r.get(0)?,
+                snippet: r.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 }
