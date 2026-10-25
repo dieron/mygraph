@@ -49,6 +49,25 @@ Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest 
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
 
+## Local deployment (Windows)
+
+Build, then deploy; run the same two commands again to replace the running version:
+
+```bash
+cargo build --release -p mygraph-server
+```
+
+```bash
+powershell -ExecutionPolicy Bypass -File deploy/windows/deploy.ps1
+```
+
+The script copies the binary to `%LOCALAPPDATA%MyGraphin`, writes
+`%LOCALAPPDATA%MyGraphserver.toml` on first install (data in `%USERPROFILE%mygraph-data`, port
+7420, log in `%LOCALAPPDATA%MyGraphogsmygraph.log`), registers the scheduled task "MyGraph
+server" that starts it hidden at logon, and starts it. `-Uninstall` stops it and removes the task
+(data stays). Only one process may use a data folder at a time ([STORE-DIR-4]), so development
+runs need their own `--data-dir` and `--listen`.
+
 ## Backups and moving data
 
 - `POST /admin/graphs/{g}/snapshot` copies the database online into `<data_dir>/snapshots/`;

@@ -837,7 +837,10 @@ async fn export_import_and_restore_keep_everything() {
     let r = s.get("/v1/graphs/copy/search?q=lovelace", READER).await;
     assert_eq!(r.json()["hits"][0]["id"], "n_1");
     let r = s
-        .get("/v1/graphs/copy/search?q=published&in=evidence&mode=text", READER)
+        .get(
+            "/v1/graphs/copy/search?q=published&in=evidence&mode=text",
+            READER,
+        )
         .await;
     assert_eq!(r.json()["hits"][0]["id"], "e_2", "{}", r.text());
     let r = s
@@ -900,4 +903,18 @@ async fn export_import_and_restore_keep_everything() {
     );
     let r = s.get("/v1/graphs/copy/search?q=lovelace", READER).await;
     assert_eq!(r.json()["hits"][0]["id"], "n_1");
+}
+
+#[test]
+fn one_process_per_data_folder() {
+    // [STORE-DIR-4]
+    let dir = tempfile::tempdir().unwrap();
+    let first = mygraph_server::lock_data_dir(dir.path()).unwrap();
+    let second = mygraph_server::lock_data_dir(dir.path()).unwrap_err();
+    assert!(
+        second.contains("in use by another MyGraph process"),
+        "{second}"
+    );
+    drop(first);
+    mygraph_server::lock_data_dir(dir.path()).unwrap();
 }

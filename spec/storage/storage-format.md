@@ -23,6 +23,11 @@ kept in sync, the change-log diff format, the blob store and the data directory.
 lower than the implementation's format version, run the missing migrations in one transaction
 before use; if higher, open read-only or refuse.
 
+**[STORE-DIR-4]** One process at a time uses a data directory: it takes an exclusive lock on
+`<data_dir>/mygraph.lock` (created when missing) before opening any graph and holds it until it
+exits. When another process holds the lock it MUST refuse to start. (Each process keeps its own
+in-memory indexes; two writers would leave them out of step with the files.)
+
 ## 2. Column encodings
 
 **[STORE-COL-1]** Enumerations:

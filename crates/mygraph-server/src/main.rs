@@ -106,11 +106,22 @@ fn main() -> ExitCode {
                 eprintln!("mygraph: {e}");
                 return ExitCode::FAILURE;
             }
-            tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::new(&config.log))
-                .init();
+            if let Err(e) = init_logging(&config) {
+                eprintln!("mygraph: {e}");
+                return ExitCode::FAILURE;
+            }
             let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-            match runtime.block_on(async { serve(App::new(config)).await }) {
+            let lock = match mygraph_server::lock_data_dir(&config.data_dir) {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("{e}");
+                    eprintln!("mygraph: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let result = runtime.block_on(async { serve(App::new(config)).await });
+            drop(lock);
+            match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!("{e}");
@@ -136,6 +147,7 @@ async fn mcp_stdio(
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let mut local = None;
+    let mut _lock = None;
     let backend = match data_dir {
         Some(dir) => {
             mygraph_core::ids::validate_actor_name(&actor).map_err(|r| format!("--actor: {r}"))?;
@@ -144,6 +156,8 @@ async fn mcp_stdio(
                 config.default_graph = g;
             }
             config.validate()?;
+            // Held until this function returns, i.e. while stdin is open.
+            _lock = Some(mygraph_server::lock_data_dir(&config.data_dir)?);
             let app = App::new(config);
             app.preload();
             mygraph_server::spawn_maintenance(&app);
@@ -187,6 +201,30 @@ async fn mcp_stdio(
     if let Some(app) = local {
         let reg = app.registry.clone();
         let _ = tokio::task::spawn_blocking(move || reg.maintain()).await;
+    }
+    Ok(())
+}
+
+/// The console, or `log_file` (appended, without colours) when configured.
+fn init_logging(config: &Config) -> Result<(), String> {
+    let filter = tracing_subscriber::EnvFilter::new(&config.log);
+    match &config.log_file {
+        None => tracing_subscriber::fmt().with_env_filter(filter).init(),
+        Some(path) => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .with_writer(std::sync::Mutex::new(file))
+                .init();
+        }
     }
     Ok(())
 }

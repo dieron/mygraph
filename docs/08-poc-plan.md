@@ -276,6 +276,12 @@ Every milestone follows the spec-first workflow of
   checkpoint ran and the WAL reached 17 GB; and even with background checkpoints the WAL outgrew
   the database during a bulk load. Maintenance now skips a busy graph's text commit (checkpoints
   need no graph lock), and import runs a truncating checkpoint every 20 batches (WAL stays < 2.5 GB).
+- *Progress 2026-10-25 (local deployment):* `deploy/windows/deploy.ps1` installs or upgrades a
+  local instance (binary in `%LOCALAPPDATA%\MyGraph\bin`, own `server.toml`, data in
+  `%USERPROFILE%\mygraph-data`, log file) and registers a hidden logon task; upgrades rename the
+  running binary aside so MCP bridges keep working. A data folder is now locked by the process
+  that uses it ([STORE-DIR-4]); a second server on the same folder refuses to start. Claude Code's
+  `mygraph` MCP server points at the deployed binary. New config option `log_file`.
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

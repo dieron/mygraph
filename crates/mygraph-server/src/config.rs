@@ -17,6 +17,8 @@ pub struct Config {
     pub default_graph: String,
     /// `tracing` filter, e.g. `info` or `mygraph=debug`.
     pub log: String,
+    /// Append the log to this file instead of the console (for a server started at login).
+    pub log_file: Option<PathBuf>,
     /// Largest accepted request body ([API-HTTP-3]).
     pub max_body_bytes: usize,
     /// How long a request waits for a graph that is loading ([API-GRAPH-2]).
@@ -63,6 +65,7 @@ impl Default for Config {
             listen: SocketAddr::from(([127, 0, 0, 1], 7420)),
             default_graph: "default".to_owned(),
             log: "info".to_owned(),
+            log_file: None,
             max_body_bytes: 16 << 20,
             warmup_wait_ms: 2000,
             preload: true,
@@ -127,6 +130,7 @@ impl Config {
             "listen": self.listen.to_string(),
             "default_graph": self.default_graph,
             "log": self.log,
+            "log_file": self.log_file.as_ref().map(|p| p.display().to_string()),
             "max_body_bytes": self.max_body_bytes,
             "warmup_wait_ms": self.warmup_wait_ms,
             "preload": self.preload,

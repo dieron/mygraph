@@ -146,7 +146,7 @@ impl<S: Store> Graph<S> {
             if imp.chunk.len() >= CHUNK {
                 self.flush_import(&mut imp, me, now_ms)?;
                 flushed += 1;
-                if flushed % CHECKPOINT_EVERY == 0 {
+                if flushed.is_multiple_of(CHECKPOINT_EVERY) {
                     self.store.checkpoint().map_err(storage_error)?;
                 }
             }

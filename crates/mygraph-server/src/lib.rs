@@ -237,3 +237,24 @@ pub fn spawn_maintenance(app: &App) {
         }
     });
 }
+
+/// [STORE-DIR-4] Locks the data folder for this process; keep the file open while running.
+pub fn lock_data_dir(dir: &std::path::Path) -> Result<std::fs::File, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let path = dir.join("mygraph.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(format!(
+            "{} is in use by another MyGraph process (lock {})",
+            dir.display(),
+            path.display()
+        )),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("cannot lock {}: {e}", path.display())),
+    }
+}
