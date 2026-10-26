@@ -150,6 +150,7 @@ pub struct Graph<S: Store> {
     /// absent or stale (an update failed after a commit; reopening catches it up).
     text: Option<Arc<dyn TextIndex>>,
     text_stale: AtomicBool,
+    pub(crate) stats_cache: crate::stats::StatsCache,
 }
 
 impl<S: Store> Graph<S> {
@@ -164,6 +165,7 @@ impl<S: Store> Graph<S> {
             name: name.to_owned(),
             text: None,
             text_stale: AtomicBool::new(false),
+            stats_cache: Default::default(),
         })
     }
 

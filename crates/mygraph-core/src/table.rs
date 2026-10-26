@@ -75,6 +75,11 @@ impl<T> Table<T> {
         self.slots.iter().flatten()
     }
 
+    /// One past the highest number with a slot: the length of a dense per-record array.
+    pub fn end(&self) -> usize {
+        self.slots.len()
+    }
+
     /// Reserves room for numbers up to `max_idx`.
     pub fn reserve_to(&mut self, max_idx: i64) {
         if let Some(n) = slot(max_idx) {

@@ -8,7 +8,7 @@ requests are accepted. The full description is served at `GET /openapi.yaml`.
 ## Operations
 
 `POST /v1/graphs/{graph}/{operation}` with the operation's JSON body, for `overview`, `search`,
-`resolve`, `get`, `write`, `retract`, `merge`, `neighbors`, `paths`, `find`, `history`.
+`resolve`, `get`, `write`, `retract`, `merge`, `neighbors`, `paths`, `find`, `history`, `stats`.
 
 ```bash
 curl -s -X POST http://127.0.0.1:7420/v1/graphs/research/search -d '{"query": "lovelace"}'
@@ -24,6 +24,7 @@ Shorthands:
 | `GET /v1/graphs/{g}/nodes/{id}?include=links,support,evidence&detail=full` | `get` one object (also `links`, `evidence`, `citations`) |
 | `GET /v1/graphs/{g}/{collection}/{id}/history` | the object's history |
 | `GET /v1/graphs/{g}/changes?since_seq=…` | changes since |
+| `GET /v1/graphs/{g}/stats?sections=degree,evidence&top=5` | `stats` |
 | `GET /v1/graphs/{g}/evidence/{id}/content` | evidence text (`?from=&max_chars=`) |
 | `GET /v1/graphs/{g}/evidence/{id}/blob` | the evidence file |
 | `DELETE /v1/graphs/{g}/{collection}/{id}?reason=…` | retract |

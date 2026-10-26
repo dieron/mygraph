@@ -1,6 +1,6 @@
 ---
 name: mygraph
-description: How to use MyGraph, a knowledge graph where every fact cites its evidence, through its MCP tools (graphs, overview, search, resolve, get, write, retract, merge, neighbors, paths, find, history) or its REST API. Use this skill whenever the user mentions MyGraph, "the graph", "my knowledge graph", or asks to record, remember, store or ingest facts from an article, web page, document, transcript or conversation; to look up what is known about a person, organization, place or topic; to explain how two things are connected; to count, group or compare stored entities; to find the sources behind a claim; or to correct, merge or retract stored facts — even when they don't name the tools.
+description: How to use MyGraph, a knowledge graph where every fact cites its evidence, through its MCP tools (graphs, overview, search, resolve, get, write, retract, merge, neighbors, paths, find, history, stats) or its REST API. Use this skill whenever the user mentions MyGraph, "the graph", "my knowledge graph", or asks to record, remember, store or ingest facts from an article, web page, document, transcript or conversation; to look up what is known about a person, organization, place or topic; to explain how two things are connected; to count, group or compare stored entities; to find the sources behind a claim; or to correct, merge or retract stored facts — even when they don't name the tools.
 ---
 
 # MyGraph
@@ -110,6 +110,7 @@ evidence IDs** (e.g. "born 1815 [e_2]") so the user can check. Pick the tool by 
 | Lists, counts, statistics | `find` (filters, `group_by`, aggregates, `sort`) |
 | "Where does this claim come from?" | `get` the link or node with `include: {"evidence": {"limit": 10}, "support": true}`, then `get` the evidence with `include: {"content": true}` |
 | "What changed?" | `history` (`target`, or `since_seq` from a previous `last_seq`) |
+| "How big / connected / well sourced is the graph?" | `stats` (counts, degree and hubs, growth per day, evidence domains, uncited and most-cited evidence) |
 
 `find` example — people born before 1850 per country:
 

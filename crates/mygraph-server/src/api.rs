@@ -17,7 +17,7 @@ use std::sync::{Arc, PoisonError};
 use std::time::Instant;
 
 /// [API-OP-1] Operations that only read, and those that change the graph.
-const READS: [&str; 8] = [
+const READS: [&str; 9] = [
     "overview",
     "search",
     "resolve",
@@ -26,10 +26,11 @@ const READS: [&str; 8] = [
     "paths",
     "find",
     "history",
+    "stats",
 ];
 const WRITES: [&str; 3] = ["write", "retract", "merge"];
 
-type Params = Result<Query<Vec<(String, String)>>, QueryRejection>;
+pub type Params = Result<Query<Vec<(String, String)>>, QueryRejection>;
 pub type Body = Result<Bytes, BytesRejection>;
 
 pub fn json_body(v: &Json) -> impl IntoResponse + use<> {
@@ -167,6 +168,7 @@ pub async fn run(
                 "paths" => g.paths(&request),
                 "find" => g.find(&request),
                 "history" => g.history(&request),
+                "stats" => g.stats(&request, now_ms()),
                 _ => unreachable!("read operations"),
             },
         };
@@ -409,6 +411,7 @@ pub async fn get_named(
     let (label, r) = match name.as_str() {
         "search" => ("search", search_get(&app, &caller, &graph, params).await),
         "changes" => ("history", changes_get(&app, &caller, &graph, params).await),
+        "stats" => ("stats", stats_get(&app, &caller, &graph, params).await),
         _ => ("unknown", Err(api_not_found())),
     };
     finish(&app, label, Some(&graph), start, r)
@@ -433,6 +436,25 @@ async fn search_get(
         ("include_retracted", "include_retracted", Kind::Bool),
     ])?;
     ok(&run(app, caller, graph, "search", Json::Object(req)).await?)
+}
+
+/// The `stats` request of `GET /v1/graphs/{graph}/stats` and `GET /admin/graphs/{graph}/stats`.
+pub fn stats_query(params: Params) -> Result<Json, ApiError> {
+    let q = Q::new(params, &["sections", "days", "top"])?;
+    Ok(Json::Object(q.to_request(&[
+        ("sections", "sections", Kind::List),
+        ("days", "days", Kind::Int),
+        ("top", "top", Kind::Int),
+    ])?))
+}
+
+async fn stats_get(
+    app: &Arc<App>,
+    caller: &Caller,
+    graph: &str,
+    params: Params,
+) -> Result<Response, ApiError> {
+    ok(&run(app, caller, graph, "stats", stats_query(params)?).await?)
 }
 
 async fn changes_get(

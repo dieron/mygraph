@@ -22,6 +22,7 @@ of the design; the rest is planned.
 | `POST /admin/graphs/{graph}/restore` | `{"snapshot": file, "replace": bool}` | `GraphInfo` |
 | `POST /admin/graphs/{graph}/export` | — | `{"path": …, "bytes": n, "counts": {…}}` |
 | `POST /admin/graphs/{graph}/import` | `{"file": name}` | `GraphInfo` plus `imported` (counts) |
+| `GET /admin/graphs/{graph}/stats?sections=…&days=…&top=…` | — | `GraphStats` ([ADMIN-GRAPH-9]) |
 
 **[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes"}`, plus, when the
 graph is loaded (`status` `ready`): `counts` (as in [OP-OVER-2]), `policies`, `last_seq`, and
@@ -58,6 +59,20 @@ snapshot fails with `admin.snapshot_not_found`. The full-text cache of the name 
 ([EXP-4], [EXP-5]). When the graph does not exist it is created with the header's policies; an
 existing graph must have no objects and no history (`import.graph_not_empty`). A missing file fails
 with `admin.file_not_found`.
+
+**[ADMIN-GRAPH-9]** Statistics are the response of the `stats` operation
+([stats.md](operations/stats.md)) for the same `sections` (comma-separated), `days` and `top`,
+where `sections` may also name the admin-only sections below and defaults to all six. Invalid
+parameters fail with `stats.invalid_field`.
+
+- `actors`: `[{"actor", "kind", "batches", "last_batch_at", "created": {"nodes", "links",
+  "evidence", "citations"}, "retracted"}]`, one entry per known actor: the batches it wrote and
+  the time of its newest one (`null` when none), the objects it created whatever their status
+  now (by `created_by`), and the objects whose status is retracted and that it last updated (by
+  `updated_by`); by `batches` descending, then actor name.
+- `storage`: `{"file_bytes", "wal_bytes", "text_index_bytes", "text_index"}`: database and WAL
+  sizes as in [ADMIN-GRAPH-1], the total size of the files of the graph's full-text cache (0 when
+  there is none), and `text_index` as in [ADMIN-GRAPH-1].
 
 ## 2. Server
 

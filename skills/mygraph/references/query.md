@@ -1,7 +1,7 @@
 # Querying MyGraph — full reference
 
 Contents: 1. search · 2. resolve · 3. get · 4. neighbors · 5. paths · 6. find · 7. history ·
-8. overview · 9. Tips
+8. overview · 9. stats · 10. Tips
 
 Every tool takes an optional `graph` and `format` (`compact` text, default, or `json`).
 
@@ -138,7 +138,16 @@ oldest first; keep the returned `last_seq` and pass it next time to see only wha
 conventions. `{"type": "Person"}` — one type in depth: property keys with value kinds and fill rate,
 link patterns with the types at the other end, examples (statistics over a sample of up to 10 000).
 
-## 9. Tips
+## 9. stats
+
+`{}` — all four sections; `{"sections": ["degree"], "top": 5}` for one. `counts`: objects by
+status, number of types, the most used types. `degree`: links per node (min, max, mean, p50 / p90
+/ p99), orphans (no links) and the top hubs. `growth`: what was created and retracted per day
+(`days`, default 30). `evidence`: kinds, web domains, `uncited` (sources nothing cites — candidates
+to cite or retract) and the most-cited sources. Use it to judge a graph before relying on it, or
+to report how a graph is doing; for counts over your own filters use `find`.
+
+## 10. Tips
 
 - Get IDs from `search`/`resolve` first; most other tools take IDs or references.
 - Ask for what you need: `detail: "brief"`, small `limit`s, `include.links.types`. Results are

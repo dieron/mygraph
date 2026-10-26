@@ -177,7 +177,7 @@ impl<S: Store> Graph<S> {
         Ok(Json::Object(out))
     }
 
-    fn brief(&self, kind: ObjectKind, idx: i64) -> Json {
+    pub(crate) fn brief(&self, kind: ObjectKind, idx: i64) -> Json {
         let row: Row = self.state.get(kind, idx).expect("active object");
         let keep = BRIEF
             .iter()

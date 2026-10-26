@@ -314,7 +314,7 @@ Every milestone follows the spec-first workflow of
 ### M5 — Observability, feedback and viewing (M)
 Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenAPI entries first.
 
-- [ ] **Graph statistics in the admin API and the agent API.** Today only `counts` exist (in
+- [x] **Graph statistics in the admin API and the agent API.** Today only `counts` exist (in
   `GET /admin/graphs`, `GET /admin/graphs/{g}` and `overview`); `GET /admin/graphs/{g}/stats` from
   [07-admin-api.md §2](07-admin-api.md) is not built. First cut: `counts`, `degree` (min / max /
   mean / percentiles, top hubs, orphans), `growth` (per day, from the change log), `evidence` (by
@@ -322,6 +322,16 @@ Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenA
   blob sizes). `quality` and `usage` follow. The agent API gets a read-only `stats` operation (and
   MCP tool) with the graph-content sections only (no storage, keys or actors' activity), in the
   compact format. Must stay fast at 1 M nodes: compute from the RAM indexes, cache per `last_seq`.
+  - *Progress 2026-10-26:* done — spec `api/operations/stats.md` ([OP-STATS-1..6]) and
+    [ADMIN-GRAPH-9]; agent operation `stats` (REST `POST`/`GET /v1/graphs/{g}/stats`, MCP tool,
+    compact layout) with `counts`, `degree`, `growth`, `evidence`; admin
+    `GET /admin/graphs/{g}/stats` adds `actors` and `storage`. `growth` is computed from record
+    times (created per day; retracted per day = retracted objects by `updated_at`), not from the
+    change log, so it needs no scan of the log. On the 1 M graph (13 M records) a first call with
+    all four sections takes ~0.33 s (counts 10 ms, degree 90 ms, evidence 105 ms, growth 130 ms —
+    single sequential passes over dense arrays; a first version with per-node adjacency walks and
+    hash maps took 1.1 s), admin with all six ~0.45 s; repeated calls are served from a cache keyed
+    by (`last_seq`, UTC day) in ~1 ms until the next write. `quality` and `usage` are not built.
 - [ ] **Prometheus metrics, complete set.** `GET /metrics` today has request counts, latency
   histograms and object counts per graph. Add: graph state (loading / ready / failed) and warm-up
   time, writes and batches per graph, text-index pending docs and commit time, WAL and DB file

@@ -71,3 +71,8 @@ n_3kq Person "Ada Lovelace" · prop:born=1815-12-10
 
 `overview` lists counts, then node and link types as `Type count` separated by ` · `, policies,
 recent batches one per line, conventions, and with `type` the type's details.
+
+`stats` puts each section under a `# section` line: counts as `active: nodes 18432 · links …`,
+the degree summary on one line and hubs one per line with their degree, growth one line per day
+(`2026-10-25 +40 nodes +92 links … -1 links`), evidence domains and most-cited evidence one per
+line.

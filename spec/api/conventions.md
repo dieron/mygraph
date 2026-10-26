@@ -33,7 +33,7 @@ it may use (default: all).
 
 | Role | May call |
 |---|---|
-| `agent-read` | `/v1` reads: `overview`, `search`, `resolve`, `get`, `neighbors`, `paths`, `find`, `history`, and their `GET` shorthands |
+| `agent-read` | `/v1` reads: `overview`, `search`, `resolve`, `get`, `neighbors`, `paths`, `find`, `history`, `stats`, and their `GET` shorthands |
 | `agent-write` | everything `agent-read` may, plus `write`, `retract`, `merge` and the `DELETE` / restore shorthands |
 | `admin` | everything, including `/admin` |
 
@@ -68,7 +68,7 @@ graph are applied one at a time; reads run in parallel with each other.
 
 **[API-OP-1]** `POST /v1/graphs/{graph}/{operation}` runs an operation with the request body as its
 request, for `operation` one of `overview`, `search`, `resolve`, `get`, `write`, `retract`,
-`merge`, `neighbors`, `paths`, `find`, `history`. Any other name fails with `api.not_found`. A
+`merge`, `neighbors`, `paths`, `find`, `history`, `stats`. Any other name fails with `api.not_found`. A
 `graph` member in the body, if present, MUST equal the path's graph (otherwise
 `api.graph_mismatch`) and is removed before the operation sees the request.
 
@@ -85,6 +85,7 @@ values are comma-separated; integers and booleans (`true`/`false`) are parsed fr
 | `GET /v1/graphs/{graph}/search?q=…` | `search` with `query` = `q`, and `in`, `types` (lists), `mode`, `limit`, `include_retracted` | the response |
 | `GET /v1/graphs/{graph}/{collection}/{id}` | `get` with `refs: [id]`, and `detail`; `include` = list of `links`, `support`, `evidence`, `content` (others off; default: the operation's defaults); `links_limit`, `link_types`, `evidence_limit`, `include_retracted` | the single item (not wrapped in `items`) |
 | `GET /v1/graphs/{graph}/{collection}/{id}/history` | `history` with `target` = id, and `limit`, `before_seq` | the response |
+| `GET /v1/graphs/{graph}/stats` | `stats` with `sections` (list), `days`, `top` | the response |
 | `GET /v1/graphs/{graph}/changes?since_seq=…` | `history` with `since_seq` (default 0) and `limit` | the response |
 | `GET /v1/graphs/{graph}/evidence/{id}/content` | — | the inline content as `text/plain; charset=utf-8`; `from`, `max_chars` select a range in code points as in [OP-GET-7] |
 | `GET /v1/graphs/{graph}/evidence/{id}/blob` | — | the blob's bytes ([STORE-BLOB-1]) with the evidence's `mime` as `Content-Type` (default `application/octet-stream`) and `ETag: "<sha256>"` |

@@ -21,10 +21,11 @@ concept; everything else is planned.
 
 ## 2. Statistics
 
-`GET /admin/graphs/{g}/stats?sections=…` — each section can be requested separately. Not built
-yet: ✅ here marks the planned PoC scope, now milestone M5 of [08-poc-plan.md](08-poc-plan.md);
-today only `counts` exist (in the graph list, the graph info and `overview`). The graph-content
-sections are also exposed to agents as a read-only `stats` operation.
+`GET /admin/graphs/{g}/stats?sections=…&days=…&top=…` — each section can be requested
+separately ([spec/api/admin.md](../spec/api/admin.md) [ADMIN-GRAPH-9]). Built (M5): `counts`,
+`degree`, `growth`, `evidence`, `actors`, `storage`; the graph-content sections are also the agent
+operation `stats` ([spec/api/operations/stats.md](../spec/api/operations/stats.md)). Still to
+build: `quality` and `usage`.
 
 | Section | Contents | PoC |
 |---|---|:-:|

@@ -918,3 +918,136 @@ fn one_process_per_data_folder() {
     drop(first);
     mygraph_server::lock_data_dir(dir.path()).unwrap();
 }
+
+#[tokio::test]
+async fn stats_for_agents_and_admins() {
+    let s = server();
+    s.create_graph("research").await;
+    let g = "/v1/graphs/research";
+
+    // Empty graph ([OP-STATS-4]): every number 0.
+    let r = s.get(&format!("{g}/stats"), READER).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let e = r.json();
+    assert_eq!(e["degree"]["nodes"], 0);
+    assert_eq!(e["degree"]["hubs"], json!([]));
+    assert_eq!(e["growth"]["per_day"], json!([]));
+
+    let w = s
+        .post(&format!("{g}/write"), WRITER, ada_batch())
+        .await
+        .json();
+    let frag = w["refs"]["@frag"].as_str().unwrap().to_owned();
+    let r = s
+        .post(
+            &format!("{g}/write"),
+            WRITER,
+            json!({ "nodes": [{ "type": "Place", "name": "London", "cite": [frag] }] }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = s
+        .call(
+            Method::DELETE,
+            &format!("{g}/links/l_2"),
+            Some(WRITER),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    let st = s
+        .post(&format!("{g}/stats"), READER, json!({}))
+        .await
+        .json();
+    assert_eq!(st["graph"], "research");
+    // [OP-STATS-3]
+    let c = &st["counts"];
+    assert_eq!(c["active"]["nodes"], 4);
+    assert_eq!(c["active"]["links"], 1);
+    assert_eq!(c["retracted"]["links"], 1);
+    assert_eq!(c["merged"]["nodes"], 0);
+    assert_eq!(c["node_types"], 3);
+    assert_eq!(
+        c["top_node_types"][0],
+        json!({ "type": "Person", "count": 2 })
+    );
+    // [OP-STATS-4] Degrees 1, 1, 0, 0 after the retraction.
+    let d = &st["degree"];
+    assert_eq!(
+        (&d["nodes"], &d["max"], &d["mean"], &d["orphans"]),
+        (&json!(4), &json!(1), &json!(0.5), &json!(2))
+    );
+    assert_eq!((&d["p50"], &d["p90"]), (&json!(0), &json!(1)));
+    assert_eq!(d["hubs"][0]["id"], "n_1");
+    assert_eq!(d["hubs"][0]["degree"], 1);
+    assert_eq!(d["hubs"].as_array().unwrap().len(), 2);
+    // [OP-STATS-5] Everything happened today.
+    let gr = &st["growth"];
+    assert_eq!(gr["per_day"].as_array().unwrap().len(), 1);
+    assert_eq!(gr["per_day"][0]["day"], gr["to"]);
+    assert_eq!(gr["totals"]["created"]["nodes"], 4);
+    assert_eq!(gr["totals"]["created"]["links"], 2);
+    assert_eq!(gr["totals"]["retracted"]["links"], 1);
+    // [OP-STATS-6] The page is cited through its fragment.
+    let ev = &st["evidence"];
+    assert_eq!(ev["active"], 2);
+    assert_eq!(ev["uncited"], 0);
+    assert_eq!(
+        ev["domains"],
+        json!([{ "domain": "example.org", "count": 1 }])
+    );
+    assert_eq!(ev["most_cited"][0]["id"], frag.as_str());
+    assert_eq!(ev["most_cited"].as_array().unwrap().len(), 1);
+
+    // Shorthand with sections and top; admin-only sections are refused ([OP-STATS-1]).
+    let r = s
+        .get(&format!("{g}/stats?sections=degree&top=1"), READER)
+        .await
+        .json();
+    assert!(r.get("counts").is_none());
+    assert_eq!(r["degree"]["hubs"].as_array().unwrap().len(), 1);
+    for bad in [
+        json!({ "sections": ["actors"] }),
+        json!({ "sections": [] }),
+        json!({ "sections": ["degree", "degree"] }),
+        json!({ "days": 0 }),
+        json!({ "top": 101 }),
+        json!({ "colour": 1 }),
+    ] {
+        let r = s.post(&format!("{g}/stats"), READER, bad.clone()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(r.code(), "stats.invalid_field", "{bad}");
+    }
+
+    // [ADMIN-GRAPH-9] All six sections for admins only.
+    let r = s.get("/admin/graphs/research/stats", READER).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let a = s.get("/admin/graphs/research/stats", ADMIN).await;
+    assert_eq!(a.status, StatusCode::OK, "{}", a.text());
+    let a = a.json();
+    let agent = a["actors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["actor"] == "agent-a")
+        .unwrap()
+        .clone();
+    assert_eq!(agent["batches"], 3);
+    assert_eq!(agent["created"]["nodes"], 4);
+    assert!(agent["retracted"].as_u64().unwrap() >= 1);
+    assert_eq!(a["actors"][0]["actor"], "agent-a");
+    assert!(a["storage"]["file_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(a["storage"]["text_index"], st_text_index(&s).await);
+    let r = s
+        .get("/admin/graphs/research/stats?sections=storage", ADMIN)
+        .await
+        .json();
+    assert!(r.get("degree").is_none() && r.get("storage").is_some());
+    let r = s.get("/admin/graphs/research/nope", ADMIN).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+async fn st_text_index(s: &Server) -> Json {
+    s.get("/admin/graphs/research", ADMIN).await.json()["text_index"].clone()
+}

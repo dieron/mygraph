@@ -95,7 +95,10 @@ pub fn router(app: Arc<App>) -> Router {
             "/admin/graphs/{graph}",
             get(admin::get_graph).delete(admin::delete_graph),
         )
-        .route("/admin/graphs/{graph}/{action}", post(admin::graph_action))
+        .route(
+            "/admin/graphs/{graph}/{action}",
+            get(admin::graph_get).post(admin::graph_action),
+        )
         .route("/admin/{what}", get(admin::server_info))
         .fallback(|| async { api::api_not_found() })
         .method_not_allowed_fallback(|| async {

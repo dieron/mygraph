@@ -146,6 +146,8 @@ pub trait Store {
     fn recent_batches(&self, limit: usize) -> Result<Vec<BatchSummary>, StoreFailure>;
     /// Every vocabulary note.
     fn vocabulary_notes(&self) -> Result<Vec<VocabularyNote>, StoreFailure>;
+    /// For each actor that wrote a batch: (actor, number of batches, time of the newest).
+    fn actor_batches(&self) -> Result<Vec<(i64, i64, i64)>, StoreFailure>;
 }
 
 /// A full-text index kept outside the store (docs/05 §2, `TextIndex` seam): a rebuildable cache

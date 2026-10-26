@@ -11,6 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use mygraph_core::model::Policies;
+use mygraph_core::stats::{Section, StatsRequest};
 use mygraph_store_sqlite::GraphFile;
 use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
@@ -306,6 +307,59 @@ pub async fn graph_action(
     }
     .await;
     finish(&app, label, Some(&graph), start, r)
+}
+
+/// Total size of the files under `dir` (0 when it does not exist).
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|e| match e.file_type() {
+                Ok(t) if t.is_dir() => dir_size(&e.path()),
+                _ => e.metadata().map_or(0, |m| m.len()),
+            })
+            .sum()
+    })
+}
+
+/// `GET /admin/graphs/{graph}/stats` ([ADMIN-GRAPH-9]).
+pub async fn graph_get(
+    State(app): State<Arc<App>>,
+    Path((graph, what)): Path<(String, String)>,
+    caller: Caller,
+    params: crate::api::Params,
+) -> Response {
+    let start = Instant::now();
+    let r = async {
+        caller.require(Role::Admin)?;
+        if what != "stats" {
+            return Err(api_not_found());
+        }
+        let req = StatsRequest::parse(&crate::api::stats_query(params)?, &Section::ADMIN)?;
+        let storage = req.wants(Section::Storage);
+        let now = now_ms();
+        let mut body = with_graph(&app, &caller, &graph, Role::Admin, false, move |access| {
+            let g = access.graph();
+            let mut v = g.compute_stats(&req, now)?;
+            if storage {
+                v["storage"] = json!({ "text_index": g.text_index_status() });
+            }
+            Ok(v)
+        })
+        .await?;
+        if storage {
+            let dir = app.registry.data_dir();
+            let (file_bytes, wal_bytes) = GraphFile::file_sizes(dir, &graph);
+            let text_bytes = dir_size(&mygraph_text_tantivy::index_dir(dir, &graph));
+            let s = &mut body["storage"];
+            s["file_bytes"] = file_bytes.into();
+            s["wal_bytes"] = wal_bytes.into();
+            s["text_index_bytes"] = text_bytes.into();
+        }
+        Ok(json_body(&body).into_response())
+    }
+    .await;
+    finish(&app, "admin.stats", Some(&graph), start, r)
 }
 
 /// `GET /admin/stats`, `/admin/keys`, `/admin/config` ([ADMIN-SRV-1]).

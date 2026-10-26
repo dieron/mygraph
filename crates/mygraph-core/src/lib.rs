@@ -18,6 +18,7 @@ pub mod reason;
 pub mod resolve;
 mod search;
 pub mod state;
+pub mod stats;
 pub mod store;
 pub mod table;
 pub mod text;

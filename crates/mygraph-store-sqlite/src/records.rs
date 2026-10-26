@@ -605,6 +605,14 @@ impl Store for GraphFile {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    fn actor_batches(&self) -> Result<Vec<(i64, i64, i64)>, StoreFailure> {
+        let c = self.connection();
+        let mut st =
+            c.prepare_cached("SELECT actor, count(*), max(created_at) FROM batch GROUP BY actor")?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     fn vocabulary_notes(&self) -> Result<Vec<VocabularyNote>, StoreFailure> {
         let c = self.connection();
         let mut st =

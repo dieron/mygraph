@@ -24,7 +24,7 @@ of server-instructions.md. The server keeps no session state: every tool call st
 
 **[MCP-TOOL-1]** `tools/list` returns the tools of mcp-tools.json: `graphs` ([MCP-TOOL-4]) and one
 tool per operation — `overview`, `search`, `resolve`, `get`, `write`, `retract`, `merge`,
-`neighbors`, `paths`, `find`, `history` — each taking the operation's request members plus `graph`
+`neighbors`, `paths`, `find`, `history`, `stats` — each taking the operation's request members plus `graph`
 (optional) and `format` (optional).
 
 **[MCP-TOOL-2]** The graph is `graph` when given; otherwise the only graph the caller's key allows,

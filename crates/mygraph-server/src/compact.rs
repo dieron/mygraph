@@ -199,6 +199,18 @@ fn joined<'a>(v: Option<&'a Json>, f: impl Fn(&'a str, &'a Json) -> String) -> S
 pub fn render(op: &str, req: &Json, r: &Json) -> String {
     let mut out = String::new();
     let skip: &[&str] = match op {
+        "stats" => {
+            stats(&mut out, r);
+            &[
+                "graph",
+                "last_seq",
+                "computed_at",
+                "counts",
+                "degree",
+                "growth",
+                "evidence",
+            ]
+        }
         "overview" => {
             overview(&mut out, r);
             &[
@@ -578,6 +590,125 @@ fn path(out: &mut String, p: &Json) {
         let _ = write!(line, " · min sources {m}");
     }
     let _ = writeln!(out, "{line}");
+}
+
+/// Counts per kind in kind order: `nodes 1 · links 2 · …`, or with a `sign`, `+1 nodes +2 links`
+/// leaving out zeros.
+fn kinds_line(v: &Json, sign: &str) -> String {
+    let parts = ["nodes", "links", "evidence", "citations"]
+        .iter()
+        .filter_map(|k| {
+            let n = v.get(*k)?.as_u64()?;
+            match sign {
+                "" => Some(format!("{k} {n}")),
+                _ => (n > 0).then(|| format!("{sign}{n} {k}")),
+            }
+        })
+        .collect::<Vec<_>>();
+    parts.join(if sign.is_empty() { " · " } else { " " })
+}
+
+fn or_none(s: String) -> String {
+    if s.is_empty() { "none".into() } else { s }
+}
+
+fn stats(out: &mut String, r: &Json) {
+    let _ = writeln!(
+        out,
+        "graph {} · last_seq {} · at {}",
+        s(r, "graph").unwrap_or("?"),
+        r["last_seq"],
+        s(r, "computed_at").unwrap_or("?")
+    );
+    let counted = |v: &Json, key: &str, name: &str| -> String {
+        let list: Vec<String> = items(v, key)
+            .map(|t| format!("{} {}", s(t, name).unwrap_or("?"), t["count"]))
+            .collect();
+        or_none(list.join(" · "))
+    };
+    if let Some(c) = r.get("counts") {
+        out.push_str("# counts\n");
+        let _ = writeln!(out, "active: {}", kinds_line(&c["active"], ""));
+        let _ = writeln!(out, "retracted: {}", kinds_line(&c["retracted"], ""));
+        let _ = writeln!(
+            out,
+            "merged nodes {} · actors {} · node types {} · link types {}",
+            c["merged"]["nodes"], c["actors"], c["node_types"], c["link_types"]
+        );
+        let _ = writeln!(
+            out,
+            "top node types: {}",
+            counted(c, "top_node_types", "type")
+        );
+        let _ = writeln!(
+            out,
+            "top link types: {}",
+            counted(c, "top_link_types", "type")
+        );
+        let kinds = joined(c.get("evidence_kinds"), |k, v| format!("{k} {v}"));
+        let _ = writeln!(out, "evidence kinds: {}", or_none(kinds));
+    }
+    if let Some(d) = r.get("degree") {
+        out.push_str("# degree\n");
+        let _ = writeln!(
+            out,
+            "nodes {} · min {} · max {} · mean {} · p50 {} · p90 {} · p99 {} · orphans {}",
+            d["nodes"], d["min"], d["max"], d["mean"], d["p50"], d["p90"], d["p99"], d["orphans"]
+        );
+        for h in items(d, "hubs") {
+            let _ = writeln!(out, "{} {}", h["degree"], brief(h));
+        }
+    }
+    if let Some(g) = r.get("growth") {
+        let _ = writeln!(
+            out,
+            "# growth ({} days, {} .. {})",
+            g["days"],
+            s(g, "from").unwrap_or("?"),
+            s(g, "to").unwrap_or("?")
+        );
+        let line = |c: &Json, r: &Json| {
+            let parts = [kinds_line(c, "+"), kinds_line(r, "-")];
+            parts
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        if items(g, "per_day").next().is_none() {
+            out.push_str("no changes\n");
+        }
+        for day in items(g, "per_day") {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                s(day, "day").unwrap_or("?"),
+                line(&day["created"], &day["retracted"])
+            );
+        }
+        let total = line(&g["totals"]["created"], &g["totals"]["retracted"]);
+        if !total.is_empty() {
+            let _ = writeln!(out, "total {total}");
+        }
+    }
+    if let Some(e) = r.get("evidence") {
+        out.push_str("# evidence\n");
+        let b = &e["blobs"];
+        let _ = writeln!(
+            out,
+            "active {} · uncited {} · blobs {} ({} distinct, {} bytes)",
+            e["active"], e["uncited"], b["evidence"], b["distinct"], b["bytes"]
+        );
+        let kinds = joined(e.get("kinds"), |k, v| format!("{k} {v}"));
+        let _ = writeln!(out, "kinds: {}", or_none(kinds));
+        let _ = writeln!(out, "domains: {}", counted(e, "domains", "domain"));
+        if items(e, "most_cited").next().is_some() {
+            out.push_str("most cited:\n");
+            for m in items(e, "most_cited") {
+                let _ = writeln!(out, "{} {}", m["citations"], brief(m));
+            }
+        }
+    }
 }
 
 fn overview(out: &mut String, r: &Json) {

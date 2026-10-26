@@ -98,7 +98,7 @@ async fn mcp_over_http() {
     )
     .await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 13);
     assert!(
         tools
             .iter()
@@ -144,6 +144,22 @@ async fn mcp_over_http() {
     );
     let (_, text) = tool(&r, "overview", json!({})).await;
     assert!(text.contains("node types: Machine 1 · Person 1"), "{text}");
+    let (_, text) = tool(&r, "stats", json!({"sections": ["counts", "degree"]})).await;
+    assert!(
+        text.contains(
+            "# counts
+active: nodes 2 · links 1"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "# degree
+nodes 2 · min 1 · max 1"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("# growth"), "{text}");
     let (_, text) = tool(&r, "search", json!({"query": "lovelace", "format": "json"})).await;
     assert_eq!(
         serde_json::from_str::<Json>(&text).unwrap()["hits"][0]["id"],

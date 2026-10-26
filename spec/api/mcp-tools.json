@@ -130,6 +130,15 @@
         "target": {}, "since_seq": { "type": "integer", "minimum": 0 },
         "before_seq": { "type": "integer" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
       } }
+    },
+    {
+      "name": "stats",
+      "description": "Base statistics of the graph: counts by status and type, degree distribution and top hubs, growth per day, evidence by kind and web domain, uncited and most-cited evidence. Use it to judge how large, connected and well sourced a graph is.",
+      "inputSchema": { "type": "object", "properties": {
+        "sections": { "type": "array", "items": { "enum": ["counts", "degree", "growth", "evidence"] }, "description": "Sections to compute (default all)." },
+        "days": { "type": "integer", "minimum": 1, "maximum": 366, "description": "Days of growth to show (default 30)." },
+        "top": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Length of the top lists (default 10)." }
+      } }
     }
   ]
 }

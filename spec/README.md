@@ -92,6 +92,7 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 | [api/operations/search.md](api/operations/search.md), [get.md](api/operations/get.md), [algorithms/search-ranking.md](algorithms/search-ranking.md), [resolve.md](api/operations/resolve.md), [algorithms/resolve-scoring.md](algorithms/resolve-scoring.md), [neighbors.md](api/operations/neighbors.md), [paths.md](api/operations/paths.md), [algorithms/traversal.md](algorithms/traversal.md), [find.md](api/operations/find.md), [history.md](api/operations/history.md) | Draft | M2 |
 | [api/operations/overview.md](api/operations/overview.md), [api/conventions.md](api/conventions.md), [api/errors.md](api/errors.md), [api/admin.md](api/admin.md), [api/openapi.yaml](api/openapi.yaml) | Draft | M3 |
 | [api/mcp.md](api/mcp.md), [api/mcp-tools.json](api/mcp-tools.json), [api/server-instructions.md](api/server-instructions.md), [api/compact-format.md](api/compact-format.md), [api/export-format.md](api/export-format.md) | Draft | M3 |
+| [api/operations/stats.md](api/operations/stats.md) | Draft | M5 |
 | `api/schemas/` (full JSON Schemas per operation) | Planned | M3 |
 
 Status values: **Draft** (open for change) → **Review** (complete, being checked against the
