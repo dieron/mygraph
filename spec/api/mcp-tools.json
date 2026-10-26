@@ -5,6 +5,15 @@
   },
   "tools": [
     {
+      "name": "graphs",
+      "description": "The graphs on this server: list them (default action; shows which one the other tools use when you pass no `graph`), or create one with action \"create\" and a `name` (lowercase letters, digits, - and _). Every other tool works on one graph.",
+      "inputSchema": { "type": "object", "properties": {
+        "action": { "enum": ["list", "create"], "description": "Default list." },
+        "name": { "type": "string", "description": "For create: the new graph's name." },
+        "policies": { "type": "object", "description": "For create, optional: require_evidence (enforce | warn | off; default enforce), inline_text_limit, normalize_types." }
+      } }
+    },
+    {
       "name": "overview",
       "description": "What the graph holds: counts, node and link types in use, evidence kinds, policies, recent batches, naming conventions. Call first. With `type`, details of one node or link type (property keys and fill rates, link patterns, examples).",
       "inputSchema": { "type": "object", "properties": {

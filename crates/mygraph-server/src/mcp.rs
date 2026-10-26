@@ -36,10 +36,17 @@ fn tools() -> &'static Json {
             .iter()
             .map(|t| {
                 let mut t = t.clone();
+                let graphs_tool = t["name"] == "graphs";
                 let props = t["inputSchema"]["properties"]
                     .as_object_mut()
                     .expect("properties");
-                props.extend(common.clone());
+                // `graphs` works on the server, not on one graph.
+                props.extend(
+                    common
+                        .iter()
+                        .filter(|(k, _)| !(graphs_tool && *k == "graph"))
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
                 t
             })
             .collect();
@@ -101,6 +108,10 @@ pub async fn handle(backend: &Backend, msg: Json) -> Option<Json> {
 /// [MCP-TOOL-2] [MCP-TOOL-3]
 async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
     let name = params["name"].as_str().unwrap_or("");
+    if name == "graphs" {
+        let args = params["arguments"].as_object().cloned().unwrap_or_default();
+        return Ok(graphs_tool(backend, args).await);
+    }
     let op = crate::api::operation(name).ok_or((-32602, format!("unknown tool: {name}")))?;
     let mut args: Map<String, Json> = match params.get("arguments") {
         None | Some(Json::Null) => Map::new(),
@@ -170,7 +181,7 @@ async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
 
 fn tool_error(e: &ApiError) -> Json {
     let mut text = format!("error {}: {}", e.code, e.message);
-    if let Some(h) = hint_of(&e.code) {
+    if let Some(h) = mcp_hint(&e.code).or_else(|| hint_of(&e.code)) {
         text.push_str("\nhint: ");
         text.push_str(h);
     }
@@ -250,4 +261,133 @@ fn only_graph(url: &str, key: Option<&str>) -> Result<String, ApiError> {
             "several graphs are available: pass graph (or start mygraph mcp with --graph)",
         )),
     }
+}
+
+/// [MCP-TOOL-3] Hints that name tools, not REST routes.
+fn mcp_hint(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "graph.not_found" => {
+            "Call the graphs tool to list the graphs, or graphs with action \"create\" to make one."
+        }
+        "auth.missing_key" | "auth.invalid_key" => {
+            "The MCP server needs a valid API key (mygraph mcp --key, or MYGRAPH_KEY)."
+        }
+        "auth.forbidden" => {
+            "This key's role does not allow it; creating graphs needs an admin key."
+        }
+        "graph.warming_up" => "The graph is loading; call the tool again in a few seconds.",
+        _ => return None,
+    })
+}
+
+/// [MCP-TOOL-4] The `graphs` tool: list the graphs, or create one.
+async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
+    let json_format = args.remove("format").is_some_and(|f| f == "json");
+    let action = match args.remove("action") {
+        None => "list".to_owned(),
+        Some(Json::String(a)) => a,
+        Some(_) => String::new(),
+    };
+    let result: Result<Json, ApiError> = match (action.as_str(), backend) {
+        ("list", Backend::Local { app, caller }) => (|| {
+            caller.require(crate::config::Role::AgentRead)?;
+            let graphs: Vec<Json> = app
+                .registry
+                .list()
+                .into_iter()
+                .filter(|(n, _)| caller.may_use(n))
+                .map(|(n, s)| json!({ "name": n, "status": s.name() }))
+                .collect();
+            let default = match &caller.graphs {
+                Some(gs) if gs.len() == 1 => gs[0].clone(),
+                _ => app.config.default_graph.clone(),
+            };
+            Ok(with_default(graphs, Some(default)))
+        })(),
+        ("create", Backend::Local { app, caller }) => {
+            crate::admin::create(app, caller, &Json::Object(args))
+                .await
+                .map(|info| json!({ "created": info }))
+        }
+        (action @ ("list" | "create"), Backend::Remote { url, key, graph }) => {
+            let (url, key, graph) = (url.clone(), key.clone(), graph.clone());
+            let action = action.to_owned();
+            tokio::task::spawn_blocking(move || {
+                let base = url.trim_end_matches('/');
+                if action == "create" {
+                    let r = request(&format!("{base}/admin/graphs"), key.as_deref(), "POST")
+                        .set("Content-Type", "application/json")
+                        .send_string(&Json::Object(args).to_string());
+                    answer(r).map(|info| json!({ "created": info }))
+                } else {
+                    let list = answer(
+                        request(&format!("{base}/v1/graphs"), key.as_deref(), "GET").call(),
+                    )?;
+                    let graphs = list["graphs"].as_array().cloned().unwrap_or_default();
+                    let default = graph.or_else(|| match graphs.as_slice() {
+                        [one] => one["name"].as_str().map(str::to_owned),
+                        _ => None,
+                    });
+                    Ok(with_default(graphs, default))
+                }
+            })
+            .await
+            .unwrap_or_else(|e| Err(ApiError::new("internal", e.to_string())))
+        }
+        _ => Err(ApiError::new(
+            "mcp.invalid_action",
+            "action: expected \"list\" or \"create\"",
+        )),
+    };
+    match result {
+        Err(e) => tool_error(&e),
+        Ok(r) => {
+            let text = if json_format {
+                r.to_string()
+            } else {
+                graphs_text(&r)
+            };
+            json!({ "content": [{ "type": "text", "text": text }] })
+        }
+    }
+}
+
+/// The list with `default`: the graph tools use when a call names none (only if it exists).
+fn with_default(graphs: Vec<Json>, default: Option<String>) -> Json {
+    let default = default.filter(|d| graphs.iter().any(|g| g["name"] == d.as_str()));
+    json!({ "graphs": graphs, "default": default })
+}
+
+fn graphs_text(r: &Json) -> String {
+    if let Some(info) = r.get("created") {
+        return format!(
+            "created graph {} · policies {}\n",
+            info["name"].as_str().unwrap_or("?"),
+            info["policies"]
+        );
+    }
+    let default = r["default"].as_str();
+    let list: Vec<String> = r["graphs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|g| {
+            let name = g["name"].as_str().unwrap_or("?");
+            let mark = if Some(name) == default {
+                ", default"
+            } else {
+                ""
+            };
+            format!("{name} ({}{mark})", g["status"].as_str().unwrap_or("?"))
+        })
+        .collect();
+    let mut out = if list.is_empty() {
+        "no graphs yet: create one with action \"create\"\n".to_owned()
+    } else {
+        format!("graphs: {}\n", list.join(" · "))
+    };
+    if default.is_none() && !list.is_empty() {
+        out.push_str("no default graph: pass `graph` to the other tools\n");
+    }
+    out
 }

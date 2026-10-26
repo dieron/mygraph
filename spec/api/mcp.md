@@ -22,9 +22,10 @@ of server-instructions.md. The server keeps no session state: every tool call st
 
 ## 2. Tools
 
-**[MCP-TOOL-1]** `tools/list` returns the tools of mcp-tools.json: `overview`, `search`,
-`resolve`, `get`, `write`, `retract`, `merge`, `neighbors`, `paths`, `find`, `history`. Each takes
-the operation's request members plus `graph` (optional) and `format` (optional).
+**[MCP-TOOL-1]** `tools/list` returns the tools of mcp-tools.json: `graphs` ([MCP-TOOL-4]) and one
+tool per operation — `overview`, `search`, `resolve`, `get`, `write`, `retract`, `merge`,
+`neighbors`, `paths`, `find`, `history` — each taking the operation's request members plus `graph`
+(optional) and `format` (optional).
 
 **[MCP-TOOL-2]** The graph is `graph` when given; otherwise the only graph the caller's key allows,
 if it allows exactly one; otherwise the server's default graph. Roles and graph lists apply as in
@@ -34,7 +35,14 @@ if it allows exactly one; otherwise the server's default graph. Roles and graph 
 format ([compact-format.md](compact-format.md)), or with `format: "json"` the JSON response. A
 failed operation returns a result with `isError: true` and the text
 `error <code>: <message>` followed by `hint: …` when there is one ([ERR-4]) and the details as
-JSON when present. Unknown tools fail with JSON-RPC error `-32602`.
+JSON when present. Hints name tools rather than REST routes (for example `graph.not_found` points to
+the `graphs` tool). Unknown tools fail with JSON-RPC error `-32602`.
+
+**[MCP-TOOL-4]** `graphs` with `action` `list` (the default) returns the graphs the caller may use,
+each with its status, and `default`: the graph of [MCP-TOOL-2] when it exists, else `null`. With
+`action` `create` it creates the graph `name` with optional `policies`, as `POST /admin/graphs`
+([ADMIN-GRAPH-2]; admin role), and returns it as `created`. Compact text: `graphs: research (ready,
+default) · lab (unloaded)`; `created graph lab · policies {…}`.
 
 ## 3. Transports
 

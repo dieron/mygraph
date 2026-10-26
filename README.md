@@ -91,6 +91,16 @@ Streamable HTTP can use `http://127.0.0.1:7420/mcp` directly with `Authorization
 Without a server, `mygraph mcp --data-dir <dir>` opens the data folder itself. Tool results are
 compact text ([spec/api/compact-format.md](spec/api/compact-format.md)); pass `format: "json"` for JSON.
 
+## Agent skill
+
+[skills/mygraph/](skills/mygraph/SKILL.md) teaches an agent how to use MyGraph well: picking or creating a
+graph, recording one source per write with verbatim evidence, deduplicating with `resolve`, choosing
+the right query tool, citing evidence IDs in answers, and fixing mistakes. It is one folder in the
+Agent Skills format (`SKILL.md` + `references/`), which Claude, Codex, Cursor and GitHub Copilot
+read; only the install folder differs. `deploy/install-skill.ps1` copies it to `~/.claude/skills/`
+(Claude Code) and `~/.agents/skills/` (Codex, Cursor, Copilot) and builds `dist/mygraph-skill.zip`
+for upload in the Claude apps. Client connection snippets: [skills/mygraph/references/setup.md](skills/mygraph/references/setup.md).
+
 ## Using the REST API
 
 Every operation is `POST /v1/graphs/{graph}/{operation}` with the JSON request of its spec file

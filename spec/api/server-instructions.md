@@ -1,4 +1,4 @@
-This is MyGraph, a knowledge graph where every fact cites evidence. Start with `overview` to learn the graph's node types, link types and conventions, and reuse them.
+This is MyGraph, a knowledge graph where every fact cites evidence. A server holds several graphs: `graphs` lists them (and creates one for a new topic); every other tool works on one graph, given by `graph` or the default `graphs` shows. Start with `overview` to learn the graph's node types, link types and conventions, and reuse them.
 
 Before creating entities, check whether they exist: `resolve` takes many described names at once and says match, ambiguous or none for each; `search` finds by name, alias or text.
 

@@ -78,14 +78,14 @@ pub async fn list_graphs(State(app): State<Arc<App>>, caller: Caller) -> Respons
     finish(&app, "admin.list_graphs", None, start, r)
 }
 
-pub async fn create_graph(State(app): State<Arc<App>>, caller: Caller, body: Body) -> Response {
-    let start = Instant::now();
-    let r = async {
-        caller.require(Role::Admin)?;
-        let req = parse_body(body)?;
-        let req = req
-            .as_object()
-            .ok_or_else(|| bad("request: expected an object"))?;
+/// Creates a graph from `{"name", "policies"}` and returns its `GraphInfo` ([ADMIN-GRAPH-2]);
+/// shared by `POST /admin/graphs` and the MCP `graphs` tool.
+pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json, ApiError> {
+    caller.require(Role::Admin)?;
+    let req = req
+        .as_object()
+        .ok_or_else(|| bad("request: expected an object"))?;
+    {
         for k in req.keys() {
             if k != "name" && k != "policies" {
                 return Err(bad(format!("{k}: no such field")));
@@ -113,7 +113,15 @@ pub async fn create_graph(State(app): State<Arc<App>>, caller: Caller, body: Bod
             .filter(|p| p.validate().is_ok())
             .ok_or_else(|| ApiError::new("graph.policy_invalid", "invalid policies"))?;
         app.registry.create(name, &policies)?;
-        let info = graph_info(&app, &caller, name).await?;
+        graph_info(app, caller, name).await
+    }
+}
+
+pub async fn create_graph(State(app): State<Arc<App>>, caller: Caller, body: Body) -> Response {
+    let start = Instant::now();
+    let r = async {
+        let info = create(&app, &caller, &parse_body(body)?).await?;
+        let name = info["name"].as_str().unwrap_or_default().to_owned();
         let mut resp = (StatusCode::CREATED, json_body(&info)).into_response();
         if let Ok(loc) = HeaderValue::from_str(&format!("/admin/graphs/{name}")) {
             resp.headers_mut().insert(header::LOCATION, loc);

@@ -18,7 +18,7 @@ fn app(dir: &std::path::Path) -> axum::Router {
             key: Some("k".into()),
             key_sha256: None,
             actor: "claude".into(),
-            role: Role::AgentWrite,
+            role: Role::Admin,
             graphs: vec![],
         }],
         ..Config::default()
@@ -98,12 +98,27 @@ async fn mcp_over_http() {
     )
     .await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
     assert!(
         tools
             .iter()
+            .filter(|t| t["name"] != "graphs")
             .all(|t| t["inputSchema"]["properties"]["graph"].is_object())
     );
+
+    // [MCP-TOOL-4]
+    let (_, text) = tool(&r, "graphs", json!({})).await;
+    assert_eq!(
+        text,
+        "graphs: research (unloaded, default)
+"
+    );
+    let (err, text) = tool(&r, "graphs", json!({"action": "create", "name": "lab"})).await;
+    assert!(!err && text.starts_with("created graph lab"), "{text}");
+    let (_, text) = tool(&r, "graphs", json!({"format": "json"})).await;
+    let list: Json = serde_json::from_str(&text).unwrap();
+    assert_eq!(list["graphs"][0]["name"], "lab");
+    assert_eq!(list["default"], "research");
 
     // [MCP-TOOL-2] the default graph; [MCP-TOOL-3] compact text.
     let batch: Json = serde_json::from_str(BATCH).unwrap();
@@ -139,7 +154,7 @@ async fn mcp_over_http() {
     let (err, text) = tool(&r, "get", json!({"refs": ["n_1"], "graph": "nope"})).await;
     assert!(err);
     assert!(text.starts_with("error graph.not_found:"), "{text}");
-    assert!(text.contains("\nhint: "), "{text}");
+    assert!(text.contains("\nhint: Call the graphs tool"), "{text}");
     let (err, text) = tool(
         &r,
         "write",

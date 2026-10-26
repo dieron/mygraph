@@ -282,6 +282,17 @@ Every milestone follows the spec-first workflow of
   running binary aside so MCP bridges keep working. A data folder is now locked by the process
   that uses it ([STORE-DIR-4]); a second server on the same folder refuses to start. Claude Code's
   `mygraph` MCP server points at the deployed binary. New config option `log_file`.
+- *Progress 2026-10-25 (agent skill):* using MyGraph from the Claude desktop chat showed two gaps:
+  the MCP tools could not list or create graphs, and the `graph.not_found` hint pointed at a REST
+  route, so the agent went looking for REST. Added the MCP tool `graphs` (list with the default
+  graph, create; [MCP-TOOL-4]) and MCP-specific hints. Wrote the **`mygraph` skill**
+  (`skills/mygraph/`: SKILL.md with the session start, the one-write-per-source pattern, a
+  question → tool table, corrections, reading results; references for writes, queries, REST and
+  client setup) in the Agent Skills format shared by Claude, Codex, Cursor and Copilot, with
+  `deploy/install-skill.ps1`. Test: a headless Claude session with only the skill and the tools,
+  given a short Lviv guide text, created its own graph, recorded the source in one write (page +
+  one quote per fact, 7 nodes, 6 links, 13 citations), answered both questions with evidence IDs
+  and flagged where the source was vague — 10 turns, 42 s, no errors.
 
 ### M4 — Validation and report (M)
 - **Benchmarks** on the 1 M / 5 M / 1 M synthetic dataset (power-law degrees, realistic names,

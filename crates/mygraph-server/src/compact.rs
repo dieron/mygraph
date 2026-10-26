@@ -89,7 +89,10 @@ fn quiet(k: &str, v: &Json) -> bool {
     v.is_null()
         || v.as_array().is_some_and(Vec::is_empty)
         || (v == &Json::Bool(false)
-            && matches!(k, "truncated" | "more" | "dry_run" | "types_truncated"))
+            && matches!(
+                k,
+                "truncated" | "more" | "dry_run" | "types_truncated" | "multi"
+            ))
 }
 
 /// [CMP-4] The generic layout for the members of `o` not in `skip`.
