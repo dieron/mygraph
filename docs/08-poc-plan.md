@@ -25,7 +25,7 @@ spec-first workflow (ADR-012); all open questions answered
 | Upserts, resolve, merge, retract/restore, change log, history | Bi-temporal "as of record time" queries |
 | Search: exact, alias, prefix, fuzzy (FTS5 trigram), full text (FTS5) | tantivy / fst (unless the benchmark gate demands them) |
 | `find` with filters, group-by, aggregates, computed values | Graph algorithms (PageRank, communities…) |
-| Admin API subset marked PoC in [07-admin-api.md](07-admin-api.md) | Admin UI |
+| Admin API subset marked PoC in [07-admin-api.md](07-admin-api.md); internal stats page, read-only graph viewer, feedback API (M5) | Admin UI with editing |
 | API keys from config, limits, metrics, slow-op log | Per-graph permissions, OAuth |
 | JSONL export/import | Other import/export formats, URL snapshots, OCR |
 | Bench harness + synthetic data generator, agent trial | Replication, Postgres backend, S3 |
@@ -167,8 +167,8 @@ Every milestone follows the spec-first workflow of
   first draft scored every weak trigram neighbour (similarity 0.3) as plausible, so on a large
   graph almost nothing would come back `none`; the thresholds were raised before release (fuzzy
   name score `min(0.9, s + 0.2)`, plausible ≥ 0.6). On the 1 M graph a call with 20 candidates
-  takes ~130 ms p50 (exact names) and ~90 ms (names with a typo), measured while Synology Drive and
-  OneDrive kept the CPU ~77 % busy, which roughly doubled every timing that day. Keeping `target/`
+  takes ~130 ms p50 (exact names) and ~90 ms (names with a typo), measured while two file-sync
+  clients kept the CPU ~77 % busy, which roughly doubled every timing that day. Keeping `target/`
   and benchmark data outside synced folders is needed for clean numbers.
 - *Progress 2026-10-25 (rest of M2):* **`neighbors`**, **`paths`**, **`history`** and **`find`**
   specified (`algorithms/traversal.md`, `api/operations/{neighbors,paths,history,find}.md`; `find`
@@ -310,6 +310,43 @@ Every milestone follows the spec-first workflow of
   implements the pure functions (ID codec, normalization, value parsing, one ranking function) in
   Go or C# and runs the vectors. Every gap it hits is a spec bug to fix.
 - **PoC report:** results vs targets, lessons, updated roadmap.
+
+### M5 — Observability, feedback and viewing (M)
+Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenAPI entries first.
+
+- [ ] **Graph statistics in the admin API and the agent API.** Today only `counts` exist (in
+  `GET /admin/graphs`, `GET /admin/graphs/{g}` and `overview`); `GET /admin/graphs/{g}/stats` from
+  [07-admin-api.md §2](07-admin-api.md) is not built. First cut: `counts`, `degree` (min / max /
+  mean / percentiles, top hubs, orphans), `growth` (per day, from the change log), `evidence` (by
+  kind, by URL domain, most cited, citing nothing), `actors`, `storage` (DB / WAL / text index /
+  blob sizes). `quality` and `usage` follow. The agent API gets a read-only `stats` operation (and
+  MCP tool) with the graph-content sections only (no storage, keys or actors' activity), in the
+  compact format. Must stay fast at 1 M nodes: compute from the RAM indexes, cache per `last_seq`.
+- [ ] **Prometheus metrics, complete set.** `GET /metrics` today has request counts, latency
+  histograms and object counts per graph. Add: graph state (loading / ready / failed) and warm-up
+  time, writes and batches per graph, text-index pending docs and commit time, WAL and DB file
+  sizes, checkpoint runs, process RSS, MCP tool calls separate from REST, errors by code, build
+  info. Document every metric (name, type, labels) in `spec/api/admin.md`; add an example
+  Grafana dashboard under `deploy/`.
+- [ ] **Internal stats page.** `GET /admin/ui` (admin role): a server-rendered HTML page — no
+  build step, embedded in the binary — showing server info, graphs with status and counts, request
+  rates and latency percentiles, slow operations, recent batches and open feedback. Reads the same
+  data as the admin API; auto-refreshes.
+- [ ] **Feedback API.** Agents and users report problems with MyGraph itself — not facts about
+  the world. `POST /v1/feedback`
+  `{category: bug | suggestion | performance | data, title, description, context, graph?}` → id;
+  `GET /v1/feedback/{id}` (status + resolution note); `GET /v1/feedback/mine` (by the caller's
+  actor, not a free-text agent id). Admin: `GET /admin/feedback` (filters, paging),
+  `GET /admin/feedback/stats`, `PATCH /admin/feedback/{id}` (status open → acknowledged → resolved
+  / dismissed, resolution note). An MCP `feedback` tool, and the skill tells agents to use it when a
+  tool misbehaves or a hint is wrong. Stored server-wide (`<data_dir>/feedback.sqlite`), not inside
+  a graph. `context` carries the operation, request shape, error code and latency.
+- [ ] **Graph viewer (visual, read-only).** `GET /admin/ui/graph/{g}` (or a page linked from the
+  stats page): search a node, show its neighbourhood (Cytoscape.js or Sigma.js, loaded from the
+  binary, no CDN), expand on click, filter by node and link type, side panel with properties,
+  support and sources (evidence text and URL). Built only on existing operations (`search`,
+  `neighbors`, `get`); caps the drawn subgraph so a 1 M-node graph stays responsive. Editing stays
+  in Admin UI v1 ([09-roadmap.md](09-roadmap.md)).
 
 ## 4. Exit criteria
 

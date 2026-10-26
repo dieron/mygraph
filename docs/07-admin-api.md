@@ -21,7 +21,10 @@ concept; everything else is planned.
 
 ## 2. Statistics
 
-`GET /admin/graphs/{g}/stats?sections=…` — each section can be requested separately.
+`GET /admin/graphs/{g}/stats?sections=…` — each section can be requested separately. Not built
+yet: ✅ here marks the planned PoC scope, now milestone M5 of [08-poc-plan.md](08-poc-plan.md);
+today only `counts` exist (in the graph list, the graph info and `overview`). The graph-content
+sections are also exposed to agents as a read-only `stats` operation.
 
 | Section | Contents | PoC |
 |---|---|:-:|
@@ -72,8 +75,24 @@ concept; everything else is planned.
 | `POST /admin/log-level` | Change log level at runtime | |
 | `GET /admin/slow-ops` | Recent slow operations with request shapes | ✅ |
 
-## 6. Admin UI (later)
+## 6. Feedback (M5)
 
-Dashboard (stats sections above), graph explorer (interactive visualization, e.g. Cytoscape.js or
-Sigma.js), evidence viewer (content, fragments in context, blobs), duplicate review queue,
-vocabulary manager, change-log browser with undo. Built on this API only.
+Agents and users report problems with MyGraph itself.
+Submitting and tracking needs any role; triage needs `admin`.
+
+| Endpoint | Purpose | PoC |
+|---|---|:-:|
+| `POST /v1/feedback` | Submit `{category: bug \| suggestion \| performance \| data, title, description, context, graph?}` → id | ✅ M5 |
+| `GET /v1/feedback/{id}` · `GET /v1/feedback/mine` | Status and resolution note; the caller's own tickets | ✅ M5 |
+| `GET /admin/feedback` · `GET /admin/feedback/stats` | List with filters and paging; counts by category and status | ✅ M5 |
+| `PATCH /admin/feedback/{id}` | Status (open → acknowledged → resolved / dismissed) and resolution note | ✅ M5 |
+
+## 7. Admin UI
+
+**PoC (M5):** an internal stats page (`GET /admin/ui`, server-rendered, embedded in the binary) and
+a read-only graph viewer (neighbourhood view with Cytoscape.js or Sigma.js, properties and sources
+in a side panel).
+
+**Later (Admin UI v1):** dashboard over all stats sections, evidence viewer (content, fragments in
+context, blobs), duplicate review queue, vocabulary manager, change-log browser with undo, editing
+in the graph viewer. Built on this API only.

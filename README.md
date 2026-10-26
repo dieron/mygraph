@@ -61,9 +61,9 @@ cargo build --release -p mygraph-server
 powershell -ExecutionPolicy Bypass -File deploy/windows/deploy.ps1
 ```
 
-The script copies the binary to `%LOCALAPPDATA%MyGraphin`, writes
-`%LOCALAPPDATA%MyGraphserver.toml` on first install (data in `%USERPROFILE%mygraph-data`, port
-7420, log in `%LOCALAPPDATA%MyGraphogsmygraph.log`), registers the scheduled task "MyGraph
+The script copies the binary to `%LOCALAPPDATA%\MyGraph\bin`, writes
+`%LOCALAPPDATA%\MyGraph\server.toml` on first install (data in `%USERPROFILE%\mygraph-data`, port
+7420, log in `%LOCALAPPDATA%\MyGraph\logs\mygraph.log`), registers the scheduled task "MyGraph
 server" that starts it hidden at logon, and starts it. `-Uninstall` stops it and removes the task
 (data stays). Only one process may use a data folder at a time ([STORE-DIR-4]), so development
 runs need their own `--data-dir` and `--listen`.

@@ -16,7 +16,7 @@ Order within a phase is a suggestion; the PoC report and real usage will re-rank
 | **Evidence** | URL snapshots into the blob store; link-rot checks; text extraction from HTML/PDF into fragment evidence; OCR for images |
 | **Access** | Per-graph permissions; OAuth for remote MCP; read-only agent keys; per-actor views |
 | **Operations** | Fast startup from binary index snapshots; snapshot (MVCC) reads; group commit; purge; undo of a batch; vocabulary rename |
-| **Admin UI v1** | Dashboard, graph explorer, evidence viewer, duplicate review, vocabulary manager |
+| **Admin UI v1** | Dashboard, evidence viewer, duplicate review, vocabulary manager, editing in the graph explorer (the stats page and a read-only graph viewer come earlier, in PoC M5) |
 | **Interop** | Import: MCP memory-server JSONL, Neo4j CSV, generic CSV. Export: GraphML, RDF-star, W3C PROV-O |
 | **Packaging** | Claude Code plugin/skill that installs the server and its usage guidance; installers for Windows/Linux/macOS; Docker image |
 
