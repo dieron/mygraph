@@ -187,3 +187,8 @@ the defaults below were accepted as proposed.
 | 5 | Clients | Claude Code first; REST for custom agents; Claude Desktop through the same MCP server |
 | 6 | Repository | Initialize git here, local only until you choose a remote |
 | 7 | Name | Keep "MyGraph" as the working name |
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Contributions are accepted under the same terms.
