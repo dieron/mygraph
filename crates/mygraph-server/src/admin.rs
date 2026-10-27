@@ -362,7 +362,8 @@ pub async fn graph_get(
     finish(&app, "admin.stats", Some(&graph), start, r)
 }
 
-/// `GET /admin/stats`, `/admin/keys`, `/admin/config` ([ADMIN-SRV-1]).
+/// `GET /admin/stats`, `/admin/slow-ops`, `/admin/keys`, `/admin/config` ([ADMIN-SRV-1],
+/// [ADMIN-SRV-2]).
 pub async fn server_info(
     State(app): State<Arc<App>>,
     Path(what): Path<String>,
@@ -379,10 +380,13 @@ pub async fn server_info(
                     .map(|(n, s)| (n, s.name().into()))
                     .collect();
                 json!({
-                    "uptime_s": app.started.elapsed().as_secs(), "graphs": graphs,
-                    "requests": app.metrics.summary(),
+                    "uptime_s": app.started.elapsed().as_secs(), "versions": crate::versions(),
+                    "memory_bytes": crate::resident_bytes(), "slow_ms": app.config.slow_ms,
+                    "graphs": graphs, "requests": app.metrics.summary(),
                 })
             }
+            // [ADMIN-SRV-2]
+            "slow-ops" => json!({ "slow_ms": app.config.slow_ms, "ops": app.metrics.slow_ops() }),
             "keys" => app.keys.redacted(),
             "config" => app.config.redacted(),
             _ => return Err(api_not_found()),

@@ -99,6 +99,7 @@ pub fn router(app: Arc<App>) -> Router {
             "/admin/graphs/{graph}/{action}",
             get(admin::graph_get).post(admin::graph_action),
         )
+        .route("/admin/ui", get(stats_page))
         .route("/admin/{what}", get(admin::server_info))
         .fallback(|| async { api::api_not_found() })
         .method_not_allowed_fallback(|| async {
@@ -134,30 +135,86 @@ async fn ready(State(app): State<Arc<App>>) -> Response {
     (status, Json(json!({ "ready": all, "graphs": states }))).into_response()
 }
 
+/// Resident memory of this process, where the platform reports it.
+pub fn resident_bytes() -> Option<u64> {
+    memory_stats::memory_stats().map(|m| m.physical_mem as u64)
+}
+
+/// [ADMIN-MET-1] A loaded graph busy with a long write (an import) is not waited for.
 async fn metrics(State(app): State<Arc<App>>) -> Response {
     let mut graphs = Vec::new();
     for (name, state) in app.registry.list() {
-        if let SlotState::Ready(h) = state {
-            let counts = tokio::task::spawn_blocking(move || {
-                h.read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .as_ref()
-                    .map(|g| g.counts())
-            })
-            .await
-            .ok()
-            .flatten();
-            if let Some(c) = counts {
-                graphs.push((name, c));
+        let loaded = match &state {
+            SlotState::Ready(h) => {
+                let h = h.clone();
+                tokio::task::spawn_blocking(move || {
+                    let g = match h.try_read() {
+                        Ok(g) => g,
+                        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                        Err(std::sync::TryLockError::WouldBlock) => return None,
+                    };
+                    g.as_ref().map(|g| metrics::LoadedMetrics {
+                        counts: g.counts(),
+                        last_seq: g.last_seq(),
+                        text: match g.text_index_status() {
+                            "none" => None,
+                            status => Some((
+                                g.text_handle().map_or(0, |t| t.pending()),
+                                status == "stale",
+                            )),
+                        },
+                    })
+                })
+                .await
+                .ok()
+                .flatten()
             }
-        }
+            _ => None,
+        };
+        graphs.push(metrics::GraphMetrics {
+            file_bytes: mygraph_store_sqlite::GraphFile::file_sizes(app.registry.data_dir(), &name),
+            run: app.registry.run(&name),
+            state: state.name(),
+            name,
+            loaded,
+        });
     }
+    let process = metrics::ProcessMetrics {
+        version: env!("CARGO_PKG_VERSION"),
+        spec: mygraph_core::SPEC_VERSION,
+        storage_format: mygraph_core::STORAGE_FORMAT_VERSION,
+        uptime_s: app.started.elapsed().as_secs_f64(),
+        resident_bytes: resident_bytes(),
+    };
     (
         [(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/plain; version=0.0.4"),
         )],
-        app.metrics.prometheus(&graphs),
+        app.metrics.prometheus(&process, &graphs),
+    )
+        .into_response()
+}
+
+/// [ADMIN-UI-1] The stats page: static, no data in it; its script reads the admin API.
+async fn stats_page() -> Response {
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            ),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(
+                    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
+                     connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; \
+                     frame-ancestors 'none'",
+                ),
+            ),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        include_str!("../ui/stats.html"),
     )
         .into_response()
 }
@@ -223,8 +280,7 @@ async fn mcp_http(State(app): State<Arc<App>>, caller: auth::Caller, body: api::
         Some(r) => Json(r).into_response(),
         None => StatusCode::ACCEPTED.into_response(),
     };
-    app.metrics
-        .record("mcp", resp.status().as_u16(), start.elapsed());
+    api::observe(&app, "mcp", None, resp.status().as_u16(), start, None);
     resp
 }
 

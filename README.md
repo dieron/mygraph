@@ -68,6 +68,16 @@ server" that starts it hidden at logon, and starts it. `-Uninstall` stops it and
 (data stays). Only one process may use a data folder at a time ([STORE-DIR-4]), so development
 runs need their own `--data-dir` and `--listen`.
 
+## Watching a running server
+
+- `http://127.0.0.1:7420/admin/ui` — the stats page: graphs, request statistics, slow requests,
+  and per graph its counts, growth, connectivity, evidence and recent batches. With API keys
+  configured it asks for an admin key (kept for the browser session only).
+- `GET /metrics` — Prometheus metrics, every one listed in
+  [spec/api/admin.md](spec/api/admin.md) (ADMIN-MET-1).
+- `GET /admin/stats`, `GET /admin/slow-ops`, `GET /admin/graphs/{g}/stats` — the same numbers as
+  JSON; agents get graph statistics through the `stats` tool.
+
 ## Backups and moving data
 
 - `POST /admin/graphs/{g}/snapshot` copies the database online into `<data_dir>/snapshots/`;

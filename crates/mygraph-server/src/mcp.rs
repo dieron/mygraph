@@ -147,7 +147,15 @@ async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
                 Some(gs) if gs.len() == 1 => gs[0].clone(),
                 _ => app.config.default_graph.clone(),
             });
-            crate::api::run(app, caller, &graph, op, Json::Object(args)).await
+            let start = std::time::Instant::now();
+            let r = crate::api::run(app, caller, &graph, op, Json::Object(args)).await;
+            let (status, code) = match &r {
+                Ok(_) => (200, None),
+                Err(e) => (e.status().as_u16(), Some(e.code.as_str())),
+            };
+            let label = format!("mcp.{op}");
+            crate::api::observe(app, &label, Some(&graph), status, start, code);
+            r
         }
         Backend::Remote {
             url,

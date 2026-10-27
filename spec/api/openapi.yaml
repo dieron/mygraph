@@ -550,12 +550,36 @@ paths:
   /admin/stats:
     get:
       tags: [admin]
-      summary: Uptime, graph states, request statistics
+      summary: Uptime, versions, memory, graph states, request statistics
       operationId: adminStats
       responses:
         "200": { $ref: "#/components/responses/Operation" }
         "4XX": { $ref: "#/components/responses/Error" }
         "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/slow-ops:
+    get:
+      tags: [admin]
+      summary: Recent slow requests (admin.md [ADMIN-SRV-2])
+      operationId: adminSlowOps
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/ui:
+    get:
+      tags: [admin]
+      summary: Stats page (admin.md [ADMIN-UI-1]); the page reads the admin API with the user's key
+      operationId: adminUi
+      security: []
+      responses:
+        "200":
+          description: An HTML page.
+          content:
+            text/html:
+              schema: { type: string }
+        "4XX": { $ref: "#/components/responses/Error" }
 
   /admin/keys:
     get:
@@ -609,7 +633,7 @@ paths:
   /metrics:
     get:
       tags: [service]
-      summary: Prometheus metrics
+      summary: Prometheus metrics (admin.md [ADMIN-MET-1])
       operationId: metrics
       security: []
       responses:

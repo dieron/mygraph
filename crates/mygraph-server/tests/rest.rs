@@ -650,6 +650,21 @@ async fn admin_manages_graphs() {
         m.contains("mygraph_objects{graph=\"lab\",kind=\"nodes\"} 1"),
         "{m}"
     );
+    // [ADMIN-MET-1]
+    for line in [
+        "mygraph_graph_state{graph=\"lab\",state=\"ready\"} 1",
+        "mygraph_graph_last_seq{graph=\"lab\"} ",
+        "mygraph_graph_file_bytes{graph=\"lab\",file=\"db\"} ",
+        "mygraph_graph_load_seconds{graph=\"lab\"} ",
+        "mygraph_build_info{version=\"",
+        "mygraph_uptime_seconds ",
+        "mygraph_checkpoints_total{graph=\"lab\",outcome=\"ok\"} ",
+        "mygraph_errors_total{code=\"graph.exists\"} 1",
+    ] {
+        assert!(m.contains(line), "{line} in {m}");
+    }
+    assert!(stats["versions"]["spec_version"].is_string());
+    assert!(stats["slow_ms"].is_u64());
 
     // [ADMIN-GRAPH-3]
     let r = s
@@ -1050,4 +1065,50 @@ async fn stats_for_agents_and_admins() {
 
 async fn st_text_index(s: &Server) -> Json {
     s.get("/admin/graphs/research", ADMIN).await.json()["text_index"].clone()
+}
+
+#[tokio::test]
+async fn slow_requests_and_the_stats_page() {
+    // Every request is slow with slow_ms = 0 ([ADMIN-SRV-2]).
+    let s = server_with(|c| c.slow_ms = 0);
+    s.create_graph("lab").await;
+    s.get("/v1/graphs/nope", READER).await;
+    let r = s.get("/admin/slow-ops", ADMIN).await.json();
+    assert_eq!(r["slow_ms"], 0);
+    let ops = r["ops"].as_array().unwrap();
+    assert_eq!(ops[0]["op"], "overview");
+    assert_eq!(ops[0]["graph"], "nope");
+    assert_eq!(ops[0]["status"], 404);
+    assert!(ops.iter().any(|o| o["op"] == "admin.create_graph"));
+    let m = s.call(Method::GET, "/metrics", None, None).await.text();
+    assert!(
+        m.contains("mygraph_slow_requests_total{op=\"overview\"} 1"),
+        "{m}"
+    );
+    assert!(
+        m.contains("mygraph_errors_total{code=\"graph.not_found\"} 1"),
+        "{m}"
+    );
+    let r = s.get("/admin/slow-ops", READER).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // [ADMIN-UI-1] The page needs no key and loads nothing from elsewhere.
+    let r = s.call(Method::GET, "/admin/ui", None, None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    let csp = r.headers["content-security-policy"].to_str().unwrap();
+    assert!(
+        csp.contains("default-src 'none'") && csp.contains("connect-src 'self'"),
+        "{csp}"
+    );
+    let page = r.text();
+    assert!(page.contains("/admin/graphs"));
+    for external in ["src=\"http", "href=\"http", "@import", "fetch(\"http"] {
+        assert!(!page.contains(external), "{external}");
+    }
 }

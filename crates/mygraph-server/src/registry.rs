@@ -37,6 +37,18 @@ impl SlotState {
     }
 }
 
+/// Background work per graph since the server started, for `/metrics` ([ADMIN-MET-1]).
+#[derive(Debug, Clone, Default)]
+pub struct GraphRun {
+    pub load_s: Option<f64>,
+    pub text_commits: u64,
+    pub text_commit_errors: u64,
+    pub text_commit_s: f64,
+    pub checkpoints: u64,
+    pub checkpoint_errors: u64,
+    pub checkpoint_s: f64,
+}
+
 pub struct Registry {
     data_dir: PathBuf,
     text_index: bool,
@@ -44,6 +56,7 @@ pub struct Registry {
     slots: Mutex<BTreeMap<String, Arc<watch::Sender<SlotState>>>>,
     /// Background WAL checkpoints of the loaded graphs.
     checkpointers: Mutex<BTreeMap<String, Arc<Checkpointer>>>,
+    runs: Mutex<BTreeMap<String, GraphRun>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -80,6 +93,7 @@ impl Registry {
             warmup_wait,
             slots: Mutex::new(slots),
             checkpointers: Mutex::new(BTreeMap::new()),
+            runs: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -93,6 +107,15 @@ impl Registry {
             .iter()
             .map(|(n, s)| (n.clone(), s.borrow().clone()))
             .collect()
+    }
+
+    /// Background work of `name` since the server started.
+    pub fn run(&self, name: &str) -> GraphRun {
+        lock(&self.runs).get(name).cloned().unwrap_or_default()
+    }
+
+    fn update_run(&self, name: &str, f: impl FnOnce(&mut GraphRun)) {
+        f(lock(&self.runs).entry(name.to_owned()).or_default());
     }
 
     pub fn state(&self, name: &str) -> Option<SlotState> {
@@ -138,6 +161,14 @@ impl Registry {
     }
 
     fn load(&self, name: &str) -> Result<G, String> {
+        let start = std::time::Instant::now();
+        let g = self.open_graph(name)?;
+        let took = start.elapsed().as_secs_f64();
+        self.update_run(name, |r| r.load_s = Some(took));
+        Ok(g)
+    }
+
+    fn open_graph(&self, name: &str) -> Result<G, String> {
         let file = GraphFile::open(&self.data_dir, name).map_err(|e| e.to_string())?;
         let policies = file.policies().map_err(|e| e.to_string())?;
         let mut g = Graph::open(file, name, policies).map_err(|e| e.to_string())?;
@@ -205,6 +236,7 @@ impl Registry {
                 format!("graph {name} exists"),
             ));
         }
+        let start = std::time::Instant::now();
         let file =
             GraphFile::create(&self.data_dir, name, policies, now_ms()).map_err(store_err)?;
         let mut g =
@@ -225,6 +257,13 @@ impl Registry {
                 Some(g),
             ))))),
         );
+        let took = start.elapsed().as_secs_f64();
+        self.update_run(name, |r| {
+            *r = GraphRun {
+                load_s: Some(took),
+                ..GraphRun::default()
+            }
+        });
         Ok(())
     }
 
@@ -290,10 +329,20 @@ impl Registry {
                 }
                 Err(std::sync::TryLockError::WouldBlock) => continue,
             };
-            if let Some(t) = text
-                && t.pending() > 0
-                && let Err(e) = t.commit()
-            {
+            let Some(t) = text.filter(|t| t.pending() > 0) else {
+                continue;
+            };
+            let start = std::time::Instant::now();
+            let result = t.commit();
+            let took = start.elapsed().as_secs_f64();
+            self.update_run(&name, |r| {
+                r.text_commit_s += took;
+                match &result {
+                    Ok(()) => r.text_commits += 1,
+                    Err(_) => r.text_commit_errors += 1,
+                }
+            });
+            if let Err(e) = result {
                 tracing::warn!(graph = %name, "full-text index commit failed, search falls back to FTS5: {e}");
                 if let Some(g) = h.read().unwrap_or_else(PoisonError::into_inner).as_ref() {
                     g.mark_text_stale();
@@ -322,7 +371,17 @@ impl Registry {
             .map(|(n, c)| (n.clone(), c.clone()))
             .collect();
         for (name, c) in all {
-            if let Err(e) = c.run() {
+            let start = std::time::Instant::now();
+            let result = c.run();
+            let took = start.elapsed().as_secs_f64();
+            self.update_run(&name, |r| {
+                r.checkpoint_s += took;
+                match &result {
+                    Ok(()) => r.checkpoints += 1,
+                    Err(_) => r.checkpoint_errors += 1,
+                }
+            });
+            if let Err(e) = result {
                 tracing::warn!(graph = %name, "checkpoint failed: {e}");
             }
         }

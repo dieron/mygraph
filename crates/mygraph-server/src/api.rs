@@ -52,16 +52,32 @@ pub fn finish(
     r: Result<Response, ApiError>,
 ) -> Response {
     let resp = r.unwrap_or_else(IntoResponse::into_response);
+    let code = resp
+        .extensions()
+        .get::<crate::error::ErrorCode>()
+        .map(|c| c.0.as_str());
+    observe(app, op, graph, resp.status().as_u16(), start, code);
+    resp
+}
+
+/// Records a finished request in the metrics and the log ([ADMIN-SRV-1], [ADMIN-SRV-2]).
+pub fn observe(
+    app: &App,
+    op: &str,
+    graph: Option<&str>,
+    status: u16,
+    start: Instant,
+    code: Option<&str>,
+) {
     let took = start.elapsed();
-    let status = resp.status().as_u16();
-    app.metrics.record(op, status, took);
     let ms = took.as_secs_f64() * 1000.0;
-    if ms >= app.config.slow_ms as f64 {
+    let slow = ms >= app.config.slow_ms as f64;
+    app.metrics.record(op, graph, status, took, code, slow);
+    if slow {
         tracing::warn!(op, graph, status, ms, "slow request");
     } else {
         tracing::debug!(op, graph, status, ms, "request");
     }
-    resp
 }
 
 fn ok(v: &Json) -> Result<Response, ApiError> {

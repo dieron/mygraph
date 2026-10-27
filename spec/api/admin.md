@@ -78,9 +78,55 @@ parameters fail with `stats.invalid_field`.
 
 | Route | Answer |
 |---|---|
-| `GET /admin/stats` | `{"uptime_s", "graphs": {name: status}, "requests": {operation: {"count", "errors", "mean_ms", "max_ms"}}}` |
+| `GET /admin/stats` | `{"uptime_s", "versions", "memory_bytes", "slow_ms", "graphs": {name: status}, "requests": {operation: {"count", "errors", "mean_ms", "max_ms"}}}` |
+| `GET /admin/slow-ops` | `{"slow_ms": n, "ops": [{"at", "op", "graph", "status", "ms"}]}` ([ADMIN-SRV-2]) |
 | `GET /admin/keys` | `{"keys": [{"key_id", "actor", "role", "graphs"}]}` — `key_id` is the first 8 hex digits of the key's SHA-256; keys themselves are never shown |
 | `GET /admin/config` | The effective configuration without key material |
 
 **[ADMIN-SRV-1]** Request statistics count since the server started, by operation name (or route
-name for shorthands and admin routes). They are informative.
+name for shorthands and admin routes; `mcp.<tool>` for MCP tool calls, `mcp` for the JSON-RPC
+messages that carry them). They are informative. `versions` is as in `GET /health`;
+`memory_bytes` is the process's resident memory, `null` where the platform does not report it;
+`slow_ms` is the configured slow-request threshold.
+
+**[ADMIN-SRV-2]** Requests that took at least `slow_ms` are kept in memory, newest first, at most
+the last 50: their time, operation name, graph (`null` for none), HTTP status (for MCP tool calls,
+the status the same REST call would have had) and duration in milliseconds.
+
+## 3. Metrics
+
+**[ADMIN-MET-1]** `GET /metrics` (no authentication; bind the server to loopback or put it behind
+a proxy when that matters) answers the Prometheus text format, version 0.0.4. Metric names and
+labels below are stable within a spec version; values are informative. Per-graph metrics cover
+every graph the server knows; those marked *loaded* only appear while the graph is loaded (and are
+left out for a graph busy with a long write at that moment).
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `mygraph_build_info` | gauge | `version`, `spec`, `storage_format` | Always 1 |
+| `mygraph_uptime_seconds` | gauge | — | Seconds since the server started |
+| `mygraph_process_resident_bytes` | gauge | — | Resident memory (absent where not reported) |
+| `mygraph_requests_total` | counter | `op`, `status` (`2xx` … `5xx`) | Requests by operation name as in [ADMIN-SRV-1] |
+| `mygraph_request_duration_seconds` | histogram | `op` | Request latency |
+| `mygraph_errors_total` | counter | `code` | Error answers by error code ([ERR-1]), REST and MCP |
+| `mygraph_slow_requests_total` | counter | `op` | Requests over `slow_ms` |
+| `mygraph_graph_state` | gauge | `graph`, `state` | 1 for the graph's current state (`unloaded`, `loading`, `ready`, `failed`) |
+| `mygraph_graph_load_seconds` | gauge | `graph` | Duration of the graph's last load |
+| `mygraph_graph_file_bytes` | gauge | `graph`, `file` (`db`, `wal`) | Database and write-ahead log sizes |
+| `mygraph_objects` | gauge | `graph`, `kind` | Active objects (*loaded*) |
+| `mygraph_graph_last_seq` | gauge | `graph` | Latest change-log sequence number (*loaded*) |
+| `mygraph_text_index_pending` | gauge | `graph` | Updates not yet committed to the full-text index (*loaded*, with an index) |
+| `mygraph_text_index_stale` | gauge | `graph` | 1 when search fell back to the store's own full text (*loaded*, with an index) |
+| `mygraph_text_commits_total` | counter | `graph`, `outcome` (`ok`, `error`) | Background full-text commits |
+| `mygraph_text_commit_seconds_total` | counter | `graph` | Time spent in them |
+| `mygraph_checkpoints_total` | counter | `graph`, `outcome` | Background WAL checkpoints |
+| `mygraph_checkpoint_seconds_total` | counter | `graph` | Time spent in them |
+
+## 4. Stats page
+
+**[ADMIN-UI-1]** `GET /admin/ui` answers an HTML page that shows the server's state: versions,
+uptime, memory, graphs with status, counts and sizes, request statistics, slow requests, and for
+a chosen graph its statistics ([ADMIN-GRAPH-9]) and recent batches. The page itself contains no
+data and needs no authentication: script in the browser reads the routes of this file and
+`overview`, sending the API key the user enters (kept for the browser session only) or none when
+the server has no keys. It loads nothing from other origins. Its layout is informative.

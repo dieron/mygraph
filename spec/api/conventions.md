@@ -111,5 +111,6 @@ transport adds the body-size limit of [API-HTTP-3]. Per-request time budgets are
 |---|---|---|
 | `GET /health` | none | `200` `{"status": "ok", "server_version", "spec_version", "storage_format_version"}` while the process runs |
 | `GET /ready` | none | `200` when every graph found at start is ready, else `503`; body `{"ready": bool, "graphs": {name: status}}` |
-| `GET /metrics` | none | Prometheus text format: request counts and latency histograms per operation, object counts per graph |
+| `GET /metrics` | none | Prometheus text format ([ADMIN-MET-1]) |
+| `GET /admin/ui` | none (the page reads the admin API with the user's key) | The stats page ([ADMIN-UI-1]) |
 | `GET /openapi.yaml` | none | [openapi.yaml](openapi.yaml) |

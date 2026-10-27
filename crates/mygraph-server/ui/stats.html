@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyGraph stats</title>
+<!-- spec/api/admin.md [ADMIN-UI-1]: no data in this file; the script reads the admin API. -->
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d232b; --muted: #66707d; --line: #e3e6ea;
+    --accent: #2f6fdf; --good: #1f8a4c; --warn: #b7791f; --bad: #c53030; --bar: #2f6fdf;
+    --bar2: #d0574a; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --panel: #1a1f26; --ink: #e6e9ee; --muted: #9aa4b1; --line: #2a313a;
+      --accent: #6f9dff; --good: #4cc584; --warn: #e2b04a; --bad: #f07167; --bar: #6f9dff;
+      --bar2: #f07167; --chip: #242b34;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: baseline;
+           padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+  header .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); }
+  header .facts b { color: var(--ink); font-weight: 600; }
+  header .right { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); }
+  main { padding: 16px 20px 40px; display: grid; gap: 16px; max-width: 1400px; margin: 0 auto; }
+  .grid2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  .grid3 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 14px 16px; min-width: 0; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+               margin: 0 0 10px; font-weight: 600; display: flex; gap: 10px; align-items: center; }
+  section h2 .grow { flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+  tr.pick { cursor: pointer; }
+  tr.pick:hover td { background: var(--chip); }
+  tr.on td { background: var(--chip); font-weight: 600; }
+  .scroll { overflow: auto; max-height: 360px; }
+  .badge { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 12px;
+           background: var(--chip); }
+  .ready, .current, .ok { color: var(--good); } .loading, .unloaded { color: var(--warn); }
+  .failed, .stale, .err { color: var(--bad); }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .big { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 10px; }
+  .big div { display: flex; flex-direction: column; }
+  .big b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .big span { color: var(--muted); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .list { margin: 0; padding: 0; list-style: none; }
+  .list li { padding: 3px 0; border-bottom: 1px dashed var(--line); display: flex; gap: 10px; }
+  .list li .n { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .id { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--muted); }
+  svg text { fill: var(--muted); font-size: 10px; }
+  button, select, input { font: inherit; color: var(--ink); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  #banner { display: none; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--bad);
+            color: var(--bad); background: var(--panel); }
+  #keybox { display: none; gap: 8px; align-items: center; }
+  #keybox input { width: 260px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
+        vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MyGraph</h1>
+  <div class="facts" id="facts"></div>
+  <div class="right">
+    <form id="keybox"><input id="key" type="password" placeholder="Admin API key" autocomplete="off">
+      <button type="submit">Use key</button></form>
+    <label><input type="checkbox" id="auto" checked> auto-refresh</label>
+    <button id="refresh" type="button">Refresh</button>
+    <span id="stamp"></span>
+  </div>
+</header>
+<main>
+  <div id="banner"></div>
+  <section>
+    <h2>Graphs <span class="grow"></span><span class="muted" style="text-transform:none">click a row for details</span></h2>
+    <div class="scroll"><table id="graphs"></table></div>
+  </section>
+  <div class="grid2">
+    <section><h2>Requests since start</h2><div class="scroll"><table id="requests"></table></div></section>
+    <section><h2>Slow requests <span class="grow"></span><span class="muted" id="slowms" style="text-transform:none"></span></h2>
+      <div class="scroll"><table id="slow"></table></div></section>
+  </div>
+  <div id="detail" style="display:none; gap:16px" class="grid3-wrap">
+    <section style="margin-bottom:16px">
+      <h2 id="gtitle">Graph <span class="grow"></span>
+        <label style="text-transform:none">growth window
+          <select id="days"><option>7</option><option selected>30</option><option>90</option><option>366</option></select></label></h2>
+      <div class="big" id="gcounts"></div>
+      <div id="growth"></div>
+    </section>
+    <div class="grid3">
+      <section><h2>Connectivity</h2><dl class="kv" id="degree"></dl><h2 style="margin-top:12px">Hubs</h2><ul class="list" id="hubs"></ul></section>
+      <section><h2>Evidence</h2><dl class="kv" id="evidence"></dl><h2 style="margin-top:12px">Domains</h2><ul class="list" id="domains"></ul></section>
+      <section><h2>Most cited</h2><ul class="list" id="cited"></ul></section>
+      <section><h2>Types</h2><ul class="list" id="types"></ul></section>
+      <section><h2>Actors</h2><div class="scroll"><table id="actors"></table></div></section>
+      <section><h2>Storage</h2><dl class="kv" id="storage"></dl></section>
+    </div>
+    <section style="margin-top:16px"><h2>Recent batches</h2><div class="scroll"><table id="batches"></table></div></section>
+  </div>
+</main>
+<script>
+"use strict";
+// Every value from the server is put into the page as text (textContent), never as HTML:
+// node names and evidence titles are written by agents.
+const $ = (id) => document.getElementById(id);
+// Kept as a reference: the graph title is rebuilt around it on every refresh.
+const daysSel = $("days");
+let key = null;
+try { key = sessionStorage.getItem("mygraph.key"); } catch (e) { /* storage blocked */ }
+let selected = null;
+try { selected = sessionStorage.getItem("mygraph.graph"); } catch (e) {}
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v; else if (k === "onclick") e.onclick = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k !== null && k !== undefined) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); return node; }
+const num = (n) => (n === null || n === undefined) ? "–" : Number(n).toLocaleString();
+function bytes(n) {
+  if (n === null || n === undefined) return "–";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; let v = Number(n);
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(v < 10 ? 2 : 1)) + " " + u[i];
+}
+function ago(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m ${Math.floor(s % 60)}s`;
+}
+function brief(o) {
+  const label = o.name ?? o.title ?? o.uri ?? o.kind ?? "";
+  return [el("span", { class: "id" }, o.id), " ", o.type ? el("span", { class: "muted" }, o.type + " ") : null, label];
+}
+function kv(node, pairs) {
+  clear(node);
+  for (const [k, v] of pairs) node.append(el("dt", {}, k), el("dd", {}, v));
+}
+function table(node, head, rows, numeric) {
+  clear(node);
+  node.append(el("tr", {}, ...head.map((h, i) => el("th", { class: numeric.includes(i) ? "num" : "" }, h))));
+  for (const r of rows) {
+    const tr = el("tr", r.attrs || {}, ...r.cells.map((c, i) => el("td", { class: numeric.includes(i) ? "num" : "" }, c)));
+    node.append(tr);
+  }
+  if (!rows.length) node.append(el("tr", {}, el("td", { class: "muted", colspan: head.length }, "none")));
+}
+
+async function api(path) {
+  const headers = key ? { Authorization: "Bearer " + key } : {};
+  const r = await fetch(path, { headers });
+  if (r.status === 401 || r.status === 403) {
+    $("keybox").style.display = "flex";
+    const e = new Error(r.status === 401 ? "This server needs an admin API key." : "This key is not an admin key.");
+    e.auth = true; throw e;
+  }
+  const body = await r.json();
+  if (!r.ok) throw new Error((body.error && body.error.message) || r.statusText);
+  return body;
+}
+
+function banner(msg) {
+  const b = $("banner");
+  b.style.display = msg ? "block" : "none";
+  b.textContent = msg || "";
+}
+
+async function loadServer() {
+  const [stats, list, slow] = await Promise.all([api("/admin/stats"), api("/admin/graphs"), api("/admin/slow-ops")]);
+  $("keybox").style.display = "none";
+  const v = stats.versions || {};
+  clear($("facts")).append(
+    el("span", {}, "server ", el("b", {}, v.server_version)),
+    el("span", {}, "spec ", el("b", {}, v.spec_version)),
+    el("span", {}, "up ", el("b", {}, ago(stats.uptime_s))),
+    el("span", {}, "memory ", el("b", {}, bytes(stats.memory_bytes))),
+  );
+  const graphs = list.graphs || [];
+  if (!selected && graphs.length) selected = graphs[0].name;
+  table($("graphs"),
+    ["Graph", "Status", "Nodes", "Links", "Evidence", "Citations", "Last seq", "Database", "WAL", "Text index"],
+    graphs.map((g) => ({
+      attrs: { class: "pick" + (g.name === selected ? " on" : ""), onclick: () => select(g.name) },
+      cells: [g.name, el("span", { class: "badge " + g.status }, g.status),
+        num(g.counts?.nodes), num(g.counts?.links), num(g.counts?.evidence), num(g.counts?.citations),
+        num(g.last_seq), bytes(g.file_bytes), bytes(g.wal_bytes),
+        g.text_index ? el("span", { class: g.text_index }, g.text_index) : "–"],
+    })), [2, 3, 4, 5, 6, 7, 8]);
+  const reqs = Object.entries(stats.requests || {}).sort((a, b) => b[1].count - a[1].count);
+  table($("requests"), ["Operation", "Calls", "Errors", "Mean ms", "Max ms"],
+    reqs.map(([op, r]) => ({ cells: [op, num(r.count),
+      r.errors ? el("span", { class: "err" }, num(r.errors)) : "0", r.mean_ms, r.max_ms] })), [1, 2, 3, 4]);
+  $("slowms").textContent = `over ${slow.slow_ms} ms, last 50`;
+  table($("slow"), ["When", "Operation", "Graph", "Status", "ms"],
+    (slow.ops || []).map((s) => ({ cells: [String(s.at).replace("T", " ").slice(0, 19), s.op, s.graph ?? "–",
+      el("span", { class: s.status >= 400 ? "err" : "" }, s.status), s.ms] })), [3, 4]);
+  return graphs;
+}
+
+function select(name) {
+  selected = name;
+  try { sessionStorage.setItem("mygraph.graph", name); } catch (e) {}
+  refresh();
+}
+
+function growthChart(g) {
+  const box = clear($("growth"));
+  const days = [];
+  const byDay = new Map((g.per_day || []).map((d) => [d.day, d]));
+  const from = new Date(g.from + "T00:00:00Z");
+  for (let i = 0; i < g.days; i++) {
+    const d = new Date(from.getTime() + i * 86400000).toISOString().slice(0, 10);
+    const e = byDay.get(d);
+    const sum = (o) => o ? o.nodes + o.links + o.evidence + o.citations : 0;
+    days.push({ day: d, created: sum(e?.created), retracted: sum(e?.retracted) });
+  }
+  const max = Math.max(1, ...days.map((d) => d.created + d.retracted));
+  const W = 900, H = 120, pad = 22, bw = (W - pad) / days.length;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H + 16}`);
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "objects created and retracted per day");
+  const rect = (x, y, w, h, fill, title) => {
+    const r = document.createElementNS(ns, "rect");
+    for (const [k, v] of Object.entries({ x, y, width: Math.max(w, 1), height: h, fill, rx: 1.5 })) r.setAttribute(k, v);
+    const t = document.createElementNS(ns, "title"); t.textContent = title; r.append(t);
+    svg.append(r);
+  };
+  const text = (x, y, s, anchor) => {
+    const t = document.createElementNS(ns, "text");
+    t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("text-anchor", anchor || "start");
+    t.textContent = s; svg.append(t);
+  };
+  days.forEach((d, i) => {
+    const x = pad + i * bw + 1, w = bw - 2;
+    const hc = d.created / max * H, hr = d.retracted / max * H;
+    const tip = `${d.day}: +${d.created.toLocaleString()} created, -${d.retracted.toLocaleString()} retracted`;
+    if (d.created) rect(x, H - hc - hr, w, hc, "var(--bar)", tip);
+    if (d.retracted) rect(x, H - hr, w, hr, "var(--bar2)", tip);
+  });
+  text(0, 10, num(max)); text(0, H, "0");
+  text(pad, H + 13, g.from); text(W, H + 13, g.to, "end");
+  const t = g.totals || {};
+  const line = (o) => o ? `${num(o.nodes)} nodes · ${num(o.links)} links · ${num(o.evidence)} evidence · ${num(o.citations)} citations` : "–";
+  box.append(
+    el("div", { class: "legend" },
+      el("span", {}, el("span", { class: "sw", style: "background:var(--bar)" }), "created: " + line(t.created)),
+      el("span", {}, el("span", { class: "sw", style: "background:var(--bar2)" }), "retracted: " + line(t.retracted))),
+    svg);
+}
+
+async function loadGraph(name, graphs) {
+  const info = graphs.find((g) => g.name === name);
+  const detail = $("detail");
+  if (!info || info.status !== "ready") { detail.style.display = "none"; return; }
+  const days = daysSel.value;
+  const enc = encodeURIComponent(name);
+  const [s, o] = await Promise.all([
+    api(`/admin/graphs/${enc}/stats?days=${days}&top=10`),
+    api(`/v1/graphs/${enc}?recent=15&types_limit=1`),
+  ]);
+  detail.style.display = "block";
+  clear($("gtitle")).append(`Graph ${name}`, el("span", { class: "grow" }),
+    el("span", { class: "muted", style: "text-transform:none" }, `last seq ${num(s.last_seq)} · computed ${String(s.computed_at).slice(11, 19)} UTC `),
+    el("label", { style: "text-transform:none" }, " growth window ", daysSel));
+  const c = s.counts;
+  clear($("gcounts")).append(...[
+    ["nodes", c.active.nodes], ["links", c.active.links], ["evidence", c.active.evidence],
+    ["citations", c.active.citations], ["node types", c.node_types], ["link types", c.link_types],
+    ["retracted", c.retracted.nodes + c.retracted.links + c.retracted.evidence + c.retracted.citations],
+    ["merged nodes", c.merged.nodes], ["actors", c.actors],
+  ].map(([k, v]) => el("div", {}, el("b", {}, num(v)), el("span", {}, k))));
+  growthChart(s.growth);
+  const d = s.degree;
+  kv($("degree"), [["nodes", num(d.nodes)], ["links per node", `mean ${d.mean} · median ${num(d.p50)}`],
+    ["p90 / p99 / max", `${num(d.p90)} / ${num(d.p99)} / ${num(d.max)}`], ["orphans (no links)", num(d.orphans)]]);
+  clear($("hubs")).append(...(d.hubs.length ? d.hubs.map((h) => el("li", {}, ...brief(h), el("span", { class: "n" }, num(h.degree))))
+    : [el("li", { class: "muted" }, "none")]));
+  const e = s.evidence;
+  kv($("evidence"), [["active", num(e.active)], ["uncited", num(e.uncited)],
+    ["kinds", Object.entries(e.kinds).map(([k, n]) => `${k} ${num(n)}`).join(" · ") || "–"],
+    ["blobs", `${num(e.blobs.evidence)} (${num(e.blobs.distinct)} distinct, ${bytes(e.blobs.bytes)})`]]);
+  clear($("domains")).append(...(e.domains.length ? e.domains.map((x) => el("li", {}, x.domain, el("span", { class: "n" }, num(x.count))))
+    : [el("li", { class: "muted" }, "none")]));
+  clear($("cited")).append(...(e.most_cited.length ? e.most_cited.map((x) => el("li", {}, ...brief(x), el("span", { class: "n" }, num(x.citations))))
+    : [el("li", { class: "muted" }, "none")]));
+  clear($("types")).append(
+    ...c.top_node_types.map((t) => el("li", {}, t.type, el("span", { class: "muted" }, " node"), el("span", { class: "n" }, num(t.count)))),
+    ...c.top_link_types.map((t) => el("li", {}, t.type, el("span", { class: "muted" }, " link"), el("span", { class: "n" }, num(t.count)))));
+  table($("actors"), ["Actor", "Kind", "Batches", "Created", "Retracted", "Last batch"],
+    s.actors.map((a) => ({ cells: [a.actor, a.kind, num(a.batches),
+      num(a.created.nodes + a.created.links + a.created.evidence + a.created.citations), num(a.retracted),
+      a.last_batch_at ? String(a.last_batch_at).replace("T", " ").slice(0, 19) : "–"] })), [2, 3, 4]);
+  const st = s.storage;
+  kv($("storage"), [["database", bytes(st.file_bytes)], ["write-ahead log", bytes(st.wal_bytes)],
+    ["full-text index", bytes(st.text_index_bytes)], ["text index state", st.text_index]]);
+  table($("batches"), ["Batch", "When", "Actor", "Operation", "Changes", "Note"],
+    (o.recent || []).map((b) => ({ cells: [el("span", { class: "id" }, b.batch), String(b.at).replace("T", " ").slice(0, 19),
+      b.actor, b.op, num(b.changes), b.note ?? ""] })), [4]);
+}
+
+let busy = false;
+async function refresh() {
+  if (busy) return;
+  busy = true;
+  try {
+    const graphs = await loadServer();
+    if (selected) await loadGraph(selected, graphs);
+    banner(null);
+    $("stamp").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    banner(e.auth ? e.message + " Enter it above (kept for this browser session only)." : "Could not load: " + e.message);
+  } finally {
+    busy = false;
+  }
+}
+
+$("keybox").onsubmit = (ev) => {
+  ev.preventDefault();
+  key = $("key").value.trim() || null;
+  try { if (key) sessionStorage.setItem("mygraph.key", key); else sessionStorage.removeItem("mygraph.key"); } catch (e) {}
+  $("key").value = "";
+  refresh();
+};
+$("refresh").onclick = refresh;
+daysSel.onchange = refresh;
+setInterval(() => { if ($("auto").checked && !document.hidden) refresh(); }, 10000);
+refresh();
+</script>
+</body>
+</html>

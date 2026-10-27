@@ -160,6 +160,17 @@ nodes 2 · min 1 · max 1"
         "{text}"
     );
     assert!(!text.contains("# growth"), "{text}");
+    // [ADMIN-SRV-1] Tool calls are counted per tool.
+    let req = Request::get("/metrics").body(Body::empty()).unwrap();
+    let resp = r.clone().oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let m = String::from_utf8_lossy(&body);
+    assert!(
+        m.contains("mygraph_requests_total{op=\"mcp.stats\",status=\"2xx\"} 1"),
+        "{m}"
+    );
     let (_, text) = tool(&r, "search", json!({"query": "lovelace", "format": "json"})).await;
     assert_eq!(
         serde_json::from_str::<Json>(&text).unwrap()["hits"][0]["id"],

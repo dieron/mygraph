@@ -332,16 +332,35 @@ Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenA
     single sequential passes over dense arrays; a first version with per-node adjacency walks and
     hash maps took 1.1 s), admin with all six ~0.45 s; repeated calls are served from a cache keyed
     by (`last_seq`, UTC day) in ~1 ms until the next write. `quality` and `usage` are not built.
-- [ ] **Prometheus metrics, complete set.** `GET /metrics` today has request counts, latency
+- [x] **Prometheus metrics, complete set.** `GET /metrics` today has request counts, latency
   histograms and object counts per graph. Add: graph state (loading / ready / failed) and warm-up
   time, writes and batches per graph, text-index pending docs and commit time, WAL and DB file
   sizes, checkpoint runs, process RSS, MCP tool calls separate from REST, errors by code, build
   info. Document every metric (name, type, labels) in `spec/api/admin.md`; add an example
   Grafana dashboard under `deploy/`.
-- [ ] **Internal stats page.** `GET /admin/ui` (admin role): a server-rendered HTML page — no
+  - *Progress 2026-10-27:* done except the Grafana dashboard. [ADMIN-MET-1] lists 18 metrics:
+    build info, uptime, resident memory; requests and latency per operation (MCP tool calls as
+    `mcp.<tool>`, separate from REST), errors by code, slow requests; per graph: state, last load
+    time, DB and WAL bytes, active objects, `last_seq` (writes show as its growth), full-text
+    pending updates and stale flag, background full-text commits and WAL checkpoints (count and
+    time). `/metrics` no longer waits for a graph busy with a long write ([ADMIN-MET-1]: its
+    *loaded* metrics are left out for that scrape). Also built: `GET /admin/slow-ops`, the last 50
+    requests over `slow_ms` ([ADMIN-SRV-2]), and `/admin/stats` now reports versions, memory and
+    `slow_ms`.
+- [x] **Internal stats page.** `GET /admin/ui` (admin role): a server-rendered HTML page — no
   build step, embedded in the binary — showing server info, graphs with status and counts, request
   rates and latency percentiles, slow operations and recent batches. Reads the same
   data as the admin API; auto-refreshes.
+  - *Progress 2026-10-27:* done as [ADMIN-UI-1], with one change: the page is static (no data in
+    it, so it needs no key) and its script reads the admin API from the browser, sending the key
+    the user types (kept for the browser session). Shown: versions, uptime, memory; graphs with
+    status, counts, `last_seq`, DB / WAL size, text index state (click one for details); requests
+    per operation (calls, errors, mean, max — no percentiles yet); slow requests; for the chosen
+    graph its `stats` (growth chart per day, connectivity and hubs, evidence, domains, most cited,
+    types, actors, storage) and recent batches. Every value is inserted as text, never as HTML
+    (names are written by agents); a strict Content-Security-Policy allows nothing from other
+    origins. Refreshes every 10 s while the tab is visible. Checked in the browser against the
+    10 k / 100 k / 1 M benchmark graphs.
 - **Feedback — postponed (2026-10-26).** Reports about MyGraph itself go to one central place,
   the project's GitHub repository, instead of a store in each server instance; see
   [09-roadmap.md](09-roadmap.md) (Phase 2, Feedback).

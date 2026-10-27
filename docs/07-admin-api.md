@@ -71,10 +71,11 @@ build: `quality` and `usage`.
 |---|---|:-:|
 | `GET /health` | Liveness (no auth) | ✅ |
 | `GET /ready` | All graphs warmed up | ✅ |
-| `GET /metrics` | Prometheus metrics | ✅ |
+| `GET /metrics` | Prometheus metrics ([spec/api/admin.md](../spec/api/admin.md) [ADMIN-MET-1]) | ✅ |
+| `GET /admin/ui` | Stats page ([ADMIN-UI-1]) | ✅ |
 | `GET /admin/config` | Effective configuration, secrets redacted | ✅ |
 | `POST /admin/log-level` | Change log level at runtime | |
-| `GET /admin/slow-ops` | Recent slow operations with request shapes | ✅ |
+| `GET /admin/slow-ops` | Recent slow operations (time, operation, graph, status, ms; request shapes are in the log) | ✅ |
 
 ## 6. Feedback (planned)
 

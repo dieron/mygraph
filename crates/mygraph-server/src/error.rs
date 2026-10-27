@@ -127,6 +127,10 @@ impl std::ops::DerefMut for ApiError {
     }
 }
 
+/// The error code of an error answer, as a response extension ([ADMIN-MET-1] counts them).
+#[derive(Clone, Debug)]
+pub struct ErrorCode(pub String);
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status();
@@ -138,6 +142,7 @@ impl IntoResponse for ApiError {
             }
         });
         let mut r = (status, crate::api::json_body(&body)).into_response();
+        r.extensions_mut().insert(ErrorCode(e.code));
         let h = r.headers_mut();
         if status == StatusCode::UNAUTHORIZED {
             h.insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
