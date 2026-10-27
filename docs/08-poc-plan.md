@@ -25,7 +25,7 @@ spec-first workflow (ADR-012); all open questions answered
 | Upserts, resolve, merge, retract/restore, change log, history | Bi-temporal "as of record time" queries |
 | Search: exact, alias, prefix, fuzzy (FTS5 trigram), full text (FTS5) | tantivy / fst (unless the benchmark gate demands them) |
 | `find` with filters, group-by, aggregates, computed values | Graph algorithms (PageRank, communities…) |
-| Admin API subset marked PoC in [07-admin-api.md](07-admin-api.md); internal stats page, read-only graph viewer, feedback API (M5) | Admin UI with editing |
+| Admin API subset marked PoC in [07-admin-api.md](07-admin-api.md); internal stats page, read-only graph viewer (M5) | Admin UI with editing; feedback to the project (central, through GitHub) |
 | API keys from config, limits, metrics, slow-op log | Per-graph permissions, OAuth |
 | JSONL export/import | Other import/export formats, URL snapshots, OCR |
 | Bench harness + synthetic data generator, agent trial | Replication, Postgres backend, S3 |
@@ -311,7 +311,7 @@ Every milestone follows the spec-first workflow of
   Go or C# and runs the vectors. Every gap it hits is a spec bug to fix.
 - **PoC report:** results vs targets, lessons, updated roadmap.
 
-### M5 — Observability, feedback and viewing (M)
+### M5 — Observability and viewing (M)
 Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenAPI entries first.
 
 - [x] **Graph statistics in the admin API and the agent API.** Today only `counts` exist (in
@@ -340,17 +340,11 @@ Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenA
   Grafana dashboard under `deploy/`.
 - [ ] **Internal stats page.** `GET /admin/ui` (admin role): a server-rendered HTML page — no
   build step, embedded in the binary — showing server info, graphs with status and counts, request
-  rates and latency percentiles, slow operations, recent batches and open feedback. Reads the same
+  rates and latency percentiles, slow operations and recent batches. Reads the same
   data as the admin API; auto-refreshes.
-- [ ] **Feedback API.** Agents and users report problems with MyGraph itself — not facts about
-  the world. `POST /v1/feedback`
-  `{category: bug | suggestion | performance | data, title, description, context, graph?}` → id;
-  `GET /v1/feedback/{id}` (status + resolution note); `GET /v1/feedback/mine` (by the caller's
-  actor, not a free-text agent id). Admin: `GET /admin/feedback` (filters, paging),
-  `GET /admin/feedback/stats`, `PATCH /admin/feedback/{id}` (status open → acknowledged → resolved
-  / dismissed, resolution note). An MCP `feedback` tool, and the skill tells agents to use it when a
-  tool misbehaves or a hint is wrong. Stored server-wide (`<data_dir>/feedback.sqlite`), not inside
-  a graph. `context` carries the operation, request shape, error code and latency.
+- **Feedback — postponed (2026-10-26).** Reports about MyGraph itself go to one central place,
+  the project's GitHub repository, instead of a store in each server instance; see
+  [09-roadmap.md](09-roadmap.md) (Phase 2, Feedback).
 - [ ] **Graph viewer (visual, read-only).** `GET /admin/ui/graph/{g}` (or a page linked from the
   stats page): search a node, show its neighbourhood (Cytoscape.js or Sigma.js, loaded from the
   binary, no CDN), expand on click, filter by node and link type, side panel with properties,

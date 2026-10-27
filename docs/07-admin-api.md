@@ -76,17 +76,11 @@ build: `quality` and `usage`.
 | `POST /admin/log-level` | Change log level at runtime | |
 | `GET /admin/slow-ops` | Recent slow operations with request shapes | ✅ |
 
-## 6. Feedback (M5)
+## 6. Feedback (planned)
 
-Agents and users report problems with MyGraph itself.
-Submitting and tracking needs any role; triage needs `admin`.
-
-| Endpoint | Purpose | PoC |
-|---|---|:-:|
-| `POST /v1/feedback` | Submit `{category: bug \| suggestion \| performance \| data, title, description, context, graph?}` → id | ✅ M5 |
-| `GET /v1/feedback/{id}` · `GET /v1/feedback/mine` | Status and resolution note; the caller's own tickets | ✅ M5 |
-| `GET /admin/feedback` · `GET /admin/feedback/stats` | List with filters and paging; counts by category and status | ✅ M5 |
-| `PATCH /admin/feedback/{id}` | Status (open → acknowledged → resolved / dismissed) and resolution note | ✅ M5 |
+Reports about MyGraph itself are not kept by each server: they go to one central place, the
+project's GitHub repository, so there are no feedback endpoints in this API. The plan is in
+[09-roadmap.md](09-roadmap.md) (Phase 2, Feedback).
 
 ## 7. Admin UI
 
