@@ -155,9 +155,16 @@ references). A failed write stores nothing, so fix and resend the whole call.
 
 ## 6. Without the MCP tools
 
-If the tools are not connected but the server runs (default `http://127.0.0.1:7420`), the same
-operations are REST calls: `POST /v1/graphs/{graph}/{operation}` with the same JSON. Graph
-administration (create, snapshot, export/import) is under `/admin`. See **`references/rest.md`**.
+If the tools are not connected, use the REST API — it has the same operations with the same JSON:
+`POST $MYGRAPH_URL/v1/graphs/{graph}/{operation}` with `Authorization: Bearer $MYGRAPH_KEY`. Take
+the server address and key from the environment variables `MYGRAPH_URL` and `MYGRAPH_KEY`
+(without `MYGRAPH_URL`, try `http://127.0.0.1:7420`); never print the key or write it into files.
+Graph administration (create, snapshot, export/import) is under `/admin`. See
+**`references/rest.md`**.
+
+```bash
+curl -s "${MYGRAPH_URL:-http://127.0.0.1:7420}/v1/graphs" -H "Authorization: Bearer $MYGRAPH_KEY"
+```
 
 To connect a client (Claude Code, Claude desktop, Cursor, VS Code Copilot, Codex) or install this
 skill elsewhere, see **`references/setup.md`**.

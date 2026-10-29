@@ -1,9 +1,11 @@
 # MyGraph over REST (when the MCP tools are not available)
 
-The server listens on `http://127.0.0.1:7420` by default. Every MCP tool is a REST operation with
-the same JSON request; responses are JSON (send `Accept: text/plain` on POST operations for the
-compact text). If the server has API keys, send `Authorization: Bearer <key>`; without keys, local
-requests are accepted. The full description is served at `GET /openapi.yaml`.
+The server's address is in the environment variable `MYGRAPH_URL` (for example
+`http://graphhost:7420`); without it, try `http://127.0.0.1:7420`. Every MCP tool is a REST
+operation with the same JSON request; responses are JSON (send `Accept: text/plain` on POST
+operations for the compact text). If the server has API keys, send
+`Authorization: Bearer $MYGRAPH_KEY`; without keys, local requests are accepted. Never print the
+key or write it into files. The full description is served at `GET /openapi.yaml`.
 
 ## Operations
 
@@ -11,8 +13,17 @@ requests are accepted. The full description is served at `GET /openapi.yaml`.
 `resolve`, `get`, `write`, `retract`, `merge`, `neighbors`, `paths`, `find`, `history`, `stats`.
 
 ```bash
-curl -s -X POST http://127.0.0.1:7420/v1/graphs/research/search -d '{"query": "lovelace"}'
+MG=${MYGRAPH_URL:-http://127.0.0.1:7420}
+curl -s -X POST "$MG/v1/graphs/research/search" -H "Authorization: Bearer $MYGRAPH_KEY" \
+  -H 'Content-Type: application/json' -H 'Accept: text/plain' -d '{"query": "lovelace"}'
 ```
+
+PowerShell: `Invoke-RestMethod -Method Post -Uri "$env:MYGRAPH_URL/v1/graphs/research/search"
+-Headers @{Authorization = "Bearer $env:MYGRAPH_KEY"} -ContentType 'application/json'
+-Body '{"query": "lovelace"}'`.
+
+For a `write` with long text, put the JSON in a file and send it with `curl --data-binary @file`
+(or `-InFile file`), so quoting cannot break it.
 
 Shorthands:
 
