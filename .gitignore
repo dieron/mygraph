@@ -19,3 +19,6 @@
 Thumbs.db
 .DS_Store
 /dist/
+
+# Local secrets for docker compose
+.env

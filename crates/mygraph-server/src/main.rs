@@ -52,6 +52,12 @@ enum Command {
     },
     /// Print the SHA-256 of an API key, for `key_sha256` in the configuration.
     HashKey { key: String },
+    /// Exit 0 when the server answers `GET /health` (for container health checks).
+    Health {
+        /// Server to ask (default: the configured listen address, on loopback).
+        #[arg(long)]
+        url: Option<String>,
+    },
     /// Print the implemented spec and storage format versions.
     Versions,
 }
@@ -73,6 +79,33 @@ fn main() -> ExitCode {
         Command::HashKey { key } => {
             println!("{}", mygraph_core::store::sha256_hex(key.as_bytes()));
             ExitCode::SUCCESS
+        }
+        Command::Health { url } => {
+            let url = url.unwrap_or_else(|| {
+                let mut addr = config.listen;
+                if addr.ip().is_unspecified() {
+                    addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+                }
+                format!("http://{addr}")
+            });
+            let health = format!("{}/health", url.trim_end_matches('/'));
+            match ureq::get(&health)
+                .timeout(std::time::Duration::from_secs(5))
+                .call()
+            {
+                Ok(r) if r.status() == 200 => {
+                    println!("ok {health}");
+                    ExitCode::SUCCESS
+                }
+                Ok(r) => {
+                    eprintln!("mygraph health: {health} answered {}", r.status());
+                    ExitCode::FAILURE
+                }
+                Err(e) => {
+                    eprintln!("mygraph health: {health}: {e}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Command::Mcp {
             url,
@@ -209,7 +242,11 @@ async fn mcp_stdio(
 fn init_logging(config: &Config) -> Result<(), String> {
     let filter = tracing_subscriber::EnvFilter::new(&config.log);
     match &config.log_file {
-        None => tracing_subscriber::fmt().with_env_filter(filter).init(),
+        // Colours only on a terminal: `docker logs` and service logs get plain text.
+        None => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+            .init(),
         Some(path) => {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;

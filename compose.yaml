@@ -1,0 +1,29 @@
+# MyGraph as a service.
+#
+#   cp .env.example .env      # then set MYGRAPH_ADMIN_KEY (and optionally the agent key)
+#   docker compose up -d --build
+#
+# Stats page: http://<host>:7420/admin/ui · graph viewer: /admin/ui/graph (enter a key).
+# To use a published image instead of building: set MYGRAPH_IMAGE in .env and run
+# `docker compose pull && docker compose up -d`.
+services:
+  mygraph:
+    image: ${MYGRAPH_IMAGE:-mygraph:local}
+    build: .
+    restart: unless-stopped
+    ports:
+      # Host side: set MYGRAPH_BIND=127.0.0.1 in .env to keep it on this machine only.
+      - "${MYGRAPH_BIND:-0.0.0.0}:${MYGRAPH_PORT:-7420}:7420"
+    environment:
+      # The container listens beyond loopback, which needs at least one key.
+      MYGRAPH_ADMIN_KEY: ${MYGRAPH_ADMIN_KEY:?set MYGRAPH_ADMIN_KEY in .env}
+      MYGRAPH_AGENT_KEY: ${MYGRAPH_AGENT_KEY:-}
+      MYGRAPH_READ_KEY: ${MYGRAPH_READ_KEY:-}
+      MYGRAPH_DEFAULT_GRAPH: ${MYGRAPH_DEFAULT_GRAPH:-default}
+      MYGRAPH_LOG: ${MYGRAPH_LOG:-info}
+    volumes:
+      - mygraph-data:/data
+    stop_grace_period: 30s
+
+volumes:
+  mygraph-data:

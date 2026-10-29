@@ -49,6 +49,35 @@ Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest 
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).
 
+## Running as a service with Docker
+
+For a home server or NAS that other machines and agents use. On the machine:
+
+```bash
+git clone <this repository> mygraph && cd mygraph
+cp .env.example .env    # set MYGRAPH_ADMIN_KEY (and MYGRAPH_AGENT_KEY for agents)
+docker compose up -d --build
+```
+
+- Data lives in the `mygraph-data` volume (`/data` in the container); the server restarts with the
+  machine (`restart: unless-stopped`) and reports its health to Docker (`mygraph health`).
+- The container listens on all interfaces, which MyGraph only allows with API keys: requests need
+  `Authorization: Bearer <key>`. The stats page (`http://<host>:7420/admin/ui`) and the graph
+  viewer ask for a key in the browser. Set `MYGRAPH_BIND=127.0.0.1` in `.env` to keep it on that
+  machine only.
+- Connect an agent from another machine: `mygraph mcp --url http://<host>:7420 --key <agent key>`
+  (stdio bridge), or MCP over HTTP at `http://<host>:7420/mcp` with the same header.
+- Update: `git pull && docker compose up -d --build`. Back up: `POST /admin/graphs/{g}/snapshot`
+  writes into the volume (`/data/snapshots/`).
+- Settings are `MYGRAPH_*` environment variables (listen address, data folder, default graph,
+  log level, and the admin / agent / read-only keys, each also as `<NAME>_FILE` for Docker
+  secrets); see `Config::apply_env` in
+  [crates/mygraph-server/src/config.rs](crates/mygraph-server/src/config.rs).
+
+Once the repository is on GitHub, a multi-arch image (amd64, arm64) is published to
+`ghcr.io/<owner>/mygraph` by [.github/workflows/docker.yml](.github/workflows/docker.yml); set
+`MYGRAPH_IMAGE` in `.env` to use it instead of building.
+
 ## Local deployment (Windows)
 
 Build, then deploy; run the same two commands again to replace the running version:

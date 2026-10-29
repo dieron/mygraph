@@ -1,0 +1,14 @@
+# Only what the build needs goes into the context.
+target/
+dist/
+.git/
+.github/
+.claude/
+.env
+**/*.db
+**/*.db-wal
+**/*.db-shm
+data/
+docs/
+skills/
+deploy/
