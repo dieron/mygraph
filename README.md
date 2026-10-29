@@ -67,8 +67,15 @@ docker compose up -d --build
   machine only.
 - Connect an agent from another machine: `mygraph mcp --url http://<host>:7420 --key <agent key>`
   (stdio bridge), or MCP over HTTP at `http://<host>:7420/mcp` with the same header.
-- Update: `git pull && docker compose up -d --build`. Back up: `POST /admin/graphs/{g}/snapshot`
-  writes into the volume (`/data/snapshots/`).
+- Update on the machine: `git pull && docker compose up -d --build`. Or from your own computer,
+  without a clone on the server: `deploy/docker/deploy.sh <ssh-destination>` sends the committed
+  `HEAD`, snapshots every graph, rebuilds, restarts and waits until healthy; `.env` and the data
+  stay. Back up any time: `POST /admin/graphs/{g}/snapshot` writes into the volume
+  (`/data/snapshots/`).
+- Clients on Windows reach it through the local bridge: `deploy/windows/deploy.ps1 -BridgeOnly`
+  installs just the program (no local server); then use `mygraph mcp --url http://<host>:7420`
+  with the key in `MYGRAPH_KEY`. Update the bridge when the server gains tools: it answers
+  `tools/list` itself.
 - Settings are `MYGRAPH_*` environment variables (listen address, data folder, default graph,
   log level, and the admin / agent / read-only keys, each also as `<NAME>_FILE` for Docker
   secrets); see `Config::apply_env` in

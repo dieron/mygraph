@@ -8,7 +8,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] **Docker and compose** — `Dockerfile` (distroless, non-root, 45 MB), `compose.yaml`,
       `.env.example`, `MYGRAPH_*` environment settings, `mygraph health`; the multi-arch image
       workflow `.github/workflows/docker.yml` runs once the repository is on GitHub.
-- [ ] Run it as a service on the chosen home machine (README, "Running as a service with Docker").
+- [x] Run it as a service on a home machine; `deploy/docker/deploy.sh <ssh-destination>` deploys
+      new versions.
+- [ ] Prune old snapshots on the server (each deploy adds one per graph).
 - [ ] Release executables built by GitHub Actions on a version tag (Windows, macOS, Linux; x64 and
       arm64) with checksums; one-line installers (likely cargo-dist).
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect

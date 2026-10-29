@@ -8,19 +8,26 @@
   Startup-folder shortcut when task registration is not allowed), and (re)starts the server.
   Running it again deploys a new build; the data folder and server.toml are kept.
 
+  With -BridgeOnly it only installs the program for MCP clients that reach a server elsewhere
+  (`mygraph mcp --url http://<host>:7420`): no local server, no autostart. The bridge answers
+  tools/list itself, so update it whenever the server gets new tools.
+
   Build first:  cargo build --release -p mygraph-server
 
 .EXAMPLE
   .\deploy\windows\deploy.ps1
 .EXAMPLE
   .\deploy\windows\deploy.ps1 -Uninstall      # stops it and removes autostart; data stays
+.EXAMPLE
+  .\deploy\windows\deploy.ps1 -BridgeOnly     # the server runs elsewhere (deploy/docker/deploy.sh)
 #>
 param(
     [string]$Source = (Join-Path $PSScriptRoot "..\..\target\release\mygraph.exe"),
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "MyGraph"),
     [string]$DataDir = (Join-Path $env:USERPROFILE "mygraph-data"),
     [string]$Listen = "127.0.0.1:7420",
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    [switch]$BridgeOnly
 )
 $ErrorActionPreference = "Stop"
 $TaskName = "MyGraph server"
@@ -72,6 +79,11 @@ Get-ChildItem $Bin -Filter "mygraph.old-*.exe" | ForEach-Object {
 }
 $version = & $Exe versions
 Write-Host "installed $Exe  $version"
+if ($BridgeOnly) {
+    Remove-Autostart
+    Write-Host "bridge only: no local server. Restart Claude apps to use the new program."
+    exit 0
+}
 
 # 2. Configuration, written once.
 if (-not (Test-Path $Config)) {
