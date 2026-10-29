@@ -364,12 +364,25 @@ Added 2026-10-25. Each item follows the spec-first workflow: rule text and OpenA
 - **Feedback — postponed (2026-10-26).** Reports about MyGraph itself go to one central place,
   the project's GitHub repository, instead of a store in each server instance; see
   [09-roadmap.md](09-roadmap.md) (Phase 2, Feedback).
-- [ ] **Graph viewer (visual, read-only).** `GET /admin/ui/graph/{g}` (or a page linked from the
+- [x] **Graph viewer (visual, read-only).** `GET /admin/ui/graph/{g}` (or a page linked from the
   stats page): search a node, show its neighbourhood (Cytoscape.js or Sigma.js, loaded from the
   binary, no CDN), expand on click, filter by node and link type, side panel with properties,
   support and sources (evidence text and URL). Built only on existing operations (`search`,
   `neighbors`, `get`); caps the drawn subgraph so a 1 M-node graph stays responsive. Editing stays
   in Admin UI v1 ([09-roadmap.md](09-roadmap.md)).
+  - *Progress 2026-10-28:* done as [ADMIN-UI-2], `GET /admin/ui/graph?graph=…&node=…`, linked from
+    the stats page ("browse"). Cytoscape.js 3.30.4 (MIT) is vendored in
+    `crates/mygraph-server/ui/vendor/` with its licence and npm integrity hash, and served from
+    the binary; no CDN. A graph with ≤ 2 000 nodes and ≤ 6 000 links is drawn whole (paged
+    `find`); a larger one starts from its top hubs and grows by double-clicking nodes
+    (`neighbors`), up to 3 000 on screen. Nodes are coloured by type (colours fixed by how common
+    the type is in the graph) and sized by degree; selecting a node or link fades everything but
+    its neighbourhood and shows details: properties, links (click to move), support, and the
+    citing evidence with a preview of its text, the source page of a fragment, and its URL (links
+    only for http/https); search by name, alias or text; filters by node and link type; the URL
+    keeps the graph and node. Needs only a key that may read the graph. Checked in the browser on
+    copies of the `boats` (396 nodes, whole: layout ~1.5 s) and `fishing` (95 nodes) graphs and
+    the 10 k benchmark graph (hub start, expand).
 
 ## 4. Exit criteria
 

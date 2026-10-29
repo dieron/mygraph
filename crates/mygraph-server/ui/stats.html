@@ -43,6 +43,8 @@
   tr.pick { cursor: pointer; }
   tr.pick:hover td { background: var(--chip); }
   tr.on td { background: var(--chip); font-weight: 600; }
+  a.browse { color: var(--accent); text-decoration: none; font-weight: 500; }
+  a.browse:hover { text-decoration: underline; }
   .scroll { overflow: auto; max-height: 360px; }
   .badge { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 12px;
            background: var(--chip); }
@@ -196,13 +198,14 @@ async function loadServer() {
   const graphs = list.graphs || [];
   if (!selected && graphs.length) selected = graphs[0].name;
   table($("graphs"),
-    ["Graph", "Status", "Nodes", "Links", "Evidence", "Citations", "Last seq", "Database", "WAL", "Text index"],
+    ["Graph", "Status", "Nodes", "Links", "Evidence", "Citations", "Last seq", "Database", "WAL", "Text index", ""],
     graphs.map((g) => ({
       attrs: { class: "pick" + (g.name === selected ? " on" : ""), onclick: () => select(g.name) },
       cells: [g.name, el("span", { class: "badge " + g.status }, g.status),
         num(g.counts?.nodes), num(g.counts?.links), num(g.counts?.evidence), num(g.counts?.citations),
         num(g.last_seq), bytes(g.file_bytes), bytes(g.wal_bytes),
-        g.text_index ? el("span", { class: g.text_index }, g.text_index) : "–"],
+        g.text_index ? el("span", { class: g.text_index }, g.text_index) : "–",
+        el("a", { class: "browse", href: "/admin/ui/graph?graph=" + encodeURIComponent(g.name) }, "browse →")],
     })), [2, 3, 4, 5, 6, 7, 8]);
   const reqs = Object.entries(stats.requests || {}).sort((a, b) => b[1].count - a[1].count);
   table($("requests"), ["Operation", "Calls", "Errors", "Mean ms", "Max ms"],

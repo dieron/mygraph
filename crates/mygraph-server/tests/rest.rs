@@ -1111,4 +1111,27 @@ async fn slow_requests_and_the_stats_page() {
     for external in ["src=\"http", "href=\"http", "@import", "fetch(\"http"] {
         assert!(!page.contains(external), "{external}");
     }
+
+    // [ADMIN-UI-2] The viewer and its library, served by the server itself.
+    let r = s
+        .call(Method::GET, "/admin/ui/graph?graph=lab", None, None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r.headers.contains_key("content-security-policy"));
+    let page = r.text();
+    assert!(page.contains("<script src=\"/admin/ui/cytoscape.min.js\"></script>"));
+    for external in ["src=\"http", "href=\"http", "@import", "fetch(\"http"] {
+        assert!(!page.contains(external), "{external}");
+    }
+    let r = s
+        .call(Method::GET, "/admin/ui/cytoscape.min.js", None, None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/javascript")
+    );
+    assert!(r.text().contains("Cytoscape Consortium"));
 }

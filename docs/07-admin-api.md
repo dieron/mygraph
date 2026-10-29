@@ -85,9 +85,9 @@ project's GitHub repository, so there are no feedback endpoints in this API. The
 
 ## 7. Admin UI
 
-**PoC (M5):** an internal stats page (`GET /admin/ui`, server-rendered, embedded in the binary) and
-a read-only graph viewer (neighbourhood view with Cytoscape.js or Sigma.js, properties and sources
-in a side panel).
+**PoC (M5), built:** the stats page (`GET /admin/ui`, [ADMIN-UI-1]) and a read-only graph viewer
+(`GET /admin/ui/graph`, [ADMIN-UI-2]: Cytoscape.js served from the binary, whole graph or
+neighbourhoods, search, filters, properties and sources in a side panel).
 
 **Later (Admin UI v1):** dashboard over all stats sections, evidence viewer (content, fragments in
 context, blobs), duplicate review queue, vocabulary manager, change-log browser with undo, editing

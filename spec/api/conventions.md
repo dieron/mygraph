@@ -113,4 +113,6 @@ transport adds the body-size limit of [API-HTTP-3]. Per-request time budgets are
 | `GET /ready` | none | `200` when every graph found at start is ready, else `503`; body `{"ready": bool, "graphs": {name: status}}` |
 | `GET /metrics` | none | Prometheus text format ([ADMIN-MET-1]) |
 | `GET /admin/ui` | none (the page reads the admin API with the user's key) | The stats page ([ADMIN-UI-1]) |
+| `GET /admin/ui/graph` | none (the page reads the agent API with the user's key) | The graph viewer ([ADMIN-UI-2]) |
+| `GET /admin/ui/cytoscape.min.js` | none | The viewer's drawing library |
 | `GET /openapi.yaml` | none | [openapi.yaml](openapi.yaml) |

@@ -122,7 +122,7 @@ left out for a graph busy with a long write at that moment).
 | `mygraph_checkpoints_total` | counter | `graph`, `outcome` | Background WAL checkpoints |
 | `mygraph_checkpoint_seconds_total` | counter | `graph` | Time spent in them |
 
-## 4. Stats page
+## 4. Pages
 
 **[ADMIN-UI-1]** `GET /admin/ui` answers an HTML page that shows the server's state: versions,
 uptime, memory, graphs with status, counts and sizes, request statistics, slow requests, and for
@@ -130,3 +130,15 @@ a chosen graph its statistics ([ADMIN-GRAPH-9]) and recent batches. The page its
 data and needs no authentication: script in the browser reads the routes of this file and
 `overview`, sending the API key the user enters (kept for the browser session only) or none when
 the server has no keys. It loads nothing from other origins. Its layout is informative.
+
+**[ADMIN-UI-2]** `GET /admin/ui/graph` answers the graph viewer, an HTML page for looking at and
+browsing a graph: nodes and links drawn as a network, coloured by node type, with a search, a
+details panel (properties, links, support, evidence and its text) and filters by node and link
+type. It is read-only. Like [ADMIN-UI-1] it contains no data and needs no authentication; its
+script reads `GET /v1/graphs`, `stats`, `find`, `search`, `neighbors` and `get` with the key the
+user enters, so any key that may read the graph (`agent-read` and up) can use it. Query
+parameters `graph` and `node` (an ID) choose what it opens with. A graph with at most 2 000 active
+nodes and 6 000 active links is drawn whole; a larger one starts from its most connected nodes and
+grows by expanding nodes, up to 3 000 nodes on screen. The drawing library is served by the server
+from `GET /admin/ui/cytoscape.min.js` (Cytoscape.js, MIT licence); nothing comes from other
+origins. Its layout is informative.

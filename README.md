@@ -73,6 +73,10 @@ runs need their own `--data-dir` and `--listen`.
 - `http://127.0.0.1:7420/admin/ui` — the stats page: graphs, request statistics, slow requests,
   and per graph its counts, growth, connectivity, evidence and recent batches. With API keys
   configured it asks for an admin key (kept for the browser session only).
+- `http://127.0.0.1:7420/admin/ui/graph` — the graph viewer: draws a graph as a network (whole
+  when small, else from its hubs, double-click to expand), with search, type filters and a panel
+  showing a node's or link's properties, links and evidence. Any key that may read the graph
+  works; "browse" on the stats page opens it.
 - `GET /metrics` — Prometheus metrics, every one listed in
   [spec/api/admin.md](spec/api/admin.md) (ADMIN-MET-1).
 - `GET /admin/stats`, `GET /admin/slow-ops`, `GET /admin/graphs/{g}/stats` — the same numbers as

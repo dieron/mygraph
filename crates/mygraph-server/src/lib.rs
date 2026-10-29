@@ -100,6 +100,8 @@ pub fn router(app: Arc<App>) -> Router {
             get(admin::graph_get).post(admin::graph_action),
         )
         .route("/admin/ui", get(stats_page))
+        .route("/admin/ui/graph", get(graph_page))
+        .route("/admin/ui/cytoscape.min.js", get(cytoscape_js))
         .route("/admin/{what}", get(admin::server_info))
         .fallback(|| async { api::api_not_found() })
         .method_not_allowed_fallback(|| async {
@@ -196,8 +198,8 @@ async fn metrics(State(app): State<Arc<App>>) -> Response {
         .into_response()
 }
 
-/// [ADMIN-UI-1] The stats page: static, no data in it; its script reads the admin API.
-async fn stats_page() -> Response {
+/// A static page of the server's own: no data in it, nothing from other origins.
+fn page(html: &'static str) -> Response {
     (
         [
             (
@@ -207,14 +209,42 @@ async fn stats_page() -> Response {
             (
                 header::CONTENT_SECURITY_POLICY,
                 HeaderValue::from_static(
-                    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
-                     connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; \
-                     frame-ancestors 'none'",
+                    "default-src 'none'; script-src 'self' 'unsafe-inline'; \
+                     style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; \
+                     base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
                 ),
             ),
             (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
         ],
-        include_str!("../ui/stats.html"),
+        html,
+    )
+        .into_response()
+}
+
+/// [ADMIN-UI-1] The stats page; its script reads the admin API.
+async fn stats_page() -> Response {
+    page(include_str!("../ui/stats.html"))
+}
+
+/// [ADMIN-UI-2] The graph viewer; its script reads the agent API.
+async fn graph_page() -> Response {
+    page(include_str!("../ui/graph.html"))
+}
+
+/// The viewer's drawing library, vendored (ui/vendor/README.md).
+async fn cytoscape_js() -> Response {
+    (
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/javascript; charset=utf-8"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=86400"),
+            ),
+        ],
+        include_str!("../ui/vendor/cytoscape-3.30.4.min.js"),
     )
         .into_response()
 }

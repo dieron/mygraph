@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyGraph viewer</title>
+<!-- spec/api/admin.md [ADMIN-UI-2]: no data in this file; the script reads the agent API. -->
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1d232b; --muted: #66707d; --line: #e3e6ea;
+    --accent: #2f6fdf; --bad: #c53030; --chip: #eef1f5; --edge: #b8c0ca; --canvas: #fbfcfd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --panel: #1a1f26; --ink: #e6e9ee; --muted: #9aa4b1; --line: #2a313a;
+      --accent: #6f9dff; --bad: #f07167; --chip: #242b34; --edge: #4a5462; --canvas: #14181e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+  header h1 a { color: inherit; text-decoration: none; }
+  header .muted { color: var(--muted); }
+  .search { position: relative; flex: 1 1 260px; max-width: 460px; }
+  .search input { width: 100%; }
+  #hits { position: absolute; top: 100%; left: 0; right: 0; z-index: 10; margin: 4px 0 0; padding: 4px;
+          list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          box-shadow: 0 6px 24px rgba(0,0,0,.18); display: none; max-height: 60vh; overflow: auto; }
+  #hits li { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  #hits li:hover, #hits li.on { background: var(--chip); }
+  button, select, input { font: inherit; color: var(--ink); background: var(--panel);
+                          border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .wrap { flex: 1; display: flex; min-height: 0; }
+  #cy { flex: 1; min-width: 0; background: var(--canvas); position: relative; }
+  aside { width: 380px; max-width: 45vw; border-left: 1px solid var(--line); background: var(--panel);
+          overflow: auto; padding: 14px 16px 30px; }
+  aside h2 { font-size: 18px; margin: 4px 0 2px; word-break: break-word; }
+  aside h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+             margin: 16px 0 6px; font-weight: 600; }
+  .id { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--muted); }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 9px;
+          font-size: 12px; background: var(--chip); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-word; }
+  .list { margin: 0; padding: 0; list-style: none; }
+  .list li { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .link { cursor: pointer; color: var(--accent); }
+  .link:hover { text-decoration: underline; }
+  .muted { color: var(--muted); }
+  .quote { margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--line); background: var(--chip);
+           border-radius: 0 6px 6px 0; white-space: pre-wrap; word-break: break-word; font-size: 13px;
+           max-height: 320px; overflow: auto; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .legend { position: absolute; left: 12px; bottom: 12px; z-index: 5; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 42%;
+            overflow: auto; width: 250px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .legend h4 { margin: 6px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+               color: var(--muted); display: flex; justify-content: space-between; }
+  .legend label { display: flex; gap: 6px; align-items: center; padding: 1px 0; cursor: pointer; }
+  .legend label .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend .toggle { cursor: pointer; color: var(--accent); font-weight: 500; text-transform: none; letter-spacing: 0; }
+  #status { position: absolute; right: 12px; top: 10px; z-index: 5; color: var(--muted); font-size: 12px;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+  #banner { display: none; padding: 8px 16px; color: var(--bad); border-bottom: 1px solid var(--line);
+            background: var(--panel); }
+  #keybox { display: none; gap: 6px; }
+  .empty { color: var(--muted); padding: 30px 4px; }
+  a.ext { color: var(--accent); word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="/admin/ui" title="Stats page">MyGraph</a> <span class="muted">viewer</span></h1>
+  <select id="graph" title="Graph"></select>
+  <div class="search">
+    <input id="q" type="search" placeholder="Search nodes by name, alias or text…" autocomplete="off">
+    <ul id="hits"></ul>
+  </div>
+  <button id="fit" type="button" title="Fit the drawing to the window">Fit</button>
+  <button id="relayout" type="button" title="Lay the drawing out again">Re-layout</button>
+  <button id="reset" type="button" title="Start this graph again">Reset</button>
+  <form id="keybox"><input id="key" type="password" placeholder="API key" autocomplete="off">
+    <button type="submit">Use key</button></form>
+</header>
+<div id="banner"></div>
+<div class="wrap">
+  <div id="cy">
+    <div id="status"></div>
+    <div class="legend" id="legend"></div>
+  </div>
+  <aside id="side"><div class="empty">Click a node or a link to see its details.
+    Double-click a node to bring in its neighbours.</div></aside>
+</div>
+<script src="/admin/ui/cytoscape.min.js"></script>
+<script>
+"use strict";
+// Every value from the server goes into the page as text (textContent), never as HTML, and
+// links to sources are only made for http(s) URLs: names, quotes and URLs are written by agents.
+const $ = (id) => document.getElementById(id);
+const ALL_NODES = 2000, ALL_LINKS = 6000, MAX_ON_SCREEN = 3000;
+const PALETTE = ["#4e79a7", "#f28e2b", "#e15759", "#59a14f", "#76b7b2", "#edc948", "#b07aa1",
+  "#ff9da7", "#9c755f", "#86bcb6", "#d37295", "#a0cbe8", "#ffbe7d", "#8cd17d", "#bab0ac", "#f1ce63"];
+let key = null;
+try { key = sessionStorage.getItem("mygraph.key"); } catch (e) { /* storage blocked */ }
+let graph = null, whole = false, colors = new Map(), cy = null;
+const hidden = { node: new Set(), link: new Set() };
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k !== null && k !== undefined && k !== false) e.append(k instanceof Node ? k : String(k));
+  return e;
+}
+function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+// Appends the children that are present (the DOM's own append would print "null").
+function put(parent, ...kids) {
+  for (const k of kids) if (k !== null && k !== undefined && k !== false) parent.append(k);
+  return parent;
+}
+const num = (n) => Number(n || 0).toLocaleString();
+function val(v) {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.map(val).join(", ");
+  if (typeof v === "object") return v.$date ?? v.$datetime ?? JSON.stringify(v);
+  return String(v);
+}
+function safeUrl(u) {
+  try { const x = new URL(u); return (x.protocol === "http:" || x.protocol === "https:") ? x.href : null; }
+  catch (e) { return null; }
+}
+const short = (s, n) => (s && s.length > n) ? s.slice(0, n - 1) + "…" : (s || "");
+
+function banner(msg) { const b = $("banner"); b.style.display = msg ? "block" : "none"; b.textContent = msg || ""; }
+function status(msg) { $("status").textContent = msg; }
+
+async function api(path, body) {
+  const headers = key ? { Authorization: "Bearer " + key } : {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const r = await fetch(path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
+  if (r.status === 401 || r.status === 403) {
+    $("keybox").style.display = "flex";
+    const e = new Error(r.status === 401 ? "This server needs an API key; enter one above (kept for this browser session only)."
+      : "This key may not read that graph.");
+    e.auth = true; throw e;
+  }
+  const out = await r.json();
+  if (!r.ok) throw new Error((out.error && (out.error.code + ": " + out.error.message)) || r.statusText);
+  return out;
+}
+const op = (name, body) => api(`/v1/graphs/${encodeURIComponent(graph)}/${name}`, body);
+
+// ---- colours and styles -------------------------------------------------------------------
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function colorOf(type) {
+  if (!colors.has(type)) colors.set(type, PALETTE[colors.size % PALETTE.length]);
+  return colors.get(type);
+}
+function style() {
+  const ink = css("--ink"), canvas = css("--canvas"), edge = css("--edge"), accent = css("--accent");
+  return [
+    { selector: "node", style: {
+      "background-color": "data(color)", "width": "data(size)", "height": "data(size)",
+      "label": "data(label)", "font-size": 10, "color": ink, "text-valign": "bottom", "text-margin-y": 3,
+      "text-outline-color": canvas, "text-outline-width": 2, "min-zoomed-font-size": 7,
+      "text-max-width": 140, "text-wrap": "ellipsis", "border-width": 0 } },
+    { selector: "edge", style: {
+      "width": 1.2, "line-color": edge, "curve-style": "bezier", "target-arrow-color": edge,
+      "arrow-scale": 0.7, "opacity": 0.85 } },
+    { selector: "edge.dir", style: { "target-arrow-shape": "triangle" } },
+    { selector: "edge.show-label, edge:selected", style: {
+      "label": "data(type)", "font-size": 9, "color": ink, "text-rotation": "autorotate",
+      "text-background-color": canvas, "text-background-opacity": 0.9, "text-background-padding": 2 } },
+    { selector: "node:selected", style: { "border-width": 3, "border-color": accent } },
+    { selector: "edge:selected", style: { "line-color": accent, "target-arrow-color": accent, "width": 2.5 } },
+    { selector: ".faded", style: { "opacity": 0.12, "text-opacity": 0 } },
+    { selector: ".hidden", style: { "display": "none" } },
+  ];
+}
+
+function sizeNodes() {
+  const degs = cy.nodes().map((n) => n.degree(false));
+  const max = Math.max(1, ...degs);
+  cy.batch(() => cy.nodes().forEach((n) => n.data("size", 14 + 32 * Math.sqrt(n.degree(false) / max))));
+}
+
+// ---- loading ------------------------------------------------------------------------------
+function add(nodes, links) {
+  const before = cy.nodes().length;
+  const els = [];
+  for (const n of nodes) {
+    if (cy.getElementById(n.id).nonempty()) continue;
+    els.push({ group: "nodes", data: { id: n.id, type: n.type, name: n.name, label: short(n.name, 32),
+      color: colorOf(n.type), size: 16 }, classes: hidden.node.has(n.type) ? "hidden" : "" });
+  }
+  const added = cy.add(els);
+  const edges = [];
+  for (const l of links) {
+    if (cy.getElementById(l.id).nonempty()) continue;
+    if (cy.getElementById(l.from).empty() || cy.getElementById(l.to).empty()) continue;
+    edges.push({ group: "edges", data: { id: l.id, source: l.from, target: l.to, type: l.type },
+      classes: (l.directed ? "dir" : "") + (hidden.link.has(l.type) ? " hidden" : "") });
+  }
+  cy.add(edges);
+  sizeNodes();
+  legend();
+  return { nodes: cy.nodes().length - before, added };
+}
+
+async function findAll(target) {
+  const rows = [];
+  let cursor = null;
+  do {
+    const r = await op("find", { target, limit: 1000, ...(cursor ? { cursor } : {}) });
+    rows.push(...r.rows);
+    cursor = r.next_cursor || null;
+  } while (cursor);
+  return rows;
+}
+
+function layout(onlyNew) {
+  const n = cy.nodes(":visible").length;
+  const opts = { name: "cose", animate: false, randomize: !onlyNew, fit: true, padding: 40,
+    nodeRepulsion: () => 40000, idealEdgeLength: () => 110, edgeElasticity: () => 60,
+    nodeOverlap: 40, componentSpacing: 120, gravity: 0.25, numIter: n > 1200 ? 600 : 1500,
+    nodeDimensionsIncludeLabels: false };
+  const l = cy.elements(":visible").layout(opts);
+  l.one("layoutstop", () => cy.fit(cy.elements(":visible"), 40));
+  l.run();
+}
+
+async function expand(ids, select) {
+  if (cy.nodes().length >= MAX_ON_SCREEN) { banner(`${MAX_ON_SCREEN} nodes on screen: reset or hide types before expanding further.`); return; }
+  status("loading neighbours…");
+  const r = await op("neighbors", { start: ids, depth: 1, limit: Math.min(400, MAX_ON_SCREEN - cy.nodes().length + ids.length),
+    limit_per_node: 80 });
+  const { nodes } = add(r.nodes, r.links);
+  if (nodes > 0) layout(cy.nodes().length > nodes);
+  showCounts();
+  if (select) focus(select);
+}
+
+async function openGraph(name, nodeId) {
+  graph = name;
+  whole = false;
+  colors = new Map();
+  hidden.node.clear(); hidden.link.clear();
+  cy.elements().remove();
+  clear($("side")).append(el("div", { class: "empty" }, "Click a node or a link to see its details. Double-click a node to bring in its neighbours."));
+  setUrl(nodeId);
+  status("loading…");
+  const s = await op("stats", { sections: ["counts", "degree"], top: 5 });
+  const c = s.counts.active;
+  // Colours by how common a type is in the whole graph, so they stay put while browsing.
+  s.counts.top_node_types.forEach((t) => colorOf(t.type));
+  if (c.nodes <= ALL_NODES && c.links <= ALL_LINKS) {
+    whole = true;
+    const [nodes, links] = await Promise.all([findAll("nodes"), findAll("links")]);
+    add(nodes, links);
+    layout(false);
+    showCounts(c);
+    if (nodeId) focus(nodeId);
+  } else {
+    const start = nodeId ? [nodeId] : s.degree.hubs.map((h) => h.id);
+    showCounts(c);
+    if (start.length) await expand(start, nodeId);
+  }
+  showCounts(c);
+}
+let totals = null;
+function showCounts(c) {
+  if (c) totals = c;
+  const t = totals || {};
+  status(whole ? `${num(cy.nodes().length)} nodes · ${num(cy.edges().length)} links (whole graph)`
+    : `${num(cy.nodes().length)} of ${num(t.nodes)} nodes · ${num(cy.edges().length)} of ${num(t.links)} links — double-click to expand`);
+}
+
+function setUrl(nodeId) {
+  const u = new URL(location.href);
+  u.searchParams.set("graph", graph);
+  if (nodeId) u.searchParams.set("node", nodeId); else u.searchParams.delete("node");
+  history.replaceState(null, "", u);
+}
+
+// ---- selection and details ----------------------------------------------------------------
+function highlight(ele) {
+  cy.batch(() => {
+    cy.elements().removeClass("faded show-label");
+    if (!ele) return;
+    const near = ele.isNode() ? ele.closedNeighborhood() : ele.union(ele.connectedNodes());
+    cy.elements().not(near).addClass("faded");
+    near.edges().addClass("show-label");
+  });
+}
+
+async function focus(id) {
+  let n = cy.getElementById(id);
+  if (n.empty()) { await expand([id], null); n = cy.getElementById(id); }
+  if (n.empty()) return;
+  cy.elements().unselect();
+  n.select();
+  highlight(n);
+  cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.1) }, { duration: 300 });
+  showNode(id);
+}
+
+function typeChip(type, isNode) {
+  return el("span", { class: "chip" }, isNode ? el("span", { class: "dot", style: `background:${colorOf(type)}` }) : null, type);
+}
+
+function nodeRef(o) {
+  return el("span", { class: "link", onclick: () => focus(o.id) }, o.name ?? o.id);
+}
+
+function propsList(props) {
+  const entries = Object.entries(props || {});
+  if (!entries.length) return null;
+  const dl = el("dl", { class: "kv" });
+  for (const [k, v] of entries) dl.append(el("dt", {}, k), el("dd", {}, val(v)));
+  return [el("h3", {}, "Properties"), dl];
+}
+
+function supportLine(s) {
+  if (!s) return null;
+  const parts = [`${s.sources ?? 0} source${s.sources === 1 ? "" : "s"}`];
+  for (const k of ["supports", "contradicts", "mentions"]) if (s[k]) parts.push(`${s[k]} ${k}`);
+  return el("div", { class: "muted" }, parts.join(" · "));
+}
+
+function extLink(uri) {
+  const url = uri ? safeUrl(uri) : null;
+  return url ? el("a", { class: "ext", href: url, target: "_blank", rel: "noopener noreferrer" }, short(url, 90)) : null;
+}
+
+// The citing evidence: a header per item now, then one request fills in a preview of each
+// item's text and the source a fragment comes from.
+function evidenceList(ev) {
+  const items = (ev && ev.items) || [];
+  if (!items.length) return [el("h3", {}, "Evidence"), el("div", { class: "muted" }, "none")];
+  const ul = el("ul", { class: "list" });
+  const slots = new Map();
+  for (const e of items) {
+    const body = el("div", {}, el("span", { class: "muted" }, "…"));
+    ul.append(el("li", {}, el("span", { class: "id" }, e.id), " ", el("span", { class: "chip" }, e.kind), " ",
+      e.role && e.role !== "supports" ? el("span", { class: "chip" }, e.role) : null, " ",
+      e.title || null, body));
+    slots.set(e.id, body);
+  }
+  fillEvidence(slots).catch((err) => banner(err.message));
+  const out = [el("h3", {}, "Evidence"), ul];
+  if (ev.truncated) out.push(el("div", { class: "muted" }, "more evidence not shown"));
+  return out;
+}
+
+async function fillEvidence(slots) {
+  const ids = [...slots.keys()];
+  const r = await op("get", { refs: ids, include: { content: { max_chars: 280 } } });
+  const parentIds = [...new Set(r.items.map((e) => e.parent).filter((p) => p && !slots.has(p)))];
+  const parents = new Map();
+  if (parentIds.length) {
+    for (const p of (await op("get", { refs: parentIds, detail: "brief" })).items) parents.set(p.id, p);
+  }
+  for (const e of r.items) {
+    const body = clear(slots.get(e.id));
+    const p = e.parent ? parents.get(e.parent) : null;
+    if (p) body.append(el("div", { class: "muted" }, "from ", el("span", { class: "id" }, p.id), " ", p.title || p.kind, extLink(p.uri)));
+    else if (e.uri) body.append(el("div", {}, extLink(e.uri) || e.uri));
+    if (e.content) body.append(el("div", { class: "quote" }, e.content + (e.content_truncated ? " …" : "")));
+    const sd = e.source_date ? val(e.source_date) : null;
+    const meta = [sd, e.author, e.publisher].filter(Boolean).join(" · ");
+    if (meta) body.append(el("div", { class: "muted" }, meta));
+    if (e.content_truncated) {
+      body.append(el("div", { class: "actions" },
+        el("button", { type: "button", onclick: (ev) => showEvidence(e.id, body, ev.target) }, "Show full text")));
+    }
+  }
+}
+
+async function showEvidence(id, body, button) {
+  button.disabled = true;
+  try {
+    const e = (await op("get", { refs: [id], include: { content: { max_chars: 20000 } } })).items[0];
+    const quote = body.querySelector(".quote");
+    if (quote) quote.textContent = e.content + (e.content_truncated ? " … (cut at 20 000 characters)" : "");
+    button.parentElement.remove();
+  } catch (err) {
+    banner(err.message);
+    button.disabled = false;
+  }
+}
+
+async function showNode(id) {
+  setUrl(id);
+  const side = clear($("side"));
+  side.append(el("div", { class: "muted" }, "loading…"));
+  try {
+    const r = await op("get", { refs: [id], include: { links: { limit: 60 }, evidence: { limit: 10 } } });
+    const n = r.items[0];
+    put(clear(side),
+      typeChip(n.type, true), " ", el("span", { class: "id" }, n.id),
+      el("h2", {}, n.name),
+      n.aliases && n.aliases.length ? el("div", { class: "muted" }, "also: " + n.aliases.join(", ")) : null,
+      n.status !== "active" ? el("div", { class: "muted" }, n.status) : null,
+      n.summary ? el("p", {}, n.summary) : null,
+      supportLine(n.support));
+    const p = propsList(n.props); if (p) side.append(...p);
+    const links = (n.links && n.links.items) || [];
+    side.append(el("h3", {}, `Links (${num((n.links.counts || []).reduce((a, c) => a + c.count, 0))})`));
+    const ul = el("ul", { class: "list" });
+    for (const l of links) {
+      const arrow = l.direction === "out" ? "→" : l.direction === "in" ? "←" : "—";
+      ul.append(el("li", {}, el("span", { class: "link", onclick: () => focusEdge(l.id) }, l.type), ` ${arrow} `,
+        nodeRef(l.other), " ", el("span", { class: "muted" }, l.other.type)));
+    }
+    if (!links.length) ul.append(el("li", { class: "muted" }, "none"));
+    side.append(ul);
+    if (n.links.truncated) side.append(el("div", { class: "muted" }, "more links not listed — expand the node to see them"));
+    side.append(...evidenceList(n.evidence));
+    side.append(el("div", { class: "actions" },
+      !whole ? el("button", { type: "button", onclick: () => expand([id], id) }, "Expand neighbours") : null,
+      el("button", { type: "button", onclick: () => { highlight(null); cy.elements().unselect(); } }, "Clear highlight")));
+  } catch (err) {
+    clear(side).append(el("div", { class: "muted" }, err.message));
+  }
+}
+
+async function focusEdge(id) {
+  const e = cy.getElementById(id);
+  if (e.nonempty()) { cy.elements().unselect(); e.select(); highlight(e); }
+  const side = clear($("side"));
+  side.append(el("div", { class: "muted" }, "loading…"));
+  try {
+    const r = await op("get", { refs: [id], include: { evidence: { limit: 10 } } });
+    const l = r.items[0];
+    const names = await op("get", { refs: [l.from, l.to], detail: "brief" });
+    const [a, b] = names.items;
+    put(clear(side), typeChip(l.type, false), " ", el("span", { class: "id" }, l.id),
+      el("h2", {}, nodeRef(a), l.directed === false ? " — " : " → ", nodeRef(b)),
+      l.status !== "active" ? el("div", { class: "muted" }, l.status) : null,
+      supportLine(l.support));
+    const p = propsList(l.props); if (p) side.append(...p);
+    if (l.valid_from || l.valid_to) side.append(el("div", { class: "muted" }, `valid ${val(l.valid_from) || "…"} – ${val(l.valid_to) || "…"}`));
+    side.append(...evidenceList(l.evidence));
+  } catch (err) {
+    clear(side).append(el("div", { class: "muted" }, err.message));
+  }
+}
+
+// ---- legend and filters -------------------------------------------------------------------
+let legendOpen = true;
+function legend() {
+  const box = clear($("legend"));
+  const count = (sel, key) => { const m = new Map(); cy[sel]().forEach((x) => m.set(x.data(key), (m.get(x.data(key)) || 0) + 1)); return [...m].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)); };
+  box.append(el("h4", {}, "Legend", el("span", { class: "toggle", onclick: () => { legendOpen = !legendOpen; legend(); } }, legendOpen ? "hide" : "show")));
+  if (!legendOpen) return;
+  const group = (title, kind, rows) => {
+    box.append(el("h4", {}, title));
+    for (const [t, n] of rows) {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !hidden[kind].has(t);
+      cb.onchange = () => { if (cb.checked) hidden[kind].delete(t); else hidden[kind].add(t); applyFilters(); };
+      box.append(el("label", {}, cb, kind === "node" ? el("span", { class: "dot", style: `background:${colorOf(t)}` }) : null,
+        t, el("span", { class: "n" }, num(n))));
+    }
+  };
+  group("Node types", "node", count("nodes", "type"));
+  group("Link types", "link", count("edges", "type"));
+}
+function applyFilters() {
+  cy.batch(() => {
+    cy.nodes().forEach((n) => n.toggleClass("hidden", hidden.node.has(n.data("type"))));
+    cy.edges().forEach((e) => e.toggleClass("hidden", hidden.link.has(e.data("type"))));
+  });
+}
+
+// ---- search -------------------------------------------------------------------------------
+let searchTimer = null, hitList = [];
+function showHits(items) {
+  const ul = clear($("hits"));
+  hitList = items;
+  ul.style.display = items.length || $("q").value.trim() ? "block" : "none";
+  if (!items.length) { ul.append(el("li", { class: "muted" }, "no matches")); return; }
+  items.forEach((h, i) => ul.append(el("li", { class: i === 0 ? "on" : "", onclick: () => pick(h) },
+    el("span", { class: "dot", style: `background:${colorOf(h.type)}` }), h.name, el("span", { class: "muted" }, h.type),
+    el("span", { class: "id", style: "margin-left:auto" }, h.id))));
+}
+function pick(h) {
+  $("hits").style.display = "none";
+  $("q").blur();
+  focus(h.id);
+}
+$("q").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const q = $("q").value.trim();
+  if (!q) { showHits([]); $("hits").style.display = "none"; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const r = await api(`/v1/graphs/${encodeURIComponent(graph)}/search?q=${encodeURIComponent(q)}&in=nodes&limit=12`);
+      if ($("q").value.trim() === q) showHits(r.hits || []);
+    } catch (e) { banner(e.message); }
+  }, 220);
+});
+$("q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && hitList.length) { e.preventDefault(); pick(hitList[0]); }
+  if (e.key === "Escape") { $("hits").style.display = "none"; }
+});
+document.addEventListener("click", (e) => { if (!e.target.closest(".search")) $("hits").style.display = "none"; });
+
+// ---- start --------------------------------------------------------------------------------
+function initCy() {
+  cy = cytoscape({ container: $("cy"), style: style(), minZoom: 0.05, maxZoom: 4,
+    selectionType: "single", boxSelectionEnabled: false });
+  cy.on("tap", "node", (e) => { highlight(e.target); showNode(e.target.id()); });
+  cy.on("dbltap", "node", (e) => { if (!whole) expand([e.target.id()], e.target.id()); });
+  cy.on("tap", "edge", (e) => focusEdge(e.target.id()));
+  cy.on("tap", (e) => { if (e.target === cy) { highlight(null); } });
+  cy.on("mouseover", "edge", (e) => e.target.addClass("show-label"));
+  cy.on("mouseout", "edge", (e) => { if (!e.target.selected()) e.target.removeClass("show-label"); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => cy.style(style()));
+}
+
+async function run(fn) {
+  try { banner(null); await fn(); }
+  catch (e) { banner(e.message); status(""); }
+}
+
+async function start() {
+  const params = new URL(location.href).searchParams;
+  const list = (await api("/v1/graphs")).graphs || [];
+  $("keybox").style.display = "none";
+  const sel = clear($("graph"));
+  for (const g of list) sel.append(el("option", { value: g.name }, g.name + (g.status === "ready" ? "" : ` (${g.status})`)));
+  if (!list.length) { status("no graphs"); return; }
+  const want = params.get("graph");
+  sel.value = list.some((g) => g.name === want) ? want : list[0].name;
+  await openGraph(sel.value, params.get("node"));
+}
+
+$("graph").onchange = () => run(() => openGraph($("graph").value, null));
+$("fit").onclick = () => cy.fit(cy.elements(":visible"), 40);
+$("relayout").onclick = () => layout(false);
+$("reset").onclick = () => run(() => openGraph(graph, null));
+$("keybox").onsubmit = (ev) => {
+  ev.preventDefault();
+  key = $("key").value.trim() || null;
+  try { if (key) sessionStorage.setItem("mygraph.key", key); else sessionStorage.removeItem("mygraph.key"); } catch (e) {}
+  $("key").value = "";
+  run(start);
+};
+if (typeof cytoscape === "undefined") {
+  banner("The drawing library did not load (/admin/ui/cytoscape.min.js).");
+} else {
+  initCy();
+  run(start);
+}
+</script>
+</body>
+</html>

@@ -581,6 +581,37 @@ paths:
               schema: { type: string }
         "4XX": { $ref: "#/components/responses/Error" }
 
+  /admin/ui/graph:
+    get:
+      tags: [admin]
+      summary: Graph viewer (admin.md [ADMIN-UI-2]); the page reads the agent API with the user's key
+      operationId: adminUiGraph
+      security: []
+      parameters:
+        - { name: graph, in: query, schema: { type: string } }
+        - { name: node, in: query, description: A node ID to open with, schema: { type: string } }
+      responses:
+        "200":
+          description: An HTML page.
+          content:
+            text/html:
+              schema: { type: string }
+        "4XX": { $ref: "#/components/responses/Error" }
+
+  /admin/ui/cytoscape.min.js:
+    get:
+      tags: [admin]
+      summary: The graph viewer's drawing library (Cytoscape.js 3.30.4, MIT)
+      operationId: adminUiCytoscape
+      security: []
+      responses:
+        "200":
+          description: JavaScript.
+          content:
+            text/javascript:
+              schema: { type: string }
+        "4XX": { $ref: "#/components/responses/Error" }
+
   /admin/keys:
     get:
       tags: [admin]
