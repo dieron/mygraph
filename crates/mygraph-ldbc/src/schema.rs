@@ -330,6 +330,21 @@ pub fn value(col: &str, cell: &str) -> Option<Json> {
     })
 }
 
+/// The start of a link's validity ([TRAV-2]), taken from its properties: a friendship and a
+/// membership hold from when they were made, a job from the start of its `workFrom` year. LDBC
+/// has no end dates, and the properties stay as they are.
+pub fn valid_from(link: &str, props: &Map<String, Json>) -> Option<Json> {
+    match link {
+        "KNOWS" => props.get("creationDate").cloned(),
+        "HAS_MEMBER" => props.get("joinDate").cloned(),
+        "WORK_AT" => props
+            .get("workFrom")
+            .and_then(Json::as_i64)
+            .map(|y| json!({ "$date": format!("{y:04}") })),
+        _ => None,
+    }
+}
+
 /// LDBC writes the offset as `+0000`; MyGraph wants `Z` or `+hh:mm` ([VAL-DT-1]).
 pub fn datetime(s: &str) -> String {
     match s.len().checked_sub(5).map(|i| s.split_at(i)) {

@@ -289,6 +289,9 @@ impl Loader {
             return Ok(());
         };
         let mut item = json!({ "type": ty, "from": from, "to": to, "directed": directed });
+        if let Some(v) = schema::valid_from(ty, &props) {
+            item["valid_from"] = v;
+        }
         if !props.is_empty() {
             item["props"] = Json::Object(props);
         }

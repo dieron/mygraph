@@ -50,8 +50,10 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       (`mygraph-ldbc diff`); 3 212 SF0.1 cases agree with Neo4j.
 - [x] Fix what it found: one group when nothing matches (code), `ne` / `not_in` on lists (spec),
       no silent renaming of names (policy `naming: styled | free`).
-- [ ] Extend the harness: `k_shortest`, directed `paths`, `steps`, `as_of`, `contains` /
-      `starts_with`, sorting and paging, result order; run it on SF1.
+- [x] Extend the harness: `k_shortest`, directed `paths`, `steps`, `as_of` (links get
+      `valid_from`), `contains` / `starts_with`, sorting, paging, group order; 3 228 cases agree,
+      and six of seven deliberate breaks are caught.
+- [ ] Run the harness on SF1 (needs the SF1 Neo4j import and the reload with `valid_from`).
 - [ ] Rerun the SF1 load on a quiet machine with the current mapping.
 - [ ] Deployed instance: after this lands, agents get `vocab.not_styled` for names the server used
       to rewrite; check the skill and tools in use there still send styled names.

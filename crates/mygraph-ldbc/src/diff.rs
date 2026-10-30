@@ -10,9 +10,10 @@ use crate::archive::Result;
 use mygraph_core::engine::Graph;
 use mygraph_core::ids::ObjectKind;
 use mygraph_core::model::id_string;
+use mygraph_core::name_key::name_key;
 use mygraph_store_sqlite::GraphFile;
 use serde_json::{Map, Value as Json, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// SplitMix64, as in `mygraph-bench`, so a seed fixes every case.
 struct Rng(u64);
@@ -64,12 +65,79 @@ const LINK_TYPES: [&str; 15] = [
     "WORK_AT",
 ];
 /// Link types `paths` cases walk: selective sets, so shortest paths stay few.
-const PATH_LINK_SETS: [&[&str]; 5] = [
+const PATH_LINK_SETS: [&[&str]; 7] = [
     &["KNOWS"],
     &["KNOWS", "STUDY_AT", "WORK_AT"],
     &["HAS_CREATOR", "REPLY_OF"],
     &["HAS_MEMBER", "KNOWS"],
     &["HAS_CREATOR", "LIKES", "KNOWS"],
+    &["IS_LOCATED_IN", "IS_PART_OF"],
+    &["HAS_TAG", "HAS_TYPE", "IS_SUBCLASS_OF"],
+];
+/// The LDBC schema's links as (type, from type, to type), so random steps follow links that
+/// exist; `KNOWS` is undirected.
+const LINK_ENDS: [(&str, &str, &str); 23] = [
+    ("CONTAINER_OF", "Forum", "Post"),
+    ("HAS_CREATOR", "Post", "Person"),
+    ("HAS_CREATOR", "Comment", "Person"),
+    ("HAS_INTEREST", "Person", "Tag"),
+    ("HAS_MEMBER", "Forum", "Person"),
+    ("HAS_MODERATOR", "Forum", "Person"),
+    ("HAS_TAG", "Forum", "Tag"),
+    ("HAS_TAG", "Post", "Tag"),
+    ("HAS_TAG", "Comment", "Tag"),
+    ("HAS_TYPE", "Tag", "TagClass"),
+    ("IS_LOCATED_IN", "Person", "Place"),
+    ("IS_LOCATED_IN", "Organisation", "Place"),
+    ("IS_LOCATED_IN", "Post", "Place"),
+    ("IS_LOCATED_IN", "Comment", "Place"),
+    ("IS_PART_OF", "Place", "Place"),
+    ("IS_SUBCLASS_OF", "TagClass", "TagClass"),
+    ("KNOWS", "Person", "Person"),
+    ("LIKES", "Person", "Post"),
+    ("LIKES", "Person", "Comment"),
+    ("REPLY_OF", "Comment", "Post"),
+    ("REPLY_OF", "Comment", "Comment"),
+    ("STUDY_AT", "Person", "Organisation"),
+    ("WORK_AT", "Person", "Organisation"),
+];
+/// Link types with a validity (`schema::valid_from`), which `as_of` cases favour.
+const DATED: [&str; 3] = ["KNOWS", "HAS_MEMBER", "WORK_AT"];
+/// String fields `contains` / `starts_with` cases filter on: (type, field, Neo4j property).
+const TEXT_FIELDS: [(&str, &str, &str); 8] = [
+    ("Person", "name", "name"),
+    ("Person", "prop:firstName", "firstName"),
+    ("Person", "prop:lastName", "lastName"),
+    ("Person", "prop:email", "email"),
+    ("Tag", "name", "name"),
+    ("Place", "name", "name"),
+    ("Organisation", "name", "name"),
+    ("Forum", "name", "name"),
+];
+/// Sort keys for `find` rows: (type, field expression, Cypher expression over `n`). Post `language`
+/// and `imageFile` are each missing on some posts, which must sort last in both orders.
+const SORT_FIELDS: [(&str, &str, &str); 17] = [
+    ("Person", "name", "n.name"),
+    ("Person", "prop:birthday", "n.birthday"),
+    ("Person", "prop:creationDate", "n.creationDate"),
+    ("Person", "prop:browserUsed", "n.browserUsed"),
+    ("Person", "prop:lastName", "n.lastName"),
+    ("Person", "degree(KNOWS)", "COUNT { (n)-[:KNOWS]-() }"),
+    ("Forum", "prop:creationDate", "n.creationDate"),
+    ("Forum", "name", "n.name"),
+    (
+        "Forum",
+        "degree(HAS_MEMBER, out)",
+        "COUNT { (n)-[:HAS_MEMBER]->() }",
+    ),
+    ("Tag", "name", "n.name"),
+    ("Tag", "degree(HAS_TAG, in)", "COUNT { (n)<-[:HAS_TAG]-() }"),
+    ("Organisation", "name", "n.name"),
+    ("Place", "name", "n.name"),
+    ("Place", "prop:url", "n.url"),
+    ("Post", "prop:language", "n.language"),
+    ("Post", "prop:imageFile", "n.imageFile"),
+    ("Post", "prop:length", "n.length"),
 ];
 
 pub struct Neo4j {
@@ -213,6 +281,8 @@ struct Ctx<'a> {
     tally: BTreeMap<&'static str, Tally>,
     failures: Vec<Json>,
     verbose: bool,
+    /// Per (type, property): (key, value) of every node, as Neo4j has them.
+    text_values: HashMap<(String, String), Vec<(String, Json)>>,
 }
 
 /// What a case compares, or why it is skipped.
@@ -221,10 +291,33 @@ enum Outcome {
     Skip(String),
 }
 
+/// The Cypher condition that link `r` is valid at `as_of` ([TRAV-2]) under the loader's mapping
+/// (`schema::valid_from`): `KNOWS` and `HAS_MEMBER` from their `creationDate` / `joinDate`,
+/// `WORK_AT` from the start of its `workFrom` year; other links have no validity.
+fn valid_at(r: &str, as_of: &str) -> String {
+    let (_, next) = period(as_of);
+    let end = format!("datetime('{next}T00:00:00Z')");
+    format!(
+        "CASE type({r}) WHEN 'KNOWS' THEN {r}.creationDate < {end}          WHEN 'HAS_MEMBER' THEN {r}.joinDate < {end}          WHEN 'WORK_AT' THEN {r}.workFrom <= {} ELSE true END",
+        &as_of[..4]
+    )
+}
+
 /// The Cypher condition that a link `r` from the expanding node `s` to `m` is followable
 /// ([TRAV-1]); `KNOWS` is followed in every direction.
-fn follow(r: &str, s: &str, m: &str, types: &[String], dir: &str, node_types: &[String]) -> String {
+fn follow(
+    r: &str,
+    s: &str,
+    m: &str,
+    types: &[String],
+    dir: &str,
+    node_types: &[String],
+    as_of: Option<&str>,
+) -> String {
     let mut c = vec![];
+    if let Some(t) = as_of {
+        c.push(valid_at(r, t));
+    }
     if !types.is_empty() {
         c.push(format!("type({r}) IN {}", list_lit(types)));
     }
@@ -280,6 +373,9 @@ impl Ctx<'_> {
                 let (a, b) = (norm(&a), norm(&b));
                 if a == b {
                     tally.pass += 1;
+                    if self.verbose {
+                        eprintln!("{}", json!({ "family": family, "case": case, "result": a }));
+                    }
                 } else {
                     tally.fail += 1;
                     let cut = |v: &Json| {
@@ -330,31 +426,63 @@ impl Ctx<'_> {
         )
     }
 
-    fn random_filter(&mut self) -> (Vec<String>, String, Vec<String>) {
-        let types = match self.r.below(3) {
-            0 => vec![],
-            1 => vec![self.r.pick(&LINK_TYPES).to_string()],
-            _ => {
-                let a = self.r.pick(&LINK_TYPES).to_string();
-                let b = self.r.pick(&LINK_TYPES).to_string();
-                if a == b { vec![a] } else { vec![a, b] }
+    /// A random step from nodes of type `ty` — (link types, direction, node types) — and the
+    /// type it mostly leads to. It follows a link the schema has from `ty`, usually in its
+    /// direction, sometimes `both` or against it, sometimes with a second link type and a node
+    /// type filter, so most steps reach something and some reach nothing. A `dated` step takes a
+    /// link type with a validity when `ty` has one.
+    fn step_from(&mut self, ty: &str, dated: bool) -> ((Vec<String>, String, Vec<String>), String) {
+        let mut incident: Vec<_> = LINK_ENDS
+            .iter()
+            .filter(|e| e.1 == ty || e.2 == ty)
+            .collect();
+        if dated && incident.iter().any(|e| DATED.contains(&e.0)) {
+            incident.retain(|e| DATED.contains(&e.0));
+        }
+        let &&(lt, from, to) = self.r.pick(&incident);
+        let next = if from == ty { to } else { from };
+        let mut types = vec![lt.to_owned()];
+        if self.r.chance(0.3) {
+            let other = self.r.pick(&incident).0;
+            if other != lt {
+                types.push(other.to_owned());
             }
+        }
+        let along = if from == ty { "out" } else { "in" };
+        let against = if from == ty { "in" } else { "out" };
+        let dir = if lt == "KNOWS" {
+            *self.r.pick(&["both", "out", "in"])
+        } else if self.r.chance(0.25) {
+            "both"
+        } else if self.r.chance(0.1) {
+            against
+        } else {
+            along
         };
-        let dir = (*self.r.pick(&["both", "both", "out", "in"])).to_owned();
         let node_types = if self.r.chance(0.3) {
+            vec![next.to_owned()]
+        } else if self.r.chance(0.05) {
             vec![self.r.pick(&TYPES).to_string()]
         } else {
             vec![]
         };
-        (types, dir, node_types)
+        ((types, dir.to_owned(), node_types), next.to_owned())
     }
 
     fn neighbors_case(&mut self, depth: u32) {
-        let ty = *self.r.pick(&TYPES);
+        let as_of = self.r.chance(0.25).then(|| self.random_as_of());
+        let ty = if as_of.is_some() {
+            *self.r.pick(&["Person", "Person", "Forum", "Organisation"])
+        } else {
+            *self.r.pick(&TYPES)
+        };
         let (_, key) = self.node(ty);
-        let (types, dir, node_types) = self.random_filter();
+        let ((types, dir, node_types), _) = self.step_from(ty, as_of.is_some());
         let mut req = json!({ "start": [{ "key": key }], "depth": depth, "direction": dir,
                               "limit_per_node": 1000, "limit": 5000 });
+        if let Some(t) = &as_of {
+            req["as_of"] = json!({ "$date": t });
+        }
         if !types.is_empty() {
             req["link_types"] = json!(types);
         }
@@ -368,7 +496,7 @@ impl Ctx<'_> {
                  WITH s, collect(DISTINCT m.key) AS ms, count(DISTINCT r) AS rs \
                  RETURN [s.key] + ms, rs",
                 k = lit(&key),
-                f = follow("r", "s", "m", &types, &dir, &node_types)
+                f = follow("r", "s", "m", &types, &dir, &node_types, as_of.as_deref())
             )
         } else {
             format!(
@@ -379,8 +507,8 @@ impl Ctx<'_> {
                  WITH s, hop1, collect(DISTINCT b.key) AS hop2 \
                  RETURN [s.key] + [x IN hop1 | x.key] + hop2",
                 k = lit(&key),
-                f1 = follow("r1", "s", "a", &types, &dir, &node_types),
-                f2 = follow("r2", "a", "b", &types, &dir, &node_types)
+                f1 = follow("r1", "s", "a", &types, &dir, &node_types, as_of.as_deref()),
+                f2 = follow("r2", "a", "b", &types, &dir, &node_types, as_of.as_deref())
             )
         };
         let family = if depth == 1 {
@@ -412,63 +540,625 @@ impl Ctx<'_> {
         });
     }
 
+    /// A random `as_of` date: a year, month or day in 2010–2012, the years of LDBC's activity.
+    fn random_as_of(&mut self) -> String {
+        let y = 2010 + self.r.below(3);
+        match self.r.below(3) {
+            0 => format!("{y}"),
+            1 => format!("{y}-{:02}", 1 + self.r.below(12)),
+            _ => format!(
+                "{y}-{:02}-{:02}",
+                1 + self.r.below(12),
+                1 + self.r.below(28)
+            ),
+        }
+    }
+
+    /// Where a random walk of up to `hops` followable links from `key` ends, so most `paths`
+    /// cases have a path; `None` when it ends where it started.
+    fn walk(
+        &mut self,
+        key: &str,
+        types: &[String],
+        dir: &str,
+        as_of: Option<&str>,
+        hops: usize,
+    ) -> Result<Option<String>> {
+        let mut at = key.to_owned();
+        for _ in 0..hops {
+            let mut req = json!({ "start": [{ "key": at }], "link_types": types, "direction": dir,
+                                  "limit_per_node": 1000, "limit": 5000 });
+            if let Some(t) = as_of {
+                req["as_of"] = json!({ "$date": t });
+            }
+            let res = self.op("neighbors", &req)?;
+            let next: Vec<String> = res["nodes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|n| n["hop"] == 1)
+                .filter_map(|n| self.keys.get(n["id"].as_str()?).cloned())
+                .collect();
+            if next.is_empty() {
+                break;
+            }
+            at = self.r.pick(&next).clone();
+        }
+        Ok((at != key).then_some(at))
+    }
+
+    /// A MyGraph path as keys and link types in walking order: `[key, TYPE, key, …]`.
+    fn our_path(&self, p: &Json) -> Json {
+        let nodes = p["nodes"].as_array().cloned().unwrap_or_default();
+        let links = p["links"].as_array().cloned().unwrap_or_default();
+        let mut out = vec![];
+        for (i, n) in nodes.iter().enumerate() {
+            if i > 0 {
+                out.push(links.get(i - 1).map_or(Json::Null, |l| l["type"].clone()));
+            }
+            let id = n["id"].as_str().unwrap_or_default();
+            out.push(self.keys.get(id).map_or(Json::Null, |k| json!(k)));
+        }
+        Json::Array(out)
+    }
+
+    /// Paths from a Cypher query returning node keys and link types, in the form of `our_path`;
+    /// `None` when Neo4j timed out.
+    fn neo_paths(&self, cypher: &str) -> Result<Option<Vec<Json>>> {
+        let rows = match self.neo.rows(cypher) {
+            Ok(rows) => rows,
+            Err(e) if e.to_string().contains("imeout") => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        Ok(Some(
+            rows.into_iter()
+                .map(|row| {
+                    let keys = row[0].as_array().cloned().unwrap_or_default();
+                    let types = row[1].as_array().cloned().unwrap_or_default();
+                    let mut out = vec![];
+                    for (i, k) in keys.into_iter().enumerate() {
+                        if i > 0 {
+                            out.push(types.get(i - 1).cloned().unwrap_or(Json::Null));
+                        }
+                        out.push(k);
+                    }
+                    Json::Array(out)
+                })
+                .collect(),
+        ))
+    }
+
+    /// `paths` in every mode, with a random direction and sometimes `as_of`. The Cypher side
+    /// walks a quantified path pattern whose inner `WHERE` applies [TRAV-1] per step. Neo4j's
+    /// shortest paths are shortest trails, which never repeat a node, so they are [TRAV-4] paths;
+    /// for `k_shortest` Neo4j lists every path of each length, filtered to distinct nodes.
     fn paths_case(&mut self) {
-        let pick_ty = |r: &mut Rng| *r.pick(&["Person", "Person", "Post", "Comment", "Forum"]);
-        let (ta, tb) = (pick_ty(&mut self.r), pick_ty(&mut self.r));
-        let ((_, a), (_, b)) = (self.node(ta), self.node(tb));
+        let as_of = self.r.chance(0.25).then(|| self.random_as_of());
+        let sets: Vec<&[&str]> = PATH_LINK_SETS
+            .into_iter()
+            .filter(|set| as_of.is_none() || set.iter().any(|t| DATED.contains(t)))
+            .collect();
+        let types: Vec<String> = self.r.pick(&sets).iter().map(|s| s.to_string()).collect();
+        let touched: Vec<&str> = LINK_ENDS
+            .iter()
+            .filter(|e| types.iter().any(|t| t == e.0))
+            .flat_map(|e| [e.1, e.2])
+            .collect();
+        let ty = *self.r.pick(&touched);
+        let (_, mut a) = self.node(ty);
+        let dir = (*self.r.pick(&["both", "both", "out", "in"])).to_owned();
+        let mode = *self.r.pick(&["shortest", "all_shortest", "k_shortest"]);
+        let max_length: usize = if mode == "k_shortest" { 3 } else { 4 };
+        let k = 1 + self.r.below(10);
+        let hops = 1 + self.r.below(max_length);
+        let mut walked = None;
+        if self.r.chance(0.7) {
+            for _ in 0..3 {
+                walked = self
+                    .walk(&a, &types, &dir, as_of.as_deref(), hops)
+                    .ok()
+                    .flatten();
+                if walked.is_some() {
+                    break;
+                }
+                a = self.node(ty).1;
+            }
+        }
+        let b = match walked {
+            Some(b) => b,
+            None => {
+                let t = *self.r.pick(&["Person", "Post", "Comment", "Forum"]);
+                self.node(t).1
+            }
+        };
         if a == b {
             return;
         }
-        let types: Vec<String> = self
-            .r
-            .pick(&PATH_LINK_SETS)
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let all = self.r.chance(0.5);
-        let req = json!({ "from": { "key": a }, "to": { "key": b }, "max_length": 4,
-                          "link_types": types, "mode": if all { "all_shortest" } else { "shortest" } });
-        let rel = format!(":{}", types.join("|"));
-        let (la, lb) = (Self::label_of(&a), Self::label_of(&b));
-        let cypher = if all {
+        let mut req = json!({ "from": { "key": a }, "to": { "key": b }, "max_length": max_length,
+                              "link_types": types, "direction": dir, "mode": mode });
+        if mode == "k_shortest" {
+            req["k"] = json!(k);
+        }
+        if let Some(t) = &as_of {
+            req["as_of"] = json!({ "$date": t });
+        }
+        let mut cond = vec![];
+        match dir.as_str() {
+            "out" => cond.push("(type(r) = 'KNOWS' OR startNode(r) = x)".to_owned()),
+            "in" => cond.push("(type(r) = 'KNOWS' OR endNode(r) = x)".to_owned()),
+            _ => {}
+        }
+        if let Some(t) = &as_of {
+            cond.push(valid_at("r", t));
+        }
+        let step = format!(
+            "((x)-[r:{}]-(y){})",
+            types.join("|"),
+            if cond.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", cond.join(" AND "))
+            }
+        );
+        let ends = format!(
+            "MATCH (a:{} {{key: {}}}), (b:{} {{key: {}}})",
+            Self::label_of(&a),
+            lit(&a),
+            Self::label_of(&b),
+            lit(&b)
+        );
+        let ret = "RETURN [n IN nodes(p) | n.key], [l IN relationships(p) | type(l)]";
+        let shortest = format!(
+            "{ends} MATCH p = ALL SHORTEST (a) {step}{{1,{max_length}}} (b) {ret} LIMIT 101"
+        );
+        let of_length = |l: usize| {
             format!(
-                "MATCH (a:{la} {{key: {}}}), (b:{lb} {{key: {}}}) \
-                 OPTIONAL MATCH p = allShortestPaths((a)-[{rel}*..4]-(b)) \
-                 WITH p LIMIT 101 RETURN min(length(p)), count(p)",
-                lit(&a),
-                lit(&b)
-            )
-        } else {
-            format!(
-                "MATCH (a:{la} {{key: {}}}), (b:{lb} {{key: {}}}) \
-                 OPTIONAL MATCH p = shortestPath((a)-[{rel}*..4]-(b)) RETURN length(p), count(p)",
-                lit(&a),
-                lit(&b)
+                "{ends} MATCH p = (a) {step}{{{l}}} (b) \
+                 WHERE all(i IN range(0, {l} - 1) WHERE NOT nodes(p)[i] IN nodes(p)[i + 1..]) \
+                 {ret} LIMIT 2001"
             )
         };
-        let family = if all {
-            "paths_all_shortest"
+        let family = match mode {
+            "shortest" => "paths_shortest",
+            "all_shortest" => "paths_all_shortest",
+            _ => "paths_k_shortest",
+        };
+        let cypher = if mode == "k_shortest" {
+            of_length(1)
         } else {
-            "paths_shortest"
+            shortest.clone()
         };
         let case = json!({ "request": req, "cypher": cypher });
         self.run(family, case, |c| {
             let res = c.op("paths", &req)?;
-            let paths = res["paths"].as_array().ok_or("no paths")?;
-            let len = paths.first().map_or(Json::Null, |p| p["length"].clone());
-            let row = match c.neo.rows(&cypher) {
-                Ok(mut rows) => rows.pop().ok_or("no row")?,
-                Err(e) if e.to_string().contains("imeout") => {
+            if res["truncated"] == true {
+                return Ok(Outcome::Skip("truncated".into()));
+            }
+            let ours: Vec<(usize, Json)> = res["paths"]
+                .as_array()
+                .ok_or("no paths")?
+                .iter()
+                .map(|p| (p["length"].as_u64().unwrap_or(0) as usize, c.our_path(p)))
+                .collect();
+            if mode != "k_shortest" {
+                let Some(theirs) = c.neo_paths(&shortest)? else {
                     return Ok(Outcome::Skip("neo4j timeout".into()));
+                };
+                let len = theirs.first().map(|p| p.as_array().map_or(0, Vec::len) / 2);
+                let our_len = ours.first().map(|p| p.0);
+                return Ok(if mode == "shortest" {
+                    // Which of the shortest paths comes first depends on internal numbers.
+                    let known = ours
+                        .first()
+                        .is_none_or(|p| theirs.len() > 100 || theirs.contains(&p.1));
+                    Outcome::Compare(
+                        json!([ours.len(), our_len, known]),
+                        json!([theirs.len().min(1), len, true]),
+                    )
+                } else if theirs.len() > 100 {
+                    Outcome::Compare(json!([ours.len(), our_len]), json!([100, len]))
+                } else {
+                    Outcome::Compare(
+                        sorted(ours.into_iter().map(|p| p.1).collect()),
+                        sorted(theirs),
+                    )
+                });
+            }
+            // k_shortest: every path of the lengths before the last one returned, then as many
+            // of the last length as are still wanted (which ones depends on internal numbers).
+            let ascending = ours.windows(2).all(|w| w[0].0 <= w[1].0);
+            let (mut need, mut last) = (k, 0);
+            let (mut our_full, mut their_full) = (vec![], vec![]);
+            let (mut our_cut, mut their_cut) = (Json::Null, Json::Null);
+            for l in 1..=max_length {
+                if need == 0 {
+                    break;
                 }
-                Err(e) => return Err(e),
-            };
-            let n = row[1].as_u64().unwrap_or(0).min(100);
+                last = l;
+                let Some(theirs) = c.neo_paths(&of_length(l))? else {
+                    return Ok(Outcome::Skip("neo4j timeout".into()));
+                };
+                let ours_l: Vec<Json> = ours
+                    .iter()
+                    .filter(|p| p.0 == l)
+                    .map(|p| p.1.clone())
+                    .collect();
+                if theirs.len() <= need {
+                    need -= theirs.len();
+                    our_full.push(json!([l, sorted(ours_l)]));
+                    their_full.push(json!([l, sorted(theirs)]));
+                } else {
+                    let known = ours_l
+                        .iter()
+                        .all(|p| theirs.len() > 2000 || theirs.contains(p));
+                    our_cut = json!([l, ours_l.len(), known]);
+                    their_cut = json!([l, need, true]);
+                    need = 0;
+                }
+            }
+            let longer = ours.iter().filter(|p| p.0 > last).count();
             Ok(Outcome::Compare(
-                json!([len, paths.len()]),
-                json!([row[0], n]),
+                json!([ascending, our_full, our_cut, longer]),
+                json!([true, their_full, their_cut, 0]),
             ))
         });
+    }
+
+    /// `neighbors` with 2–3 different `steps`, sometimes `as_of`. Neo4j expands hop by hop from
+    /// the nodes first reached at the previous hop ([OP-NEIGH-2]), by element ID.
+    fn neighbors_steps_case(&mut self) {
+        let as_of = self.r.chance(0.3).then(|| self.random_as_of());
+        let ty = if as_of.is_some() {
+            *self.r.pick(&["Person", "Forum", "Organisation"])
+        } else {
+            *self.r.pick(&TYPES)
+        };
+        let (_, key) = self.node(ty);
+        let n = 2 + self.r.below(2);
+        let mut at = ty.to_owned();
+        let mut steps = vec![];
+        for i in 0..n {
+            let (step, next) = self.step_from(&at, as_of.is_some() && i == 0);
+            steps.push(step);
+            at = next;
+        }
+        let step_json: Vec<Json> = steps
+            .iter()
+            .map(|(types, dir, node_types)| {
+                let mut s = json!({ "direction": dir });
+                if !types.is_empty() {
+                    s["link_types"] = json!(types);
+                }
+                if !node_types.is_empty() {
+                    s["node_types"] = json!(node_types);
+                }
+                s
+            })
+            .collect();
+        let mut req = json!({ "start": [{ "key": key }], "steps": step_json,
+                              "limit_per_node": 1000, "limit": 5000 });
+        if let Some(t) = &as_of {
+            req["as_of"] = json!({ "$date": t });
+        }
+        let label = Self::label_of(&key);
+        let case = json!({ "request": req, "cypher": "one query per hop" });
+        self.run("neighbors_steps", case, |c| {
+            let res = c.op("neighbors", &req)?;
+            let Some(mut ours) = c.neighbor_keys(&res) else {
+                return Ok(Outcome::Skip("truncated".into()));
+            };
+            let links = res["links"].as_array().map_or(0, Vec::len);
+            let start = c
+                .neo
+                .rows(&format!(
+                    "MATCH (s:{label} {{key: {}}}) RETURN elementId(s)",
+                    lit(&key)
+                ))?
+                .pop()
+                .ok_or("no start")?;
+            let start = start[0].as_str().ok_or("no element ID")?.to_owned();
+            let mut seen = HashSet::from([start.clone()]);
+            let mut theirs = vec![json!(key)];
+            let mut rels = HashSet::new();
+            let mut frontier = vec![start];
+            for (types, dir, node_types) in &steps {
+                if frontier.is_empty() {
+                    break;
+                }
+                let cypher = format!(
+                    "MATCH (a) WHERE elementId(a) IN {} MATCH (a)-[r]-(b) WHERE {} \
+                     RETURN elementId(r), elementId(b), b.key",
+                    list_lit(&frontier),
+                    follow("r", "a", "b", types, dir, node_types, as_of.as_deref())
+                );
+                let mut next = vec![];
+                for row in c.neo.rows(&cypher)? {
+                    rels.insert(row[0].to_string());
+                    let b = row[1].as_str().unwrap_or_default().to_owned();
+                    if seen.insert(b.clone()) {
+                        next.push(b);
+                        theirs.push(row[2].clone());
+                    }
+                }
+                frontier = next;
+            }
+            ours.sort_by_key(|x| x.to_string());
+            Ok(Outcome::Compare(
+                json!([ours, links]),
+                json!([sorted(theirs), rels.len()]),
+            ))
+        });
+    }
+
+    /// Every row of a `find` request, page by page.
+    fn all_rows(&self, req: &Json) -> Result<Vec<Json>> {
+        let mut req = req.clone();
+        req["limit"] = json!(1000);
+        let mut rows = vec![];
+        loop {
+            let res = self.op("find", &req)?;
+            rows.extend(res["rows"].as_array().cloned().unwrap_or_default());
+            match res["next_cursor"].as_str() {
+                Some(c) => req["cursor"] = json!(c),
+                None => return Ok(rows),
+            }
+        }
+    }
+
+    /// (key, value of `prop`) of every node of type `ty` in Neo4j, cached.
+    fn text_values(&mut self, ty: &str, prop: &str) -> Result<Vec<(String, Json)>> {
+        let k = (ty.to_owned(), prop.to_owned());
+        if !self.text_values.contains_key(&k) {
+            let rows = self
+                .neo
+                .rows(&format!("MATCH (n:{ty}) RETURN n.key, n.{prop}"))?;
+            let values = rows
+                .into_iter()
+                .map(|r| (r[0].as_str().unwrap_or_default().to_owned(), r[1].clone()))
+                .collect();
+            self.text_values.insert(k.clone(), values);
+        }
+        Ok(self.text_values[&k].clone())
+    }
+
+    /// `contains` / `starts_with` on a string or list field, sometimes under `not`, with an
+    /// operand cut from a real value and its case changed. Cypher has no name key
+    /// ([NORM-NAME-1]: case folding, accents removed), so the expected nodes are worked out here
+    /// from Neo4j's values with the spec's name key, and MyGraph's are read page by page.
+    fn find_text_case(&mut self) {
+        let (ty, field, prop) = *self.r.pick(&TEXT_FIELDS);
+        let op = *self.r.pick(&["contains", "starts_with"]);
+        let negate = self.r.chance(0.25);
+        let values = match self.text_values(ty, prop) {
+            Ok(v) => v,
+            Err(e) => {
+                self.run("find_text", json!({ "type": ty, "field": field }), |_| {
+                    Err(e)
+                });
+                return;
+            }
+        };
+        let strings: Vec<&str> = values
+            .iter()
+            .flat_map(|(_, v)| match v {
+                Json::Array(a) => a.iter().filter_map(Json::as_str).collect::<Vec<_>>(),
+                _ => v.as_str().into_iter().collect(),
+            })
+            .collect();
+        if strings.is_empty() {
+            return;
+        }
+        let chars: Vec<char> = self.r.pick(&strings).chars().collect();
+        let start = if op == "starts_with" {
+            0
+        } else {
+            self.r.below(chars.len())
+        };
+        let len = 1 + self.r.below((chars.len() - start).min(5));
+        let cut: String = chars[start..start + len].iter().collect();
+        let operand = match self.r.below(3) {
+            0 => cut.to_uppercase(),
+            1 => cut.to_lowercase(),
+            _ => cut,
+        };
+        let key = name_key(&operand);
+        if key.is_empty() {
+            return;
+        }
+        let holds = |s: &str| {
+            let k = name_key(s);
+            if op == "contains" {
+                k.contains(&key)
+            } else {
+                k.starts_with(&key)
+            }
+        };
+        let expected: Vec<Json> = values
+            .iter()
+            .filter(|(_, v)| {
+                let m = match v {
+                    Json::Array(a) => a.iter().filter_map(Json::as_str).any(holds),
+                    _ => v.as_str().is_some_and(holds),
+                };
+                m != negate
+            })
+            .map(|(k, _)| json!(k))
+            .collect();
+        let mut cond = json!({ "field": field, "op": op, "value": operand });
+        if negate {
+            cond = json!({ "not": cond });
+        }
+        let req = json!({ "target": "nodes",
+            "where": { "all": [{ "field": "type", "op": "eq", "value": ty }, cond] } });
+        let case =
+            json!({ "request": req, "cypher": format!("MATCH (n:{ty}) RETURN n.key, n.{prop}") });
+        self.run("find_text", case, |c| {
+            let ours: Vec<Json> = c
+                .all_rows(&req)?
+                .iter()
+                .filter_map(|r| c.keys.get(r["id"].as_str()?).map(|k| json!(k)))
+                .collect();
+            Ok(Outcome::Compare(
+                json!([ours.len(), sorted(ours)]),
+                json!([expected.len(), sorted(expected)]),
+            ))
+        });
+    }
+
+    /// Rows sorted by one or two keys in either order, sometimes filtered, read in pages with
+    /// `cursor`: the sequence of sort values must equal Cypher's `ORDER BY` with missing values
+    /// last ([OP-FIND-7]). Ties are broken by internal number, so only values are compared, plus
+    /// the total and that no row comes twice.
+    fn find_sort_case(&mut self) {
+        let ty = self.r.pick(&SORT_FIELDS).0;
+        let menu: Vec<(&str, &str)> = SORT_FIELDS
+            .iter()
+            .filter(|f| f.0 == ty)
+            .map(|f| (f.1, f.2))
+            .collect();
+        let first = *self.r.pick(&menu);
+        let mut keys = vec![first];
+        if menu.len() > 1 && self.r.chance(0.5) {
+            let second = *self.r.pick(&menu);
+            if second != first {
+                keys.push(second);
+            }
+        }
+        let desc: Vec<bool> = keys.iter().map(|_| self.r.chance(0.5)).collect();
+        let (cond, expr) = match self.r.chance(0.5).then(|| self.random_condition(ty)) {
+            Some(Ok(Some((cond, expr)))) => (Some(cond), expr),
+            _ => (None, "true".to_owned()),
+        };
+        let limit = *self.r.pick(&[7, 50, 333, 1000]);
+        let mut all = vec![json!({ "field": "type", "op": "eq", "value": ty })];
+        all.extend(cond);
+        let sort: Vec<Json> = keys
+            .iter()
+            .zip(&desc)
+            .map(|(k, d)| json!({ "by": k.0, "order": if *d { "desc" } else { "asc" } }))
+            .collect();
+        let req = json!({ "target": "nodes", "where": { "all": all },
+            "fields": keys.iter().map(|k| k.0).collect::<Vec<_>>(), "sort": sort, "limit": limit });
+        let order: Vec<String> = desc
+            .iter()
+            .enumerate()
+            .map(|(i, d)| format!("k{i} IS NULL, k{i}{}", if *d { " DESC" } else { "" }))
+            .collect();
+        let with: Vec<String> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, k)| format!("{} AS k{i}", k.1))
+            .collect();
+        let ret: Vec<String> = (0..keys.len()).map(|i| format!("k{i}")).collect();
+        let base = format!("MATCH (n:{ty}) WHERE {expr}");
+        let cypher = format!(
+            "{base} WITH n, {} ORDER BY {} RETURN {} LIMIT $N",
+            with.join(", "),
+            order.join(", "),
+            ret.join(", ")
+        );
+        let case = json!({ "request": req, "cypher": cypher });
+        self.run("find_sort", case, |c| {
+            let mut req = req.clone();
+            let (mut rows, mut total) = (vec![], Json::Null);
+            for _ in 0..4 {
+                let res = c.op("find", &req)?;
+                total = res["total"].clone();
+                rows.extend(res["rows"].as_array().cloned().unwrap_or_default());
+                match res["next_cursor"].as_str() {
+                    Some(cur) => req["cursor"] = json!(cur),
+                    None => break,
+                }
+            }
+            let ids: HashSet<&str> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
+            let repeated = rows.len() - ids.len();
+            let ours: Vec<Json> = rows
+                .iter()
+                .map(|r| Json::Array(keys.iter().map(|k| r["values"][k.0].clone()).collect()))
+                .collect();
+            let count = c
+                .neo
+                .rows(&format!("{base} RETURN count(n)"))?
+                .pop()
+                .ok_or("no row")?;
+            let theirs: Vec<Json> = c
+                .neo
+                .rows(&cypher.replace("$N", &rows.len().to_string()))?
+                .into_iter()
+                .map(Json::Array)
+                .collect();
+            Ok(Outcome::Compare(
+                json!([total, repeated, ours]),
+                json!([count[0], 0, theirs]),
+            ))
+        });
+    }
+
+    /// Group order ([OP-FIND-7]): by the `sort` key, then count descending, then group key,
+    /// missing keys last; read in pages of a random size.
+    fn find_group_order_cases(&mut self) {
+        let groups: [(&str, &str, &str); 5] = [
+            ("Person", "prop:browserUsed", "n.browserUsed"),
+            ("Post", "prop:language", "n.language"),
+            ("Comment", "prop:creationDate.month", "n.creationDate.month"),
+            (
+                "Person",
+                "prop:birthday.decade",
+                "(n.birthday.year / 10) * 10",
+            ),
+            (
+                "Forum",
+                "degree(HAS_MEMBER, out)",
+                "COUNT { (n)-[:HAS_MEMBER]->() }",
+            ),
+        ];
+        for (ty, by, cy) in groups {
+            for sort in ["default", "key_asc", "key_desc", "count_asc"] {
+                let (sort_json, order) = match sort {
+                    "default" => (json!([]), "c DESC, g IS NULL, g"),
+                    "key_asc" => (json!([{ "by": by }]), "g IS NULL, g"),
+                    "key_desc" => (json!([{ "by": by, "order": "desc" }]), "g IS NULL, g DESC"),
+                    _ => (
+                        json!([{ "by": "count", "order": "asc" }]),
+                        "c, g IS NULL, g",
+                    ),
+                };
+                let limit = *self.r.pick(&[3, 25, 1000]);
+                let req = json!({ "target": "nodes",
+                    "where": { "field": "type", "op": "eq", "value": ty },
+                    "group_by": [by], "sort": sort_json, "limit": limit });
+                let cypher = format!(
+                    "MATCH (n:{ty}) WITH {cy} AS g, count(*) AS c RETURN g, c ORDER BY {order}"
+                );
+                let case = json!({ "request": req, "cypher": cypher });
+                self.run("find_group_order", case, |c| {
+                    let mut req = req.clone();
+                    let mut groups = vec![];
+                    let mut total;
+                    loop {
+                        let res = c.op("find", &req)?;
+                        total = Some(res["total"].clone());
+                        groups.extend(
+                            res["groups"]
+                                .as_array()
+                                .ok_or("no groups")?
+                                .iter()
+                                .map(|g| json!([g["key"][by], g["count"]])),
+                        );
+                        match res["next_cursor"].as_str() {
+                            Some(cur) => req["cursor"] = json!(cur),
+                            None => break,
+                        }
+                    }
+                    let theirs: Vec<Json> =
+                        c.neo.rows(&cypher)?.into_iter().map(Json::Array).collect();
+                    Ok(Outcome::Compare(
+                        json!([total, groups]),
+                        json!([theirs.len(), theirs]),
+                    ))
+                });
+            }
+        }
     }
 
     /// A random property condition on nodes of a random type, with the operand taken from a real
@@ -894,19 +1584,24 @@ pub fn run(
         tally: BTreeMap::new(),
         failures: Vec::new(),
         verbose,
+        text_values: HashMap::new(),
     };
     c.find_group_cases();
+    c.find_group_order_cases();
     c.find_link_cases();
     for i in 0..cases {
-        match i % 7 {
+        match i % 10 {
             0 | 1 => c.neighbors_case(1),
             2 => c.neighbors_case(2),
-            3 => c.paths_case(),
-            4 | 5 => c.find_count_case(),
-            _ => {
+            3 => c.neighbors_steps_case(),
+            4 => c.paths_case(),
+            5 | 6 => c.find_count_case(),
+            7 => {
                 c.find_degree_case();
                 c.find_linked_case();
             }
+            8 => c.find_text_case(),
+            _ => c.find_sort_case(),
         }
     }
     let ok = c.failures.is_empty();

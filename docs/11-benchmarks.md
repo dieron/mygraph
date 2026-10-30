@@ -64,6 +64,9 @@ of at most 1000 items ([OP-WRITE-1]): all nodes first, then all links.
   `HAS_MODERATOR`, `HAS_MEMBER`, `HAS_TAG`, `HAS_INTEREST`, `IS_LOCATED_IN`, `REPLY_OF`, `LIKES`,
   `STUDY_AT`, `WORK_AT`, `IS_PART_OF`, `HAS_TYPE`, `IS_SUBCLASS_OF`. Link attributes
   (`creationDate`, `joinDate`, `classYear`, `workFrom`) are link properties.
+- **Validity:** `KNOWS` and `HAS_MEMBER` links are valid from their `creationDate` / `joinDate`,
+  `WORK_AT` from the start of its `workFrom` year (`valid_from`, [TRAV-2]), so `as_of` has
+  something to filter. The properties stay as well; LDBC has no end dates.
 - **Naming:** graphs are created with `naming: free` ([VOCAB-1]), so names stay exactly as in
   LDBC and in Neo4j (`locationIP`, not the `location_ip` that `naming: styled` would ask for).
 - **Provenance** (`--provenance`): `none` (policy `require_evidence = off`, no citations) or `file`
@@ -99,7 +102,8 @@ rows it comes from; no row points to a missing node; no row matched an earlier o
 | Open time (warm cache) | 4.9 s | 6.2 s | |
 
 (Rerun on a quiet machine with the current mapping; an earlier run alongside other work took
-145 s and 262 s.)
+145 s and 262 s. Adding `valid_from` to 140 654 links later made the `none` load 156 s and the
+file 1 227 MiB.)
 
 **SF1** (`--provenance file`): 3 181 724 nodes, 17 256 038 links, 20 437 762 citations; every
 count equals its CSV rows, nothing dangling. Load 3 612 s (nodes 638 s at 4 986/s, links 2 973 s
@@ -169,34 +173,75 @@ mygraph-ldbc diff --data <data dir> --graph ldbc-sf01-none --cases 700 --seed 1
 
 | Family | MyGraph request | Compared |
 |---|---|---|
-| `neighbors_1` | 1 hop from a random node; random link types (0–2), direction, node type | node keys, link count |
+| `neighbors_1` | 1 hop from a random node along a link its type has in the LDBC schema (sometimes a second link type, `both` or the other direction, a node type filter); `as_of` in a quarter of the cases | node keys, link count |
 | `neighbors_2` | the same, 2 hops | node keys |
-| `paths_shortest`, `paths_all_shortest` | random pair, `max_length` 4, one of five link-type sets | length, number of paths (≤ 100) |
+| `neighbors_steps` | 2–3 different `steps` that follow the schema from type to type, sometimes `as_of`; Neo4j expands hop by hop from the nodes first reached at the previous hop ([OP-NEIGH-2]) | node keys, link count |
+| `paths_shortest` | a pair where the second node is mostly reached by a random walk, one of seven link-type sets, `direction` `both` / `out` / `in`, sometimes `as_of`, `max_length` 4 | length, and that the path is one of Neo4j's shortest paths |
+| `paths_all_shortest` | the same | every path (keys and link types), or length and count when there are more than 100 |
+| `paths_k_shortest` | the same with `k` 1–10, `max_length` 3 | every path of each length before the last one returned, then the count of the last length and that each is one of Neo4j's |
 | `find_count` | type plus one condition on a property, `name` or `labels`, operand taken from a real node: every operator on strings, ints, dates and date-times (as partial dates), lists | count |
 | `find_degree` | `degree(T, dir)` with `gt` / `eq` / `lte` | count, `max(degree)` |
 | `find_group` | 9 fixed group-bys (`prop:…`, `.year`, `.month`, `.decade`, `labels`) with count, count of, sum, avg, median, min, count_distinct | every group |
+| `find_group_order` | 5 group-bys (one with missing keys, one by `degree`) × 4 orders (default, key ascending / descending, count ascending), read in pages of 3, 25 or 1000 | the groups in order |
 | `find_links` | links by type and endpoint types; date and int filters on link properties | groups, counts |
 | `find_linked` | persons with a `linked` condition | node keys |
+| `find_text` | `contains` / `starts_with` on a name, string or list property, sometimes under `not`; the operand cut from a real value, sometimes upper- or lower-cased | node keys, all pages |
+| `find_sort` | rows sorted by one or two of 17 keys (names, dates, strings, degrees, properties some posts lack) in either order, sometimes with a condition, limit 7–1000, up to 4 pages | the total, no row twice, and the sequence of sort values against `ORDER BY` with missing values last |
+
+The Cypher side of `paths` is a quantified path pattern whose inner `WHERE` applies [TRAV-1] per
+step (direction, and validity for `as_of`). Neo4j's `ALL SHORTEST` returns shortest trails, which
+never repeat a node, so they are [TRAV-4] paths; for `k_shortest` Neo4j lists the paths of each
+length filtered to distinct nodes. Which of several equally long paths comes first, and which rows
+tie in a sort, depend on internal numbers ([TRAV-4], [OP-FIND-7]), so those are compared as sets
+or by their sort values. Cypher has no name key ([NORM-NAME-1] folds case and removes accents),
+so for `find_text` the expected nodes are worked out from Neo4j's values with the spec's name key.
 
 A case is skipped when MyGraph's result is truncated (more than 1000 links per node or 5000
-nodes), or when Neo4j hits its 30 s transaction timeout (`db.transaction.timeout=30s`).
+nodes, or the `k_shortest` work budget), or when Neo4j hits its 30 s transaction timeout
+(`db.transaction.timeout=30s`).
 
-**SF0.1, seeds 1–4, 700 random cases each** (the group-by cases are the same in every run):
+**SF0.1, seeds 1–4, 700 random cases each** (the group-by cases are the same in every run; about
+40 s per run):
 
 | Family | Pass | Fail | Skipped |
 |---|---|---|---|
-| `neighbors_1` | 797 | 0 | 3 |
-| `neighbors_2` | 347 | 0 | 53 |
-| `paths_shortest` | 205 | 0 | 0 |
-| `paths_all_shortest` | 195 | 0 | 0 |
-| `find_count` | 800 | 0 | 0 |
-| `find_degree` | 400 | 0 | 0 |
+| `neighbors_1` | 557 | 0 | 3 |
+| `neighbors_2` | 278 | 0 | 2 |
+| `neighbors_steps` | 259 | 0 | 21 |
+| `paths_shortest` | 108 | 0 | 0 |
+| `paths_all_shortest` | 98 | 0 | 0 |
+| `paths_k_shortest` | 74 | 0 | 0 |
+| `find_count` | 560 | 0 | 0 |
+| `find_degree` | 280 | 0 | 0 |
 | `find_group` | 36 | 0 | 0 |
+| `find_group_order` | 80 | 0 | 0 |
 | `find_links` | 32 | 0 | 0 |
-| `find_linked` | 400 | 0 | 0 |
+| `find_linked` | 280 | 0 | 0 |
+| `find_text` | 280 | 0 | 0 |
+| `find_sort` | 280 | 0 | 0 |
 
-The table is from runs after the fixes below, with nothing excused: the empty-group cases (206 in
-these runs) now return `{count: 0}` and match Neo4j.
+**Are the cases worth anything?** `--verbose` prints every compared result. In these runs 201 of
+280 `paths` cases have a path (lengths 1–4, all three directions, 77 with `as_of`); two fifths of
+the `neighbors` cases reach only the start node (a link the node happens not to have, the other
+direction, or an `as_of` before the link); the `find_text` results have a median of 218 nodes;
+223 of 280 `find_sort` cases read more than one page. The first version of the generator picked
+link types at random, and two thirds of its `neighbors` cases and four fifths of its `paths` cases
+were empty, which is why steps now follow the schema.
+
+Each comparison was also broken on purpose, one at a time, on a 700-case run:
+
+| Broken on the Cypher side | Failures |
+|---|---|
+| `as_of` uses the start of the period instead of its end | 11 (`neighbors_*`, `paths_*`) |
+| `out` follows links into the node | 10 (`paths_*`) |
+| missing sort values first in descending order | 4 (`find_sort`) |
+| plain lower-casing instead of the name key | 15 (`find_text`) |
+| later hops expand every node so far, not the new ones | 18 (`neighbors_steps`) |
+| default group order with the key descending | 1 (`find_group_order`) |
+| `k_shortest` paths may repeat a node | 0 |
+
+The last one is not caught: with these link sets a path of length ≤ 3 that repeats a node needs
+two links between the same pair (a person liking their own post), which the cases did not meet.
 
 **Findings, fixed on 2026-10-29:**
 
@@ -214,8 +259,12 @@ these runs) now return `{count: 0}` and match Neo4j.
    names the same way, so a misspelled type fails instead of matching nothing. Existing graphs
    read `normalize_types: true` as `styled`.
 
-Not covered yet: `k_shortest`, `paths` with a direction, `neighbors` with different `steps`,
-`as_of`, `contains` / `starts_with`, sorting, paging, and the order of results.
+No differences were found by the families added on 2026-10-29 (`neighbors_steps`, the three
+`paths` families with direction and `as_of`, `find_text`, `find_sort`, `find_group_order`).
+
+Not covered yet: SF1; the order of `neighbors` nodes and of equally long paths (internal numbers);
+`include_retracted`; `find` over evidence and citations, `fields` beyond sort keys, `bucket()` and
+`.century`; `search`, `resolve` and `history`, which have no Cypher counterpart.
 
 ### Then
 
