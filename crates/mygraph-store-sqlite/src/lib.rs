@@ -326,12 +326,17 @@ mod tests {
         spec.execute_batch(include_str!("../../../spec/storage/schema.sql"))
             .unwrap();
         let q = "SELECT type, name, sql FROM sqlite_master ORDER BY type, name";
+        // SQLite keeps each statement's text as written; line endings depend on how git checked
+        // out the two files (core.autocrlf), so they are not compared.
         let rows = |c: &Connection| -> Vec<(String, String, Option<String>)> {
             let mut st = c.prepare(q).unwrap();
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect()
+            st.query_map([], |r| {
+                let sql: Option<String> = r.get(2)?;
+                Ok((r.get(0)?, r.get(1)?, sql.map(|s| s.replace("\r\n", "\n"))))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
         };
         assert_eq!(rows(&g.connection()), rows(&spec));
     }
