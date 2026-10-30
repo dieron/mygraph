@@ -398,7 +398,34 @@ pub fn record_json(row: &Row, actor: &dyn Fn(i64) -> String) -> Map<String, Json
 pub struct Policies {
     pub require_evidence: RequireEvidence,
     pub inline_text_limit: u32,
-    pub normalize_types: bool,
+    pub naming: Naming,
+}
+
+/// [VOCAB-1] which spellings of node types, link types and property keys a graph accepts. Names
+/// are never rewritten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Naming {
+    /// PascalCase node types, UPPER_SNAKE link types, lower_snake property keys.
+    Styled,
+    /// Any name that passes [VOCAB-5], as given.
+    Free,
+}
+
+impl Naming {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Styled => "styled",
+            Self::Free => "free",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "styled" => Some(Self::Styled),
+            "free" => Some(Self::Free),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -432,7 +459,7 @@ impl Default for Policies {
         Self {
             require_evidence: RequireEvidence::Enforce,
             inline_text_limit: 65_536,
-            normalize_types: true,
+            naming: Naming::Styled,
         }
     }
 }
@@ -450,15 +477,23 @@ impl Policies {
         json!({
             "require_evidence": self.require_evidence.as_str(),
             "inline_text_limit": self.inline_text_limit,
-            "normalize_types": self.normalize_types,
+            "naming": self.naming.as_str(),
         })
     }
 
+    /// Graphs created before the `naming` policy stored `normalize_types`; their names are
+    /// already styled (true) or were taken as given (false).
     pub fn from_json(v: &Json) -> Option<Self> {
+        let naming = match (v.get("naming"), v.get("normalize_types")) {
+            (Some(n), _) => Naming::parse(n.as_str()?)?,
+            (None, Some(b)) if b.as_bool()? => Naming::Styled,
+            (None, Some(_)) => Naming::Free,
+            (None, None) => return None,
+        };
         Some(Self {
             require_evidence: RequireEvidence::parse(v["require_evidence"].as_str()?)?,
             inline_text_limit: u32::try_from(v["inline_text_limit"].as_u64()?).ok()?,
-            normalize_types: v["normalize_types"].as_bool()?,
+            naming,
         })
     }
 }

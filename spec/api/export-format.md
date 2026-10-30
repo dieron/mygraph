@@ -16,7 +16,7 @@ storage format.
 ```json
 { "mygraph_export": 1, "graph": "research", "spec_version": "0.1.0-draft",
   "exported_at": "2026-10-25T20:00:00.000Z", "last_seq": 412230,
-  "policies": { "require_evidence": "enforce", "inline_text_limit": 65536, "normalize_types": true },
+  "policies": { "require_evidence": "enforce", "inline_text_limit": 65536, "naming": "styled" },
   "counts": { "actors": 3, "nodes": 18432, "links": 61210, "evidence": 9120, "citations": 88014 } }
 ```
 

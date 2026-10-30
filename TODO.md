@@ -39,20 +39,22 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 ## External benchmarks (docs/11-benchmarks.md)
 
 - [x] LDBC SNB loader (`mygraph-ldbc`); SF0.1 loads with exact counts, with and without evidence.
-- [ ] SF1 load numbers.
+- [x] SF1 load numbers: 60 min with evidence on a busy machine, 23 GiB file, 10.9 GiB RAM.
 - [ ] Where the graph file's bytes go: ~650 bytes per object without evidence, about 21× the raw
       CSV (Neo4j: about 2×).
 - [ ] Faster large loads: an offline bulk import (like `neo4j-admin import`), larger
       transactions for trusted loaders, one batch-level citation instead of one per fact.
-      Published SF1 loads: Neo4j 71 s, TypeGraph/SQLite 587 s; ours is estimated at ~25 min.
+      Published SF1 loads: Neo4j 71 s, TypeGraph/SQLite 587 s; ours took 60 min with evidence.
 - [x] Neo4j Community on Windows with the same data (`mygraph-ldbc neo4j-csv`); SF0.1 counts match.
 - [x] The harness that compares `neighbors` / `paths` / `find` results with Cypher
       (`mygraph-ldbc diff`); 3 212 SF0.1 cases agree with Neo4j.
-- [ ] Decide the two spec / implementation differences it found (docs/11-benchmarks.md):
-      `find` returns no group when nothing matches; `ne` / `not_in` on lists.
+- [x] Fix what it found: one group when nothing matches (code), `ne` / `not_in` on lists (spec),
+      no silent renaming of names (policy `naming: styled | free`).
 - [ ] Extend the harness: `k_shortest`, directed `paths`, `steps`, `as_of`, `contains` /
       `starts_with`, sorting and paging, result order; run it on SF1.
-- [ ] Rerun the SF0.1 and SF1 loads on a quiet machine with the current mapping.
+- [ ] Rerun the SF1 load on a quiet machine with the current mapping.
+- [ ] Deployed instance: after this lands, agents get `vocab.not_styled` for names the server used
+      to rewrite; check the skill and tools in use there still send styled names.
 - [ ] Workload driver: IS1–IS7, update-stream inserts, IC1 / IC13-style reads; MyGraph versus
       Neo4j.
 - [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.

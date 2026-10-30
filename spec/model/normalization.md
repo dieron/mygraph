@@ -9,8 +9,8 @@ Three things are defined here:
 1. **Text input** — how every incoming string is cleaned before it is stored ([NORM-TEXT]).
 2. **Name keys** — the matching form of names and aliases, used for exact lookup, upsert matching
    and the exact stage of entity resolution ([NORM-NAME]).
-3. **Vocabulary canonicalization** — the canonical spelling of node types, link types and property
-   keys ([VOCAB]).
+3. **Vocabulary naming** — which spellings of node types, link types and property keys a graph
+   accepts; names are never rewritten ([VOCAB]).
 
 Full-text search tokenization is not defined here; it is configured in the storage format
 ([storage/schema.sql](../storage/schema.sql)).
@@ -117,19 +117,33 @@ an implementation MAY cache them, but MUST be able to recompute them from the st
 - No folding of Cyrillic `й`/`и`, Ukrainian `ї`/`і`, or any mark outside Latin and Greek script,
   except `ё` → `е`, which is how Russian is commonly written.
 
-## 3. Vocabulary canonicalization
+## 3. Vocabulary naming
 
-Node types, link types and property keys are canonicalized so that `works at`, `worksAt` and
-`WORKS_AT` become one vocabulary item.
+A graph's naming policy keeps one spelling per vocabulary item, so `works at`, `worksAt` and
+`WORKS_AT` do not become three link types. It does so by refusing names, never by rewriting them:
+what a client sends is what is stored and returned, or the request fails and says what to send.
 
-| Item | Canonical style | Example |
+| Item | Style | Example |
 |---|---|---|
-| Node type | PascalCase | `ResearchPaper` |
+| Node type (also labels) | PascalCase | `ResearchPaper` |
 | Link type | UPPER_SNAKE | `WORKS_AT` |
 | Property key | lower_snake | `birth_date` |
 
-**[VOCAB-1]** Canonicalization applies when the graph policy `normalize_types` is `true` (the
-default). The canonical form replaces the input everywhere: it is what is stored and returned.
+**[VOCAB-1]** The graph policy `naming` is one of:
+
+- `styled` (the default): a name is accepted only when it already is in its style, that is, when
+  its NFC form equals its styled form ([VOCAB-2] .. [VOCAB-4]) and the styled form passes
+  [VOCAB-5]. Otherwise the request fails with `vocab.not_styled`; the error's `details` hold
+  `field`, `given` and `expected` (the styled form), so the client can resend.
+- `free`: any name that passes [VOCAB-5] as given (after NFC) is accepted unchanged.
+
+The rule applies to every name in a request, in writes and in reads alike (`find` field
+expressions and type values, `neighbors` and `paths` link and node types, `search` types,
+`resolve` types and hint keys, `get` link types), so a misspelled name fails instead of quietly
+matching nothing. NFC ([NORM-TEXT-2]) is the only change ever made to a name.
+
+*(informative)* Graphs created before this policy stored `normalize_types`; `true` reads as
+`styled` (their names are styled already), `false` as `free`.
 
 **[VOCAB-2]** Word splitting. Convert the input to **NFKC**, then split it into words:
 
@@ -158,19 +172,20 @@ code point to one code point. A code point without a mapping is unchanged.
 - **Property key (lower_snake):** map every code point of every word to lowercase; join the words
   with `_`.
 
-**[VOCAB-5]** Validation of the canonical form (also applied when `normalize_types` is `false`,
-to the input as given, after NFC):
+**[VOCAB-5]** Validation of a name: under `styled`, of its styled form; under `free`, of the name
+as given, after NFC:
 
 | Reason code | When |
 |---|---|
-| `vocab.empty` | No words (canonical form is empty) |
+| `vocab.empty` | No words (`styled`) or the empty string (`free`) |
 | `vocab.too_long` | More than 64 code points |
 | `vocab.bad_start` | The first code point is not a letter (General_Category `L*`) |
-| `vocab.bad_char` | Only when `normalize_types` is `false`: a code point that is not `L*`, `M*`, `N*` or `_` |
+| `vocab.bad_char` | Only under `free`: a code point that is not `L*`, `M*`, `N*` or `_` |
+| `vocab.not_styled` | Only under `styled`: the name passes the checks above but is not its own styled form ([VOCAB-1]) |
 
 The checks apply in the order listed.
 
-*(informative)* Known effects of these rules: acronyms lose their capitals in PascalCase
-(`TVShow` → `TvShow`, `HTTPServer` → `HttpServer`), which is accepted because one predictable
-spelling matters more than preserving acronyms. Letters of any script are allowed
-(`человек` → `Человек`).
+*(informative)* Known effects of these rules: under `styled`, acronyms lose their capitals in
+PascalCase (`TVShow` is refused with `expected` `TvShow`), because one predictable spelling matters
+more than preserving acronyms; a graph that must keep source spellings (`locationIP`, `TVShow`)
+uses `free`. Letters of any script are allowed (`Человек`).

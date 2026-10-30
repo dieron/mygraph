@@ -64,6 +64,8 @@ of at most 1000 items ([OP-WRITE-1]): all nodes first, then all links.
   `HAS_MODERATOR`, `HAS_MEMBER`, `HAS_TAG`, `HAS_INTEREST`, `IS_LOCATED_IN`, `REPLY_OF`, `LIKES`,
   `STUDY_AT`, `WORK_AT`, `IS_PART_OF`, `HAS_TYPE`, `IS_SUBCLASS_OF`. Link attributes
   (`creationDate`, `joinDate`, `classYear`, `workFrom`) are link properties.
+- **Naming:** graphs are created with `naming: free` ([VOCAB-1]), so names stay exactly as in
+  LDBC and in Neo4j (`locationIP`, not the `location_ip` that `naming: styled` would ask for).
 - **Provenance** (`--provenance`): `none` (policy `require_evidence = off`, no citations) or `file`
   (one evidence per CSV file, every node and link cites the evidence of the file it came from). The
   difference between the two runs is the measured cost of evidence.
@@ -89,12 +91,23 @@ rows it comes from; no row points to a missing node; no row matched an earlier o
 | | `--provenance none` | `--provenance file` | Cost of evidence |
 |---|---|---|---|
 | Evidence / citations | 0 / 0 | 18 / 1 805 553 | |
-| Load: nodes / links | 41 s / 104 s | 65 s / 197 s | |
-| Write throughput: nodes/s, links/s | 8 006 / 14 228 | 5 069 / 7 488 | ~1.8× slower |
-| Load total | 145 s | 262 s | +81 % |
-| File size | 1 224 MiB | 2 042 MiB | +67 % |
-| RAM after opening (heap) | 653 MiB | 1 011 MiB | +55 % |
-| Open time (warm cache) | 5.1 s | 6.7 s | |
+| Load: nodes / links | 41 s / 99 s | 53 s / 177 s | |
+| Write throughput: nodes/s, links/s | 7 961 / 14 954 | 6 133 / 8 336 | |
+| Load total | 140 s | 231 s | +65 % |
+| File size | 1 218 MiB | 2 036 MiB | +67 % |
+| RAM after opening (heap) | 650 MiB | 1 008 MiB | +55 % |
+| Open time (warm cache) | 4.9 s | 6.2 s | |
+
+(Rerun on a quiet machine with the current mapping; an earlier run alongside other work took
+145 s and 262 s.)
+
+**SF1** (`--provenance file`): 3 181 724 nodes, 17 256 038 links, 20 437 762 citations; every
+count equals its CSV rows, nothing dangling. Load 3 612 s (nodes 638 s at 4 986/s, links 2 973 s
+at 5 803/s), file 23.0 GiB, 10.9 GiB of RAM after opening, which takes 123 s. This run shared the
+machine with builds, the Neo4j import and other loads, and used the earlier mapping (names
+repeated as properties, keys renamed to lower_snake), so its times are an upper bound. Per object
+it is close to SF0.1 (heap ~270 bytes per node, link or citation on average), so memory grows
+linearly; at this size a 16 GB machine is the minimum.
 
 Per object in memory: node 917 bytes (posts and comments carry their text as a property), link
 254 bytes, citation 207 bytes. Findings so far:
@@ -105,9 +118,6 @@ Per object in memory: node 917 bytes (posts and comments carry their text as a p
 - **The file is large**: about 650 bytes per object without evidence (1.2 GB for 1.8 M objects),
   compared with 59 MiB of CSV tables (17 MB compressed). Where the bytes go (change log, FTS5 tables,
   indexes) is the next thing to measure.
-
-These SF0.1 numbers were measured before the name column stopped being repeated as a property
-(about 39 000 fewer properties now); rerun them on a quiet machine before relying on them.
 
 ### Neo4j with the same graph
 
@@ -139,8 +149,8 @@ relationship type equals MyGraph's.
 
 | | Neo4j 2026.10.1 (offline import) | MyGraph (`write`, no evidence) |
 |---|---|---|
-| Load | 5.6 s (10.5 s with JVM start) | 145 s |
-| On disk | 141 MiB, 151 MiB with the key indexes | 1 224 MiB |
+| Load | 5.6 s (10.5 s with JVM start) | 140 s |
+| On disk | 141 MiB, 151 MiB with the key indexes | 1 218 MiB |
 
 The load times are not like for like: `neo4j-admin import` builds the store offline from sorted
 input, while MyGraph applies every batch as a transaction with matching, validation, the change log
@@ -185,26 +195,29 @@ nodes), or when Neo4j hits its 30 s transaction timeout (`db.transaction.timeout
 | `find_links` | 32 | 0 | 0 |
 | `find_linked` | 400 | 0 | 0 |
 
-**Findings** (spec and implementation disagree; neither is changed yet):
+The table is from runs after the fixes below, with nothing excused: the empty-group cases (206 in
+these runs) now return `{count: 0}` and match Neo4j.
 
-1. **`find` without `group_by` over no matching objects returns no group.** [OP-FIND-5] makes all
-   matching objects one group and [OP-FIND-6] says a count over no values is 0, as SQL and Cypher
-   return. The harness counts this as a known difference (206 times in the runs above) and compares
-   as if the group `{count: 0}` were there.
-2. **`ne` and `not_in` on a list property**: MyGraph treats them as the negation of `eq` / `in`
-   (no element matches, `find.rs` `holds`), while [OP-FIND-4] says a comparison on a list holds
-   when it holds for any element, which would make `speaks ne "en"` true for `["en", "si"]`. The
-   implementation's meaning is the more useful one; the spec sentence should say so. The harness
-   follows the implementation.
-3. **Property keys are renamed**: `normalize_types` turns `locationIP` into `location_ip` and
-   `creationDate` into `creation_date`. `find` accepts either spelling, but `get` shows the
-   canonical one, so an agent sees different names than the source data used.
+**Findings, fixed on 2026-10-29:**
+
+1. **`find` without `group_by` over no matching objects returned no group** when an aggregate
+   other than `count` was asked for. Fixed in the code; [OP-FIND-5] now says outright that there
+   is always one group (count 0, other aggregates null), as SQL and Cypher do.
+2. **`ne` and `not_in` on a list property**: the code treated them as the negations of `eq` /
+   `in` (no element matches), while [OP-FIND-4] said a comparison on a list holds for any element,
+   which would make `speaks ne "en"` true for `["en", "si"]`. The spec now says `ne` / `not_in`
+   are always the negations, which is what the code did.
+3. **Names were rewritten silently**: `normalize_types` turned `locationIP` into `location_ip`, so
+   agents saw other names than they wrote. Replaced by the policy `naming` ([VOCAB-1]): `styled`
+   (the default) refuses a name not in its style with `vocab.not_styled` and the expected spelling
+   in `details.expected`; `free` stores names as given. Names are never rewritten, and reads check
+   names the same way, so a misspelled type fails instead of matching nothing. Existing graphs
+   read `normalize_types: true` as `styled`.
 
 Not covered yet: `k_shortest`, `paths` with a direction, `neighbors` with different `steps`,
 `as_of`, `contains` / `starts_with`, sorting, paging, and the order of results.
 
 ### Then
 
-1. Load SF1 (3.2 M nodes, ~17 M links); RAM is expected around 10 GB with evidence.
-2. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
+1. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
    p50 / p95 / p99 for MyGraph and Neo4j on the same machine.

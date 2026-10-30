@@ -57,6 +57,7 @@ with the request itself and answers `400 Bad Request`.
 | `write.version_conflict` | The object changed since you read it; `get` it again and retry with its current version. |
 | `write.property_conflict` | A stored value differs; use `on_conflict: overwrite` to replace it, or `keep` to leave it and get a warning. |
 | `lifecycle.retracted` | The object is retracted; restore it with `retract` and `action: restore` first. |
+| `vocab.not_styled` | This graph wants names in its style; resend with `details.expected` (`overview` lists the names in use). |
 | `graph.not_found` | List the available graphs with `GET /v1/graphs`. |
 | `graph.warming_up` | The graph is loading; retry after the number of seconds in `Retry-After`. |
 | `auth.missing_key` | Send `Authorization: Bearer <key>`. |

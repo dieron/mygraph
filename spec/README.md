@@ -29,7 +29,7 @@ Every normative rule carries a stable ID in brackets, e.g. **[ID-CODEC-3]**.
 |---|---|---|
 | `ID`, `KEY`, `REF`, `GRAPH`, `ACTOR`, `SEQ` | Object IDs, natural keys, batch references, graph and actor names, change-log sequence numbers | [model/identifiers.md](model/identifiers.md) |
 | `NORM` | Text input handling and name matching keys | [model/normalization.md](model/normalization.md) |
-| `VOCAB` | Canonical spelling of node types, link types and property keys | [model/normalization.md](model/normalization.md) |
+| `VOCAB` | Naming policy for node types, link types and property keys | [model/normalization.md](model/normalization.md) |
 | `VAL` | Property values: kinds, JSON forms, limits, ordering, storage encoding | [model/values.md](model/values.md) |
 | `STORE` | Storage format | [storage/schema.sql](storage/schema.sql) (comments are normative) |
 | `OBJ` | Objects, lifecycle, evidence policy, merge | [model/objects.md](model/objects.md) |

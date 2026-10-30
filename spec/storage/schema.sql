@@ -39,7 +39,7 @@ PRAGMA user_version = 1;
 -- [STORE-META-1] Required rows: format = 'mygraph', format_version = '1' (inserted below),
 --                and, written when the graph is created: graph_name, created_at (decimal
 --                milliseconds), spec_version (of the creating implementation), policies (JSON
---                object: require_evidence, inline_text_limit, normalize_types).
+--                object: require_evidence, inline_text_limit, naming; older files: normalize_types).
 --                Optional: description.
 -- -------------------------------------------------------------------------------------
 CREATE TABLE meta (

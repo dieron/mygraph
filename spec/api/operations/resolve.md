@@ -22,7 +22,7 @@ each one, does a node for it already exist? Scoring and verdicts:
 | `candidates` | 1–100 described entities |
 | `candidates[].name` | Required; a node name ([NORM-NAME]) |
 | `candidates[].type` | Optional node type |
-| `candidates[].hints` | Optional map of property key → value in write form ([VAL]); keys canonicalized as in a write |
+| `candidates[].hints` | Optional map of property key → value in write form ([VAL]); keys checked as in a write ([VOCAB-1]) |
 
 **[OP-RESOLVE-1]** An invalid field fails the whole call with `resolve.invalid_field`, naming the
 candidate index and field.

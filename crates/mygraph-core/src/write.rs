@@ -505,12 +505,14 @@ impl<S: Store> Graph<S> {
                 Ok(idx)
             }
             Json::Object(o) if kind == ObjectKind::Node && o.contains_key("name") => {
-                let type_ = self.canon(
-                    VocabKind::NodeType,
-                    o.get("type")
-                        .and_then(Json::as_str)
-                        .ok_or_else(|| invalid("type", "a string"))?,
-                )?;
+                let type_ = self
+                    .vocab_name(
+                        VocabKind::NodeType,
+                        o.get("type")
+                            .and_then(Json::as_str)
+                            .ok_or_else(|| invalid("type", "a string"))?,
+                    )
+                    .map_err(|e| e.at("type"))?;
                 let name = o["name"]
                     .as_str()
                     .ok_or_else(|| invalid("name", "a string"))?;
@@ -527,12 +529,10 @@ impl<S: Store> Graph<S> {
         }
     }
 
-    pub(crate) fn canon(&self, kind: VocabKind, s: &str) -> Result<String, Reason> {
-        if self.policies.normalize_types {
-            vocab::canonicalize(kind, s)
-        } else {
-            vocab::validate_verbatim(s)
-        }
+    /// A node type, link type or property key from a request, as stored, if the graph's naming
+    /// policy accepts it ([VOCAB-1]).
+    pub(crate) fn vocab_name(&self, kind: VocabKind, s: &str) -> Result<String, vocab::NameError> {
+        vocab::check(kind, s, self.policies.naming)
     }
 
     fn name_matches(&self, type_: &str, name: &str) -> Vec<i64> {
@@ -579,8 +579,8 @@ impl<S: Store> Graph<S> {
         o.iter()
             .map(|(k, v)| {
                 let key = self
-                    .canon(VocabKind::PropKey, k)
-                    .map_err(|r| field_err(r, "props"))?;
+                    .vocab_name(VocabKind::PropKey, k)
+                    .map_err(|e| e.at("props"))?;
                 let parsed = values::parse(v).map_err(|r| field_err(r, &format!("props.{key}")))?;
                 Ok((key, parsed))
             })
@@ -684,8 +684,8 @@ impl<S: Store> Graph<S> {
     fn add_labels(&self, node: &mut Node, labels: Vec<String>) -> Result<(), OpError> {
         for l in labels {
             let l = self
-                .canon(VocabKind::NodeType, &l)
-                .map_err(|r| field_err(r, "labels"))?;
+                .vocab_name(VocabKind::NodeType, &l)
+                .map_err(|e| e.at("labels"))?;
             if !node.labels.contains(&l) {
                 node.labels.push(l);
             }
@@ -747,8 +747,8 @@ impl<S: Store> Graph<S> {
         let key = Self::key_field(o)?;
         let type_ = opt_str(o, "type")?
             .map(|t| {
-                self.canon(VocabKind::NodeType, &t)
-                    .map_err(|r| field_err(r, "type"))
+                self.vocab_name(VocabKind::NodeType, &t)
+                    .map_err(|e| e.at("type"))
             })
             .transpose()?;
         let name = opt_text(o, "name", 512, "node.name_too_long")?;
@@ -896,8 +896,8 @@ impl<S: Store> Graph<S> {
         let key = Self::key_field(o)?;
         let type_ = opt_str(o, "type")?
             .map(|t| {
-                self.canon(VocabKind::LinkType, &t)
-                    .map_err(|r| field_err(r, "type"))
+                self.vocab_name(VocabKind::LinkType, &t)
+                    .map_err(|e| e.at("type"))
             })
             .transpose()?;
         let from = get(o, "from")
@@ -1394,8 +1394,8 @@ impl<S: Store> Graph<S> {
         }
         let prop = opt_str(o, "prop")?
             .map(|p| {
-                self.canon(VocabKind::PropKey, &p)
-                    .map_err(|r| field_err(r, "prop"))
+                self.vocab_name(VocabKind::PropKey, &p)
+                    .map_err(|e| e.at("prop"))
             })
             .transpose()?;
         let role = match opt_str(o, "role")? {
@@ -1525,8 +1525,11 @@ impl<S: Store> Graph<S> {
                 self.add_labels(n, labels)?;
                 let remove: Vec<String> = str_list(o, "remove_labels")?
                     .iter()
-                    .map(|l| self.canon(VocabKind::NodeType, l).unwrap_or_default())
-                    .collect();
+                    .map(|l| {
+                        self.vocab_name(VocabKind::NodeType, l)
+                            .map_err(|e| e.at("remove_labels"))
+                    })
+                    .collect::<Result<_, _>>()?;
                 n.labels.retain(|l| !remove.contains(l));
                 let changes = self.prop_changes(o)?;
                 self.combine_props(b, &id, &mut n.props, changes, OnConflict::Overwrite, true)?;
@@ -1615,8 +1618,8 @@ impl<S: Store> Graph<S> {
         };
         for k in str_list(o, "unset")? {
             let key = self
-                .canon(VocabKind::PropKey, &k)
-                .map_err(|r| field_err(r, "unset"))?;
+                .vocab_name(VocabKind::PropKey, &k)
+                .map_err(|e| e.at("unset"))?;
             changes.push((key, Parsed::Remove));
         }
         Ok(changes)

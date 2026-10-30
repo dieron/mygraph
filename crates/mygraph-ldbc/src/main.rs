@@ -14,7 +14,7 @@ mod schema;
 use archive::{Result, col, each_table, rows};
 use clap::{Parser, Subcommand, ValueEnum};
 use mygraph_core::engine::Graph;
-use mygraph_core::model::{Policies, RequireEvidence};
+use mygraph_core::model::{Naming, Policies, RequireEvidence};
 use mygraph_store_sqlite::{GraphFile, graph_path};
 use schema::{NODE_TABLES, PERSON_LISTS, PersonLists};
 use serde_json::{Map, Value as Json, json};
@@ -398,11 +398,13 @@ fn load(
         .into_owned();
     let sha256 = sha256_of(archive)?;
     eprintln!("{archive_name} (SHA-256 {sha256}) -> {}", path.display());
+    // `naming: free` keeps LDBC's own names (`locationIP`), the same as in Neo4j.
     let policies = Policies {
         require_evidence: match provenance {
             Provenance::None => RequireEvidence::Off,
             Provenance::File => RequireEvidence::Enforce,
         },
+        naming: Naming::Free,
         ..Policies::default()
     };
     GraphFile::create(data, graph, &policies, T0)?;

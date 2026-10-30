@@ -46,7 +46,7 @@ Needs `type` and `name` when created.
 
 | Field | Meaning |
 |---|---|
-| `type` | Node type, PascalCase singular (`Person`); spelling is canonicalized |
+| `type` | Node type, PascalCase singular (`Person`); another spelling fails with `vocab.not_styled` and the expected one |
 | `name` | Display name, ≤ 512 bytes |
 | `aliases` | Other names (≤ 64); also used for matching and search |
 | `labels` | Extra classifications spelled like types (`["Mathematician", "Writer"]`) |
@@ -108,7 +108,7 @@ and write a new one instead.
 
 ## 7. How items are matched (why writes don't duplicate)
 
-- **Node**: `id` → `key` → `create_new` → otherwise name matching: same canonical type and the
+- **Node**: `id` → `key` → `create_new` → otherwise name matching: same type and the
   same normalized name (case, accents and punctuation ignored) as the node's name or an alias. One
   match → reused (new aliases/props/citations are added); none → created; several →
   `write.ambiguous_match`.

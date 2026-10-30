@@ -54,8 +54,8 @@ citation `confidence`, `quote`, `note`).
 2. `key` given → the node with that key (following merges). If none exists, the item **creates** a
    node with that key — no name matching happens.
 3. `create_new: true` → **create**.
-4. Otherwise, **name matching**: the active nodes whose canonical `type` equals the item's
-   canonical type and whose name or any alias has the same name key ([NORM-NAME-7]) as the item's
+4. Otherwise, **name matching**: the active nodes whose `type` equals the item's
+   type ([VOCAB-1]) and whose name or any alias has the same name key ([NORM-NAME-7]) as the item's
    `name`:
    - none → **create**;
    - exactly one → **match**;
@@ -80,7 +80,7 @@ Only the item's `name` is used for matching, not its aliases.
 ## 4. Links
 
 **[WRITE-MATCH-LINK-1]** `from` and `to` are resolved first; each must be an active node
-(`link.endpoint_not_active`). `type` is canonicalized; `directed` defaults as in
+(`link.endpoint_not_active`). `type` is checked by [VOCAB-1]; `directed` defaults as in
 [model/objects.md §4](../model/objects.md#4-link).
 
 **[WRITE-MATCH-LINK-2]** A link item is resolved in this order:

@@ -42,7 +42,7 @@ values spec points to for filters on partial dates and for missing values.
 
 | Target | Expressions |
 |---|---|
-| all | `id` (the object's ID string), `status`, `created_at`, `updated_at` (`datetime`), `prop:<key>` (nodes and links; key canonicalized as in a write), `evidence_count` (nodes and links: distinct active evidence, [OP-GET-5]) |
+| all | `id` (the object's ID string), `status`, `created_at`, `updated_at` (`datetime`), `prop:<key>` (nodes and links; key checked as in a write, [VOCAB-1]), `evidence_count` (nodes and links: distinct active evidence, [OP-GET-5]) |
 | nodes | `type`, `name`, `labels` (list), `degree`, `degree(<LINK_TYPE>)`, `degree(<LINK_TYPE>, <out\|in\|both>)` — number of active links, an undirected link counting for every direction, a self-link once |
 | links | `type`, `from`, `to` (node IDs), `from.type`, `to.type`, `directed` |
 | evidence | `kind`, `title`, `uri`, `author`, `publisher`, `language`, `source_date`, `captured_at`, `citations` (number of active citations) |
@@ -51,7 +51,7 @@ values spec points to for filters on partial dates and for missing values.
 Suffixes on a `date` or `datetime` value (UTC): `.year`, `.month` (missing for a year-precision
 date), `.decade` (`floor(year / 10) × 10`), `.century` (`floor(year / 100) × 100`), all `int`.
 `bucket(<expr>, <width>)` maps a number `x` to `floor(x / width) × width` (`width` > 0).
-`degree(...)` link types are canonicalized as in a write.
+`degree(...)` link types, and type names compared with `type` by `eq`, `ne`, `in`, `not_in`, are checked as in a write ([VOCAB-1]).
 
 ## 3. Conditions
 
@@ -62,13 +62,15 @@ an active link of that type and direction, as in [TRAV-1], to the referenced nod
 write form ([VAL]); `in`, `not_in` take a list, `between` a list `[low, high]`; `exists` and
 `missing` take no value.
 
-**[OP-FIND-4]** Operators on a field value `v` (when `v` is a list, a comparison holds when it
-holds for any element; `exists` / `missing` look at the field itself):
+**[OP-FIND-4]** Operators on a field value `v`. `ne` and `not_in` are always the negations of
+`eq` and `in`. When `v` is a list, every other comparison holds when it holds for some element, so
+`ne` / `not_in` hold when no element is equal / in the operand list (`speaks ne "en"` fails for
+`["en", "si"]`). `exists` / `missing` look at the field itself.
 
 | Op | Holds when |
 |---|---|
 | `exists` / `missing` | the field has a value / has none |
-| `eq`, `ne` | equal / not equal ([VAL-EQ-1]); for temporal values see below |
+| `eq`, `ne` | equal ([VAL-EQ-1]; temporal values: below) / not `eq` |
 | `lt`, `lte`, `gt`, `gte` | by [VAL-ORDER-1] within the same kind rank; temporal: below |
 | `between` | `gte low` and `lte high` |
 | `in`, `not_in` | `eq` some element / no element of the list |
@@ -86,7 +88,10 @@ and `not_in`.
 
 **[OP-FIND-5]** With `group_by` or `aggregate`, matching objects are grouped by the values of the
 `group_by` expressions (a missing value forms its own group, shown as `null`; a list value is one
-group key, not one group per element). Without `group_by`, all matching objects form one group.
+group key, not one group per element). Without `group_by`, all matching objects form one group,
+also when no object matches: that group has count 0 and its other aggregates follow
+[OP-FIND-6] (as SQL and Cypher aggregate without grouping). With `group_by`, no matching objects
+means no groups.
 
 **[OP-FIND-6]** Aggregates over a group, skipping objects where `of` is missing:
 
@@ -99,7 +104,8 @@ group key, not one group per element). Without `group_by`, all matching objects 
 | `min`, `max` | by [VAL-ORDER-1] | `min(<of>)`, `max(<of>)` |
 | `median` | numbers only; the mean of the two middle values for an even count | `median(<of>)` |
 
-An aggregate over no values is `null` (`count` is 0).
+An aggregate over no values is `null`, except the counts (`count`, `count` with `of`,
+`count_distinct`), which are 0.
 
 ## 5. Order, paging, response
 

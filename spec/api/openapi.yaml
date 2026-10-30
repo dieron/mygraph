@@ -775,7 +775,7 @@ components:
       properties:
         require_evidence: { type: string, enum: [enforce, warn, "off"] }
         inline_text_limit: { type: integer }
-        normalize_types: { type: boolean }
+        naming: { type: string, enum: [styled, free] }
     Reference:
       description: An object ID, a keyed reference, or a node by type and name (get.md).
       oneOf:

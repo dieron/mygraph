@@ -257,7 +257,10 @@ async fn agent_workflow_over_rest() {
     assert_eq!(o["node_types"][0], json!({ "type": "Person", "count": 2 }));
     assert_eq!(o["evidence_kinds"], json!({ "text": 1, "url": 1 }));
     assert_eq!(o["recent"][0]["changes"], 12);
-    let o = s.get(&format!("{g}?type=person"), READER).await.json();
+    // Type names are not rewritten: another spelling is not found, with a hint.
+    let r = s.get(&format!("{g}?type=person"), READER).await;
+    assert!(r.text().contains("did you mean Person"), "{}", r.text());
+    let o = s.get(&format!("{g}?type=Person"), READER).await.json();
     let d = &o["type_detail"];
     assert_eq!(
         (d["kind"].as_str(), d["count"].as_u64()),
@@ -268,7 +271,7 @@ async fn agent_workflow_over_rest() {
         json!([{ "key": "born", "kinds": ["date"], "fill": 0.5 }])
     );
     assert_eq!(d["links"][0]["type"], "COLLABORATED_WITH");
-    let o = s.get(&format!("{g}?type=wrote_about"), READER).await.json();
+    let o = s.get(&format!("{g}?type=WROTE_ABOUT"), READER).await.json();
     assert_eq!(
         o["type_detail"]["endpoints"],
         json!([{ "from": "Person", "to": "Machine", "count": 1 }])
@@ -307,7 +310,7 @@ async fn agent_workflow_over_rest() {
     assert!(n.get("evidence").is_none());
     let n = s
         .get(
-            &format!("{g}/nodes/n_1?links_limit=1&link_types=wrote_about&detail=full"),
+            &format!("{g}/nodes/n_1?links_limit=1&link_types=WROTE_ABOUT&detail=full"),
             READER,
         )
         .await

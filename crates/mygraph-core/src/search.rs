@@ -121,11 +121,13 @@ impl<S: Store> Graph<S> {
                     let s = v
                         .as_str()
                         .ok_or_else(|| bad("types", "a list of type names"))?;
-                    // A name may be a node type or a link type; accept either spelling.
-                    for kind in [VocabKind::NodeType, VocabKind::LinkType] {
-                        if let Ok(c) = self.canon(kind, s) {
-                            set.insert(c);
-                        }
+                    // A name may be a node type or a link type: it must be acceptable as one of
+                    // them; when neither accepts it, the node type's error says why.
+                    let as_node = self.vocab_name(VocabKind::NodeType, s);
+                    let as_link = self.vocab_name(VocabKind::LinkType, s);
+                    match (as_node, as_link) {
+                        (Err(e), Err(_)) => return Err(e.at("types")),
+                        (n, l) => set.extend(n.into_iter().chain(l)),
                     }
                 }
                 Some(set)

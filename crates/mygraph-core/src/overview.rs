@@ -154,8 +154,24 @@ impl<S: Store> Graph<S> {
 
         if let Some(t) = req.get("type") {
             let t = t.as_str().ok_or_else(|| bad("type", "a string"))?;
-            let as_node = self.canon(VocabKind::NodeType, t).ok();
-            let as_link = self.canon(VocabKind::LinkType, t).ok();
+            // The name may be a node type or a link type, so a spelling one kind refuses is
+            // tried as the other; a miss names the styled spellings that do exist.
+            let as_node = self.vocab_name(VocabKind::NodeType, t).ok();
+            let as_link = self.vocab_name(VocabKind::LinkType, t).ok();
+            let near: Vec<String> = [VocabKind::NodeType, VocabKind::LinkType]
+                .into_iter()
+                .filter_map(|k| crate::vocab::canonicalize(k, t).ok())
+                .filter(|c| c != t)
+                .filter(|c| {
+                    st.nodes_by_type
+                        .get(c.as_str())
+                        .is_some_and(|s| !s.is_empty())
+                        || st
+                            .links_by_type
+                            .get(c.as_str())
+                            .is_some_and(|s| !s.is_empty())
+                })
+                .collect();
             let detail = if let Some((name, set)) = as_node
                 .as_deref()
                 .and_then(|n| st.nodes_by_type.get_key_value(n))
@@ -167,9 +183,14 @@ impl<S: Store> Graph<S> {
             {
                 self.link_type_detail(name, set.as_slice(), description(1, name))
             } else {
+                let hint = if near.is_empty() {
+                    String::new()
+                } else {
+                    format!("; did you mean {}?", near.join(" or "))
+                };
                 return Err(OpError::new(
                     "ref.not_found",
-                    format!("no active node or link has type {t}"),
+                    format!("no active node or link has type {t}{hint}"),
                 ));
             };
             out.insert("type_detail".into(), Json::Object(detail));

@@ -85,8 +85,8 @@ impl<S: Store> Graph<S> {
             let type_ = match o.get("type") {
                 None | Some(Json::Null) => None,
                 Some(Json::String(t)) => Some(
-                    self.canon(VocabKind::NodeType, t)
-                        .map_err(|r| bad(i, "type", r.code()))?,
+                    self.vocab_name(VocabKind::NodeType, t)
+                        .map_err(|e| e.at(&format!("candidates[{i}].type")))?,
                 ),
                 Some(_) => return Err(bad(i, "type", "a node type")),
             };
@@ -96,8 +96,8 @@ impl<S: Store> Graph<S> {
                 Some(Json::Object(h)) => {
                     for (k, v) in h {
                         let key = self
-                            .canon(VocabKind::PropKey, k)
-                            .map_err(|r| bad(i, &format!("hints.{k}"), r.code()))?;
+                            .vocab_name(VocabKind::PropKey, k)
+                            .map_err(|e| e.at(&format!("candidates[{i}].hints")))?;
                         match values::parse(v)
                             .map_err(|r| bad(i, &format!("hints.{k}"), r.code()))?
                         {

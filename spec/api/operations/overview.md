@@ -17,7 +17,7 @@ drift. With `type`, it describes one node type or link type in depth.
 
 | Field | Meaning | Default |
 |---|---|---|
-| `type` | A node type or link type, canonicalized as in a write ([VOCAB]) | — |
+| `type` | A node type or link type, exactly as stored ([VOCAB-1]); a miss suggests styled spellings that exist | — |
 | `recent` | 0–50: number of recent batches to list | 5 |
 | `types_limit` | 1–1000: node types and link types listed (each) | 100 |
 
@@ -33,7 +33,7 @@ node type nor a link type of an active object fails with `ref.not_found`.
   "link_types": [ { "type": "MARRIED_TO", "count": 210, "symmetric": true } ],
   "types_truncated": false,
   "evidence_kinds": { "text": 4600, "url": 4100 },
-  "policies": { "require_evidence": "enforce", "inline_text_limit": 65536, "normalize_types": true },
+  "policies": { "require_evidence": "enforce", "inline_text_limit": 65536, "naming": "styled" },
   "last_seq": 412230,
   "recent": [ { "batch": "b_8k2", "at": "2026-10-24T09:12:00.000Z", "actor": "claude-research",
                 "op": "write", "note": null, "changes": 34 } ],

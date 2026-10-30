@@ -22,7 +22,7 @@ these policies:
 |---|---|---|
 | `require_evidence` | `enforce`, `warn`, `off` | `enforce` |
 | `inline_text_limit` | integer bytes, 1024 – 1 048 576 | 65 536 |
-| `normalize_types` | `true`, `false` | `true` |
+| `naming` | `styled`, `free` ([VOCAB-1]) | `styled` |
 
 **[OBJ-GRAPH-2]** Policies apply to writes made after they change; existing objects are not
 re-validated.

@@ -10,7 +10,6 @@ use crate::archive::Result;
 use mygraph_core::engine::Graph;
 use mygraph_core::ids::ObjectKind;
 use mygraph_core::model::id_string;
-use mygraph_core::vocab::VocabKind;
 use mygraph_store_sqlite::GraphFile;
 use serde_json::{Map, Value as Json, json};
 use std::collections::{BTreeMap, HashMap};
@@ -210,12 +209,8 @@ struct Ctx<'a> {
     keys: HashMap<String, String>,
     /// Per node type: (ID, key) of every active node.
     by_type: HashMap<String, Vec<(String, String)>>,
-    /// MyGraph's canonical property key ([VOCAB-1]) → the LDBC column name Neo4j keeps.
-    columns: HashMap<String, String>,
     r: Rng,
     tally: BTreeMap<&'static str, Tally>,
-    /// Known differences between MyGraph and the spec, counted instead of failing each case.
-    known: BTreeMap<&'static str, u64>,
     failures: Vec<Json>,
     verbose: bool,
 }
@@ -314,20 +309,10 @@ impl Ctx<'_> {
         }
     }
 
-    /// The single group of a `find` without `group_by`. When nothing matches, MyGraph returns no
-    /// group, while [OP-FIND-5] makes all matching objects one group (count 0, other aggregates
-    /// null, as SQL and Cypher do): counted as a known difference and compared as that group.
-    fn only_group(&mut self, res: &Json) -> Json {
-        match res["groups"].as_array().and_then(|g| g.first()) {
-            Some(g) => g.clone(),
-            None => {
-                *self
-                    .known
-                    .entry("find_no_group_when_nothing_matches")
-                    .or_default() += 1;
-                json!({ "count": 0 })
-            }
-        }
+    /// The single group of a `find` without `group_by` ([OP-FIND-5]: there is one even when
+    /// nothing matches); a missing group compares as `null` and fails the case.
+    fn only_group(&self, res: &Json) -> Json {
+        res["groups"][0].clone()
     }
 
     /// Node keys of a MyGraph `neighbors` result, or `None` when it was truncated.
@@ -507,14 +492,8 @@ impl Ctx<'_> {
             fields.push(("labels".into(), l.clone()));
         }
         let (field, sample) = self.r.pick(&fields).clone();
-        let col = match field.strip_prefix("prop:") {
-            Some(k) => self
-                .columns
-                .get(k)
-                .cloned()
-                .ok_or(format!("no Neo4j key for {k}"))?,
-            None => field.clone(),
-        };
+        // The graph keeps LDBC's names (`naming: free`), so a property key is Neo4j's too.
+        let col = field.strip_prefix("prop:").unwrap_or(&field).to_owned();
         let x = format!("n.{col}");
         let missing = format!("{x} IS NULL");
         Ok(Some(if field == "labels" {
@@ -524,9 +503,8 @@ impl Ctx<'_> {
                 format!("n:{l}"),
             )
         } else if let Json::Array(items) = &sample {
-            // A list: `eq` / `in` hold when some element matches. `ne` / `not_in` are their
-            // negations (no element matches), as MyGraph implements them; [OP-FIND-4]'s "holds
-            // for any element" would make them "some element differs" (docs/11 §2, findings).
+            // A list: `eq` / `in` hold when some element matches; `ne` / `not_in` are their
+            // negations, so no element matches ([OP-FIND-4]).
             let v = items
                 .first()
                 .and_then(Json::as_str)
@@ -886,7 +864,8 @@ pub fn run(
     verbose: bool,
 ) -> Result<bool> {
     let file = GraphFile::open(data, graph)?;
-    let g = Graph::open(file, graph, mygraph_core::model::Policies::default())?;
+    let policies = file.policies()?;
+    let g = Graph::open(file, graph, policies)?;
     let neo = Neo4j::new(neo4j, "neo4j");
     let st = g.state();
     let mut keys = HashMap::new();
@@ -906,22 +885,13 @@ pub fn run(
             return Err(format!("no {ty} nodes in graph {graph}").into());
         }
     }
-    let mut columns = HashMap::new();
-    for row in neo.rows("CALL db.propertyKeys() YIELD propertyKey RETURN propertyKey")? {
-        let col = row[0].as_str().unwrap_or_default().to_owned();
-        let canonical = mygraph_core::vocab::canonicalize(VocabKind::PropKey, &col)
-            .map_err(|e| format!("{col}: {e:?}"))?;
-        columns.insert(canonical, col);
-    }
     let mut c = Ctx {
         g: &g,
         neo: &neo,
         keys,
         by_type,
-        columns,
         r: Rng(seed),
         tally: BTreeMap::new(),
-        known: BTreeMap::new(),
         failures: Vec::new(),
         verbose,
     };
@@ -953,7 +923,7 @@ pub fn run(
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
-            "graph": graph, "seed": seed, "summary": summary, "known_differences": c.known,
+            "graph": graph, "seed": seed, "summary": summary,
             "failures": c.failures.iter().take(30).collect::<Vec<_>>(),
             "failure_count": c.failures.len(),
         }))?

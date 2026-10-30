@@ -12,7 +12,7 @@ subgraphs and paths in every implementation.
 
 **[TRAV-1]** From node `n`, a link `l` can be followed to its other end when all hold:
 - `l` is active;
-- `l`'s type is in the step's `link_types` (canonicalized as in a write, [VOCAB-1]), or no
+- `l`'s type is in the step's `link_types` (checked as in a write, [VOCAB-1]), or no
   `link_types` are given;
 - direction: `out` follows directed links from `n` (`n` = `from`), `in` follows directed links
   into `n` (`n` = `to`), `both` follows either; undirected links are followed in every direction;

@@ -28,13 +28,13 @@ fn ada_batch() -> Json {
             { "ref": "@frag", "kind": "text", "parent": "@art", "content": "In 1843 Lovelace published her notes on Babbage's Analytical Engine." }
         ],
         "nodes": [
-            { "ref": "@ada", "type": "person", "name": "Ada Lovelace", "aliases": ["Augusta Ada King"],
+            { "ref": "@ada", "type": "Person", "name": "Ada Lovelace", "aliases": ["Augusta Ada King"],
               "props": { "born": {"$date": "1815-12-10"} }, "cite": ["@frag"] },
             { "ref": "@bab", "type": "Person", "name": "Charles Babbage", "cite": ["@frag"] },
             { "ref": "@ae", "type": "Machine", "name": "Analytical Engine", "cite": ["@frag"] }
         ],
         "links": [
-            { "type": "collaborated with", "from": "@ada", "to": "@bab", "directed": false,
+            { "type": "COLLABORATED_WITH", "from": "@ada", "to": "@bab", "directed": false,
               "cite": [{ "evidence": "@frag", "confidence": 0.9 }] },
             { "type": "WROTE_ABOUT", "from": "@ada", "to": "@ae", "props": { "year": 1843 }, "cite": ["@frag"] }
         ]
@@ -59,7 +59,7 @@ fn write_creates_everything_and_is_idempotent() {
         json!({ "evidence": 2, "node": 3, "link": 2, "citation": 5 })
     );
     assert_eq!(r["refs"]["@ada"], "n_1");
-    // Vocabulary was canonicalized and announced.
+    // New vocabulary was announced.
     assert_eq!(&*g.state().nodes[&1].type_, "Person");
     assert_eq!(&*g.state().links[&1].type_, "COLLABORATED_WITH");
     assert!(
@@ -613,7 +613,7 @@ fn search_ranks_names_then_text() {
     // Type filter and modes.
     let r = s(
         &g,
-        json!({ "query": "analytical engine", "types": ["machine"] }),
+        json!({ "query": "analytical engine", "types": ["Machine"] }),
     );
     assert_eq!(ids(&r), vec![pair("n_3", "name:exact")]);
     let r = s(
@@ -688,7 +688,7 @@ fn get_returns_objects_with_neighbourhood_support_and_content() {
         r["items"][0],
         json!({ "id": "l_1", "type": "COLLABORATED_WITH", "from": "n_1", "to": "n_2", "directed": false, "status": "active" })
     );
-    let r = g.get(&json!({ "refs": ["n_1"], "detail": "full", "include": { "links": { "limit": 1, "types": ["wrote about"] } } })).unwrap();
+    let r = g.get(&json!({ "refs": ["n_1"], "detail": "full", "include": { "links": { "limit": 1, "types": ["WROTE_ABOUT"] } } })).unwrap();
     assert_eq!(r["items"][0]["version"], 1);
     assert_eq!(
         r["items"][0]["links"]["counts"].as_array().unwrap().len(),
@@ -814,7 +814,7 @@ fn neighbors_expands_by_hop_with_limits() {
     assert_eq!(r["truncated"], false);
     // Steps with types; the node limit; the per-node limit with a note.
     let r = g
-        .neighbors(&json!({ "start": ["n_3"], "steps": [{ "link_types": ["wrote about"], "direction": "in" }], "include": { "support": true } }))
+        .neighbors(&json!({ "start": ["n_3"], "steps": [{ "link_types": ["WROTE_ABOUT"], "direction": "in" }], "include": { "support": true } }))
         .unwrap();
     assert_eq!(ids_of(&r["nodes"]), ["n_3", "n_1", "n_4"]);
     assert_eq!(r["links"][0]["sources"], 1);
@@ -1018,14 +1018,152 @@ fn find_filters_groups_and_aggregates() {
 }
 
 #[test]
-fn find_uses_the_type_index_with_canonical_type_names() {
+fn naming_policy_checks_names_and_never_renames() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    // `styled` (the default): a name in another style fails and the error names the style.
+    let e = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "person", "name": "Mary Somerville",
+                                 "props": { "born": {"$date": "1780"} }, "cite": ["e_1"] }] }),
+            T,
+        )
+        .unwrap_err();
+    assert_eq!(e.reason.code(), "vocab.not_styled");
+    assert_eq!(e.details["field"], "type");
+    assert_eq!(e.details["expected"], "Person");
+    let e = g
+        .write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "Person", "name": "Mary Somerville",
+                                 "props": { "bornOn": {"$date": "1780"} }, "cite": ["e_1"] }] }),
+            T,
+        )
+        .unwrap_err();
+    assert_eq!(e.details["expected"], "born_on");
+    let e = g
+        .write(ACTOR, &json!({ "links": [{ "type": "wrote about", "from": "n_2", "to": "n_3", "cite": ["e_1"] }] }), T)
+        .unwrap_err();
+    assert_eq!(e.details["expected"], "WROTE_ABOUT");
+    // Reads check the same way instead of quietly matching nothing.
+    for (e, expected) in [
+        (
+            g.find(&json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "person" } }))
+                .unwrap_err(),
+            "Person",
+        ),
+        (
+            g.find(&json!({ "target": "nodes", "where": { "field": "prop:bornOn", "op": "exists" } }))
+                .unwrap_err(),
+            "born_on",
+        ),
+        (
+            g.neighbors(&json!({ "start": ["n_3"], "link_types": ["wrote about"] }))
+                .unwrap_err(),
+            "WROTE_ABOUT",
+        ),
+        (
+            g.search(&json!({ "query": "engine", "types": ["machine"] }))
+                .unwrap_err(),
+            "Machine",
+        ),
+    ] {
+        assert_eq!(e.reason.code(), "vocab.not_styled");
+        assert_eq!(e.details["expected"], expected);
+    }
+
+    // `free`: names are stored and matched exactly as given.
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = new_graph(
+        dir.path(),
+        Policies {
+            naming: mygraph_core::model::Naming::Free,
+            ..Policies::default()
+        },
+    );
+    g.write(
+        ACTOR,
+        &json!({ "evidence": [{ "ref": "@e", "kind": "text", "content": "x" }],
+                 "nodes": [{ "type": "person", "name": "Ada", "props": { "bornOn": 1815 }, "cite": ["@e"] }] }),
+        T,
+    )
+    .unwrap();
+    assert_eq!(&*g.state().nodes[&1].type_, "person");
+    let r = g
+        .find(&json!({ "target": "nodes", "where": { "field": "prop:bornOn", "op": "eq", "value": 1815 },
+                       "aggregate": [{ "fn": "count" }] }))
+        .unwrap();
+    assert_eq!(r["groups"][0]["count"], 1);
+    let r = g
+        .find(
+            &json!({ "target": "nodes", "where": { "field": "prop:born_on", "op": "exists" },
+                       "aggregate": [{ "fn": "count" }] }),
+        )
+        .unwrap();
+    assert_eq!(r["groups"][0]["count"], 0);
+    assert_eq!(
+        g.write(
+            ACTOR,
+            &json!({ "nodes": [{ "type": "a person", "name": "B", "cite": ["e_1"] }] }),
+            T
+        )
+        .unwrap_err()
+        .reason
+        .code(),
+        "vocab.bad_char"
+    );
+}
+
+#[test]
+fn find_without_group_by_has_one_group_even_when_nothing_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = traversal_graph(dir.path());
+    let r = g
+        .find(&json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Planet" },
+                       "aggregate": [{ "fn": "count" }, { "fn": "count_distinct", "of": "name" },
+                                     { "fn": "max", "of": "prop:born" }, { "fn": "avg", "of": "degree" }] }))
+        .unwrap();
+    assert_eq!(r["total"], 1);
+    assert_eq!(
+        r["groups"],
+        json!([{ "key": {}, "count": 0, "count_distinct(name)": 0, "max(prop:born)": null, "avg(degree)": null }])
+    );
+    let r = g
+        .find(
+            &json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Planet" },
+                       "group_by": ["name"] }),
+        )
+        .unwrap();
+    assert_eq!(r["groups"], json!([]));
+    // `ne` on a list is the negation of `eq`: no element equal.
+    let mut g = g;
+    g.write(
+        ACTOR,
+        &json!({ "updates": [{ "target": { "node": "n_1" }, "set": { "langs": ["en", "fr"] } }] }),
+        T,
+    )
+    .unwrap();
+    let n = |op: &str| {
+        g.find(&json!({ "target": "nodes", "where": { "all": [
+            { "field": "type", "op": "eq", "value": "Person" },
+            { "field": "prop:langs", "op": op, "value": "en" }] }, "aggregate": [{ "fn": "count" }] }))
+            .unwrap()["groups"][0]["count"]
+            .clone()
+    };
+    assert_eq!(n("eq"), 1);
+    assert_eq!(n("ne"), 2);
+}
+
+#[test]
+fn find_uses_the_type_index() {
     let dir = tempfile::tempdir().unwrap();
     let mut g = traversal_graph(dir.path());
     let count = |g: &Graph<GraphFile>, q: Json| g.find(&q).unwrap()["groups"][0]["count"].clone();
     assert_eq!(
         count(
             &g,
-            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "person" }, "aggregate": [{ "fn": "count" }] })
+            json!({ "target": "nodes", "where": { "field": "type", "op": "eq", "value": "Person" }, "aggregate": [{ "fn": "count" }] })
         ),
         3
     );

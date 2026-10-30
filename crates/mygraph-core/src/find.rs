@@ -380,9 +380,10 @@ impl<S: Store> Graph<S> {
             (_, "created_at") => Base::CreatedAt,
             (_, "updated_at") => Base::UpdatedAt,
             (Nodes | Links, "evidence_count") => Base::EvidenceCount,
-            (Nodes | Links, p) if p.starts_with("prop:") => {
-                Base::Prop(self.canon(VocabKind::PropKey, &p[5..]).map_err(|_| err())?)
-            }
+            (Nodes | Links, p) if p.starts_with("prop:") => Base::Prop(
+                self.vocab_name(VocabKind::PropKey, &p[5..])
+                    .map_err(|e| e.at(s))?,
+            ),
             (Nodes | Links, "type") => Base::Type,
             (Nodes, "name") => Base::Name,
             (Nodes, "labels") => Base::Labels,
@@ -390,8 +391,8 @@ impl<S: Store> Graph<S> {
             (Nodes, d) if d.starts_with("degree(") && d.ends_with(')') => {
                 let args: Vec<&str> = d[7..d.len() - 1].split(',').collect();
                 let t = self
-                    .canon(VocabKind::LinkType, args[0].trim())
-                    .map_err(|_| err())?;
+                    .vocab_name(VocabKind::LinkType, args[0].trim())
+                    .map_err(|e| e.at(s))?;
                 let dir = match args.get(1) {
                     None => Dir::Both,
                     Some(a) => parse_dir(a).ok_or_else(err)?,
@@ -654,8 +655,8 @@ impl<S: Store> Graph<S> {
             let t = match l.get("link_type").and_then(Json::as_str) {
                 None => None,
                 Some(t) => Some(
-                    self.canon(VocabKind::LinkType, t)
-                        .map_err(|_| bad("linked.link_type", "a link type"))?,
+                    self.vocab_name(VocabKind::LinkType, t)
+                        .map_err(|e| e.at("linked.link_type"))?,
                 ),
             };
             let dir = match l.get("direction").and_then(Json::as_str) {
@@ -706,30 +707,31 @@ impl<S: Store> Graph<S> {
         if matches!(op, Op::Between) && !matches!(&value, Some(Value::List(x)) if x.len() == 2) {
             return Err(bad("value", "[low, high] for between"));
         }
-        // Type names are compared in their canonical spelling, as a write would store them.
-        let value = match (&expr, value) {
-            (Expr::Field(Base::Type, None), Some(v)) => {
-                let kind = if target == Target::Links {
-                    VocabKind::LinkType
-                } else {
-                    VocabKind::NodeType
-                };
-                let canon = |s: &str| self.canon(kind, s).unwrap_or_else(|_| s.to_owned());
-                Some(match v {
-                    Value::String(s) => Value::String(canon(&s)),
-                    Value::List(xs) => Value::List(
-                        xs.into_iter()
-                            .map(|x| match x {
-                                Value::String(s) => Value::String(canon(&s)),
-                                other => other,
-                            })
-                            .collect(),
-                    ),
-                    other => other,
-                })
+        // A type name given to compare with must follow the graph's naming policy, as in a write;
+        // otherwise the condition could never match, and the error names the expected spelling.
+        if let (Expr::Field(Base::Type, None), Some(v), Op::Eq | Op::Ne | Op::In | Op::NotIn) =
+            (&expr, &value, op)
+        {
+            let kind = if target == Target::Links {
+                VocabKind::LinkType
+            } else {
+                VocabKind::NodeType
+            };
+            let names: Vec<&String> = match v {
+                Value::String(s) => vec![s],
+                Value::List(xs) => xs
+                    .iter()
+                    .filter_map(|x| match x {
+                        Value::String(s) => Some(s),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => vec![],
+            };
+            for n in names {
+                self.vocab_name(kind, n).map_err(|e| e.at("value"))?;
             }
-            (_, v) => v,
-        };
+        }
         Ok(Cond::Cmp(expr, op, value))
     }
 
@@ -1179,6 +1181,27 @@ impl<S: Store> Graph<S> {
                     AggFn::Count | AggFn::CountOf => {}
                 }
             }
+        }
+        // Without `group_by` there is always one group, also over no objects ([OP-FIND-5]).
+        if group_by.is_empty() && groups.is_empty() {
+            let m: Map<String, Json> = aggs
+                .iter()
+                .map(|a| {
+                    let v = match a.f {
+                        AggFn::Count | AggFn::CountOf | AggFn::CountDistinct => json!(0),
+                        _ => Json::Null,
+                    };
+                    (a.name.clone(), v)
+                })
+                .collect();
+            return self.finish_groups(
+                vec![(Vec::new(), 0, m)],
+                group_by,
+                aggs,
+                sort,
+                offset,
+                limit,
+            );
         }
         // Group rows: key values and aggregate results.
         let out: Vec<GroupRow> = groups

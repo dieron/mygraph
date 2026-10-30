@@ -6,8 +6,8 @@ Nodes and links carry properties: a map from property key to value. This file de
 kinds, their JSON form in the API, their limits, how they compare and sort, and how they are
 encoded in storage.
 
-Property keys follow [normalization.md §3](normalization.md#3-vocabulary-canonicalization)
-(lower_snake when `normalize_types` is on).
+Property keys follow [normalization.md §3](normalization.md#3-vocabulary-naming) (lower_snake
+under the default `naming: styled`).
 
 ---
 

@@ -24,7 +24,7 @@ key or any alias key (a typo in a full name scores about 0.9; an initial instead
 about 0.7).
 
 **[RES-3]** **Type factor**: 1.0 when the entity gives no `type` or the node has that type
-(canonicalized as in a write, [VOCAB-1]); 0.7 otherwise.
+(checked as in a write, [VOCAB-1]); 0.7 otherwise.
 
 **[RES-4]** **Hints**: for each hint property the node also has, the hint **agrees** or
 **conflicts** ([RES-5]); properties the node lacks count for neither.

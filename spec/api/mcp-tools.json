@@ -10,7 +10,7 @@
       "inputSchema": { "type": "object", "properties": {
         "action": { "enum": ["list", "create"], "description": "Default list." },
         "name": { "type": "string", "description": "For create: the new graph's name." },
-        "policies": { "type": "object", "description": "For create, optional: require_evidence (enforce | warn | off; default enforce), inline_text_limit, normalize_types." }
+        "policies": { "type": "object", "description": "For create, optional: require_evidence (enforce | warn | off; default enforce), inline_text_limit, naming (styled | free; default styled: names must be in style and are never rewritten)." }
       } }
     },
     {

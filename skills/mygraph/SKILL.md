@@ -77,7 +77,9 @@ What matters here, and why:
   distinguishable from what sources say.
 - **Naming**: node types `PascalCase` singular (`Person`, `Organization`), link types
   `UPPER_SNAKE_CASE` verbs (`WORKS_AT`, `BORN_IN`), property keys `lower_snake_case`. The server
-  canonicalizes spelling ("works at" → `WORKS_AT`) but cannot merge synonyms — that is your job.
+  never rewrites a name: another spelling ("works at") fails with `vocab.not_styled`, and
+  `details.expected` is the spelling to resend. It cannot merge synonyms — that is your job. (A
+  graph created with `naming: free` takes names exactly as given; follow what `overview` shows.)
 - **Values**: strings, numbers, booleans, lists of one kind; dates as `{"$date": "1815-12-10"}`
   (also `"1815-12"` or `"1815"` when that's all the source says — don't invent precision); times as
   `{"$datetime": "2024-03-02T10:00:00Z"}`.

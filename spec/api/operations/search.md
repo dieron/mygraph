@@ -18,7 +18,7 @@ order: [algorithms/search-ranking.md](../../algorithms/search-ranking.md).
 |---|---|---|
 | `query` | Text, 1–512 bytes after NFC ([NORM-TEXT-1]) | required |
 | `in` | Any of `nodes`, `links`, `evidence` | `["nodes"]` |
-| `types` | Node types (canonicalized like a write, [VOCAB-1]) or link types; filters node and link hits | all |
+| `types` | Node types or link types, each acceptable as one of them ([VOCAB-1]); filters node and link hits | all |
 | `mode` | `auto` (all match kinds), `exact` (`*:exact`), `prefix` (`*:exact`, `*:prefix`), `fuzzy` (`*:fuzzy`), `text` (`text` only) | `auto` |
 | `limit` | 1–500 | 20 |
 | `include_retracted` | Also return retracted nodes, links and evidence (merged nodes never). Name matching covers active nodes only, so retracted nodes are found by full text | `false` |

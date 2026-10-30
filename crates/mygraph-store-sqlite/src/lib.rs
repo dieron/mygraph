@@ -300,7 +300,7 @@ mod tests {
         let policies = Policies {
             require_evidence: RequireEvidence::Warn,
             inline_text_limit: 4096,
-            normalize_types: false,
+            naming: mygraph_core::model::Naming::Free,
         };
         GraphFile::create(dir.path(), "research", &policies, NOW).unwrap();
 

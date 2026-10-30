@@ -1,9 +1,12 @@
-//! Vocabulary canonicalization — spec/model/normalization.md §3.
+//! Vocabulary naming — spec/model/normalization.md §3.
 
 use crate::Reason;
+use crate::engine::OpError;
+use crate::model::Naming;
 use crate::ucd::{
     gc, is_letter, is_mark, is_number, is_upper_or_title, simple_lower, simple_upper,
 };
+use serde_json::json;
 use unicode_general_category::GeneralCategory as Gc;
 use unicode_normalization::UnicodeNormalization;
 
@@ -29,7 +32,54 @@ impl VocabKind {
     }
 }
 
-/// [VOCAB-1] [VOCAB-4] canonical form when `normalize_types` is on.
+/// A name the graph's naming policy refuses ([VOCAB-1], [VOCAB-5]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameError {
+    pub reason: Reason,
+    pub given: String,
+    /// For `vocab.not_styled`: the spelling the policy expects.
+    pub styled: Option<String>,
+}
+
+impl NameError {
+    /// The error for the request field that held the name.
+    pub fn at(&self, field: &str) -> OpError {
+        let message = match &self.styled {
+            Some(s) => format!(
+                "{field}: {:?} does not follow this graph's naming style; use {s:?}",
+                self.given
+            ),
+            None => format!("{field}: {:?}: {}", self.given, self.reason.0),
+        };
+        OpError::new(self.reason.0, message)
+            .details(json!({ "field": field, "given": self.given, "expected": self.styled }))
+    }
+}
+
+/// [VOCAB-1] the name as stored and looked up, if the policy accepts it: `input` in NFC, never
+/// rewritten otherwise.
+pub fn check(kind: VocabKind, input: &str, naming: Naming) -> Result<String, NameError> {
+    let err = |reason, styled| NameError {
+        reason,
+        given: input.to_owned(),
+        styled,
+    };
+    match naming {
+        Naming::Free => validate_verbatim(input).map_err(|r| err(r, None)),
+        Naming::Styled => {
+            let styled = canonicalize(kind, input).map_err(|r| err(r, None))?;
+            let given: String = input.nfc().collect();
+            if given == styled {
+                Ok(given)
+            } else {
+                Err(err(Reason("vocab.not_styled"), Some(styled)))
+            }
+        }
+    }
+}
+
+/// [VOCAB-2] .. [VOCAB-4] the styled spelling of a name: what `check` asks for under
+/// `naming: styled`.
 pub fn canonicalize(kind: VocabKind, input: &str) -> Result<String, Reason> {
     let words = split_words(input);
     let out = match kind {
@@ -50,7 +100,7 @@ pub fn canonicalize(kind: VocabKind, input: &str) -> Result<String, Reason> {
     Ok(out)
 }
 
-/// [VOCAB-5] validation of an item taken as given (`normalize_types` off); returns the NFC form.
+/// [VOCAB-5] validation of a name taken as given (`naming: free`); returns the NFC form.
 pub fn validate_verbatim(input: &str) -> Result<String, Reason> {
     let s: String = input.nfc().collect();
     validate(&s, true)?;

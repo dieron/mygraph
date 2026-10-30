@@ -130,9 +130,10 @@ impl<S: Store> Graph<S> {
             Some(Json::Array(a)) => a
                 .iter()
                 .map(|t| {
-                    t.as_str()
-                        .and_then(|t| self.canon(kind, t).ok())
-                        .ok_or_else(|| bad(op, key, "a list of type names"))
+                    let t = t
+                        .as_str()
+                        .ok_or_else(|| bad(op, key, "a list of type names"))?;
+                    self.vocab_name(kind, t).map_err(|e| e.at(key))
                 })
                 .collect::<Result<HashSet<_>, _>>()
                 .map(Some),

@@ -100,6 +100,9 @@ pub fn hint_of(code: &str) -> Option<&'static str> {
         "lifecycle.retracted" => {
             "The object is retracted; restore it with retract and action: restore first."
         }
+        "vocab.not_styled" => {
+            "This graph wants names in its style; resend with details.expected (overview lists the names in use)."
+        }
         "graph.not_found" => "List the available graphs with GET /v1/graphs.",
         "graph.warming_up" => {
             "The graph is loading; retry after the number of seconds in Retry-After."

@@ -40,7 +40,7 @@ An isolated knowledge base. A server hosts any number of graphs; an agent works 
 | `description` | Shown to the agent in the overview |
 | `policies.require_evidence` | `enforce` (default) · `warn` · `off` — see §7 |
 | `policies.inline_text_limit` | Default 64 KB; longer text goes to the blob store |
-| `policies.normalize_types` | Default `true` — see §9 |
+| `policies.naming` | `styled` (default) · `free` — see §9 |
 
 ## 2. Node
 
@@ -199,8 +199,12 @@ Anywhere the API needs a node, it accepts any of:
 Schemaless by default, with an **implicit vocabulary** the engine maintains: every node type, link
 type and property key in use, with counts and optional descriptions.
 
-- With `normalize_types` on, the engine canonicalizes spelling: node types → `PascalCase`
-  (`"person"` → `Person`), link types → `UPPER_SNAKE` (`"works at"`, `"worksAt"` → `WORKS_AT`).
+- Names are never rewritten. With `naming: styled` (the default) the engine requires one style:
+  node types `PascalCase`, link types `UPPER_SNAKE`, property keys `lower_snake`; `"person"` or
+  `"works at"` fails with `vocab.not_styled` and the expected spelling (`Person`, `WORKS_AT`).
+  With `naming: free` names are stored as given (for imports that must keep source names).
+  *(Changed 2026-10-29: earlier drafts rewrote names silently, which surprised users when
+  `locationIP` came back as `location_ip`.)*
 - When a write introduces a **new** type or link type, the response lists similar existing ones
   (`"new link type EMPLOYED_BY; similar: WORKS_AT (1,204 links)"`), so the agent can correct itself.
 - Agents can attach descriptions to types (`type_info`) — these appear in the overview and act as
