@@ -46,7 +46,12 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       transactions for trusted loaders, one batch-level citation instead of one per fact.
       Published SF1 loads: Neo4j 71 s, TypeGraph/SQLite 587 s; ours is estimated at ~25 min.
 - [x] Neo4j Community on Windows with the same data (`mygraph-ldbc neo4j-csv`); SF0.1 counts match.
-- [ ] The harness that compares `neighbors` / `paths` / `find` results with Cypher.
+- [x] The harness that compares `neighbors` / `paths` / `find` results with Cypher
+      (`mygraph-ldbc diff`); 3 212 SF0.1 cases agree with Neo4j.
+- [ ] Decide the two spec / implementation differences it found (docs/11-benchmarks.md):
+      `find` returns no group when nothing matches; `ne` / `not_in` on lists.
+- [ ] Extend the harness: `k_shortest`, directed `paths`, `steps`, `as_of`, `contains` /
+      `starts_with`, sorting and paging, result order; run it on SF1.
 - [ ] Rerun the SF0.1 and SF1 loads on a quiet machine with the current mapping.
 - [ ] Workload driver: IS1–IS7, update-stream inserts, IC1 / IC13-style reads; MyGraph versus
       Neo4j.

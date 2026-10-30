@@ -7,6 +7,7 @@
 //! endpoint exists before its links are written.
 
 mod archive;
+mod diff;
 mod neo4j;
 mod schema;
 
@@ -64,6 +65,25 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Compares random `neighbors`, `paths` and `find` results with Neo4j holding the same graph;
+    /// exits with status 1 when any case differs.
+    Diff {
+        #[arg(long)]
+        data: PathBuf,
+        #[arg(long, default_value = "ldbc")]
+        graph: String,
+        /// Neo4j's HTTP address (authentication off).
+        #[arg(long, default_value = "http://localhost:7474")]
+        neo4j: String,
+        /// Random cases, besides a fixed set of group-by cases.
+        #[arg(long, default_value_t = 300)]
+        cases: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Report skipped cases on stderr.
+        #[arg(long)]
+        verbose: bool,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -84,6 +104,19 @@ fn main() -> Result<()> {
             replace,
         } => load(&archive, &data, &graph, provenance, replace),
         Cmd::Neo4jCsv { archive, out } => neo4j::export(&archive, &out),
+        Cmd::Diff {
+            data,
+            graph,
+            neo4j,
+            cases,
+            seed,
+            verbose,
+        } => {
+            if !diff::run(&data, &graph, &neo4j, cases, seed, verbose)? {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
     }
 }
 

@@ -146,10 +146,65 @@ The load times are not like for like: `neo4j-admin import` builds the store offl
 input, while MyGraph applies every batch as a transaction with matching, validation, the change log
 and the search indexes.
 
+### Comparing results with Neo4j
+
+`mygraph-ldbc diff` opens the MyGraph graph in-process and sends Cypher to Neo4j's HTTP API. Each
+case is a random MyGraph request plus a Cypher query meant to return the same thing; results are
+normalized (node IDs to keys, order removed, one form for temporal values and numbers) and compared.
+It exits with status 1 when any case differs.
+
+```bash
+mygraph-ldbc diff --data <data dir> --graph ldbc-sf01-none --cases 700 --seed 1
+```
+
+| Family | MyGraph request | Compared |
+|---|---|---|
+| `neighbors_1` | 1 hop from a random node; random link types (0–2), direction, node type | node keys, link count |
+| `neighbors_2` | the same, 2 hops | node keys |
+| `paths_shortest`, `paths_all_shortest` | random pair, `max_length` 4, one of five link-type sets | length, number of paths (≤ 100) |
+| `find_count` | type plus one condition on a property, `name` or `labels`, operand taken from a real node: every operator on strings, ints, dates and date-times (as partial dates), lists | count |
+| `find_degree` | `degree(T, dir)` with `gt` / `eq` / `lte` | count, `max(degree)` |
+| `find_group` | 9 fixed group-bys (`prop:…`, `.year`, `.month`, `.decade`, `labels`) with count, count of, sum, avg, median, min, count_distinct | every group |
+| `find_links` | links by type and endpoint types; date and int filters on link properties | groups, counts |
+| `find_linked` | persons with a `linked` condition | node keys |
+
+A case is skipped when MyGraph's result is truncated (more than 1000 links per node or 5000
+nodes), or when Neo4j hits its 30 s transaction timeout (`db.transaction.timeout=30s`).
+
+**SF0.1, seeds 1–4, 700 random cases each** (the group-by cases are the same in every run):
+
+| Family | Pass | Fail | Skipped |
+|---|---|---|---|
+| `neighbors_1` | 797 | 0 | 3 |
+| `neighbors_2` | 347 | 0 | 53 |
+| `paths_shortest` | 205 | 0 | 0 |
+| `paths_all_shortest` | 195 | 0 | 0 |
+| `find_count` | 800 | 0 | 0 |
+| `find_degree` | 400 | 0 | 0 |
+| `find_group` | 36 | 0 | 0 |
+| `find_links` | 32 | 0 | 0 |
+| `find_linked` | 400 | 0 | 0 |
+
+**Findings** (spec and implementation disagree; neither is changed yet):
+
+1. **`find` without `group_by` over no matching objects returns no group.** [OP-FIND-5] makes all
+   matching objects one group and [OP-FIND-6] says a count over no values is 0, as SQL and Cypher
+   return. The harness counts this as a known difference (206 times in the runs above) and compares
+   as if the group `{count: 0}` were there.
+2. **`ne` and `not_in` on a list property**: MyGraph treats them as the negation of `eq` / `in`
+   (no element matches, `find.rs` `holds`), while [OP-FIND-4] says a comparison on a list holds
+   when it holds for any element, which would make `speaks ne "en"` true for `["en", "si"]`. The
+   implementation's meaning is the more useful one; the spec sentence should say so. The harness
+   follows the implementation.
+3. **Property keys are renamed**: `normalize_types` turns `locationIP` into `location_ip` and
+   `creationDate` into `creation_date`. `find` accepts either spelling, but `get` shows the
+   canonical one, so an agent sees different names than the source data used.
+
+Not covered yet: `k_shortest`, `paths` with a direction, `neighbors` with different `steps`,
+`as_of`, `contains` / `starts_with`, sorting, paging, and the order of results.
+
 ### Then
 
 1. Load SF1 (3.2 M nodes, ~17 M links); RAM is expected around 10 GB with evidence.
-2. The comparison harness for group 1: random `neighbors` / `paths` / `find` requests, their
-   Cypher translation, and a diff of the results by `key`.
-3. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
+2. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
    p50 / p95 / p99 for MyGraph and Neo4j on the same machine.
