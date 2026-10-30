@@ -36,6 +36,19 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [ ] Portability cold read: a fresh session implements the pure functions in another language
       from `spec/` and `conformance/` only.
 
+## External benchmarks (docs/11-benchmarks.md)
+
+- [x] LDBC SNB loader (`mygraph-ldbc`); SF0.1 loads with exact counts, with and without evidence.
+- [ ] SF1 load numbers.
+- [ ] Where the graph file's bytes go (~650 bytes per object without evidence).
+- [ ] Neo4j with the same data, and the harness that compares `neighbors` / `paths` / `find`
+      results with Cypher.
+- [ ] Workload driver: IS1–IS7, update-stream inserts, IC1 / IC13-style reads; MyGraph versus
+      Neo4j.
+- [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.
+- [ ] `resolve` on the Leipzig entity-resolution datasets.
+- [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
+
 ## Observability
 
 - [ ] Example Grafana dashboard for `/metrics` under `deploy/`.

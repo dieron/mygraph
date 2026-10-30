@@ -6,6 +6,7 @@ members = [
   "crates/mygraph-text-tantivy",
   "crates/mygraph-server",
   "crates/mygraph-bench",
+  "crates/mygraph-ldbc",
 ]
 
 [workspace.package]
