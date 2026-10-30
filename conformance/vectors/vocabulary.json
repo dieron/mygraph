@@ -6,7 +6,7 @@
     {
       "function": "canonical_node_type",
       "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
-      "description": "Node type as written -> PascalCase canonical form (normalize_types = true).",
+      "description": "Node type as written -> its styled (PascalCase) form, which naming: styled requires the input to equal.",
       "cases": [
         { "input": "person", "output": "Person" },
         { "input": "Person", "output": "Person" },
@@ -36,7 +36,7 @@
     {
       "function": "canonical_link_type",
       "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
-      "description": "Link type as written -> UPPER_SNAKE canonical form (normalize_types = true).",
+      "description": "Link type as written -> its styled (UPPER_SNAKE) form, which naming: styled requires the input to equal.",
       "cases": [
         { "input": "works at", "output": "WORKS_AT" },
         { "input": "worksAt", "output": "WORKS_AT" },
@@ -55,7 +55,7 @@
     {
       "function": "canonical_prop_key",
       "rules": ["VOCAB-1", "VOCAB-2", "VOCAB-3", "VOCAB-4", "VOCAB-5"],
-      "description": "Property key as written -> lower_snake canonical form (normalize_types = true).",
+      "description": "Property key as written -> its styled (lower_snake) form, which naming: styled requires the input to equal.",
       "cases": [
         { "input": "born", "output": "born" },
         { "input": "birthDate", "output": "birth_date" },
@@ -75,7 +75,7 @@
     {
       "function": "validate_vocabulary_verbatim",
       "rules": ["VOCAB-5"],
-      "description": "Validation when normalize_types = false: input is taken as given (after NFC).",
+      "description": "Validation under naming: free: the input is taken as given (after NFC).",
       "cases": [
         { "input": { "kind": "link_type", "value": "WORKS_AT" }, "output": "WORKS_AT" },
         { "input": { "kind": "prop_key", "value": "birthDate" }, "output": "birthDate", "note": "not converted" },

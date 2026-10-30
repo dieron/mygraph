@@ -27,7 +27,7 @@
           "output": [ { "name": "born_to", "count": 9 }, { "name": "born_at", "count": 3 }, { "name": "born_up", "count": 3 } ]
         },
         {
-          "note": "Case only (graphs with normalize_types off): joined forms are equal -> 1000.",
+          "note": "Case only (graphs with naming: free): joined forms are equal -> 1000.",
           "input": { "new": "person", "vocabulary": [ { "name": "Person", "count": 4 } ] },
           "output": [ { "name": "Person", "count": 4 } ]
         },
