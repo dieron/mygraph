@@ -1,7 +1,9 @@
 //! How the tables of LDBC SNB Interactive v1 (`CsvMergeForeign`) map to MyGraph nodes and links
 //! (docs/11-benchmarks.md §2).
 
-use serde_json::{Value as Json, json};
+use crate::archive::{Result, col};
+use serde_json::{Map, Value as Json, json};
+use std::collections::HashMap;
 
 /// A table whose rows become nodes. Its foreign-key columns become links in the second pass.
 pub struct NodeTable {
@@ -193,21 +195,143 @@ pub fn table_of(file_name: &str) -> Option<&str> {
     (numeric(a) && numeric(b)).then_some(rest)
 }
 
+/// Per person table name in [`PERSON_LISTS`]: person id → values.
+pub type PersonLists = HashMap<&'static str, HashMap<i64, Vec<String>>>;
+
+/// Where a node table's fields are in its header.
+pub struct NodeColumns {
+    id: usize,
+    label: Option<usize>,
+    name: Vec<usize>,
+    /// Property columns: index and name.
+    pub props: Vec<(usize, String)>,
+}
+
+/// What one node row becomes, the same for MyGraph and for the Neo4j export.
+pub struct NodeRow {
+    pub id: i64,
+    pub key: String,
+    pub name: String,
+    pub labels: Vec<String>,
+    pub props: Map<String, Json>,
+}
+
+impl NodeTable {
+    pub fn columns(&self, header: &[String]) -> Result<NodeColumns> {
+        let id = col(header, "id")?;
+        let label = self.label_col.map(|c| col(header, c)).transpose()?;
+        let name = match self.name {
+            Name::Col(c) => vec![col(header, c)?],
+            Name::Person => vec![col(header, "firstName")?, col(header, "lastName")?],
+            Name::Id(_) => vec![],
+        };
+        // A column that is the whole name is not repeated as a property; a person keeps
+        // `firstName` and `lastName`, which LDBC queries filter on.
+        let name_col = matches!(self.name, Name::Col(_)).then(|| name[0]);
+        let props = header
+            .iter()
+            .enumerate()
+            .filter(|&(i, h)| {
+                i != id
+                    && Some(i) != label
+                    && Some(i) != name_col
+                    && !self.fks.iter().any(|f| f.col == h)
+            })
+            .map(|(i, h)| (i, h.clone()))
+            .collect();
+        Ok(NodeColumns {
+            id,
+            label,
+            name,
+            props,
+        })
+    }
+
+    /// The list properties this table's nodes get from [`PERSON_LISTS`].
+    pub fn list_props(&self) -> &'static [(&'static str, &'static str)] {
+        if self.table == "person" {
+            &PERSON_LISTS
+        } else {
+            &[]
+        }
+    }
+
+    pub fn row(&self, c: &NodeColumns, row: &[String], lists: &PersonLists) -> Result<NodeRow> {
+        let id: i64 = row[c.id].parse()?;
+        let name = match self.name {
+            Name::Id(prefix) => format!("{prefix} {id}"),
+            _ => c
+                .name
+                .iter()
+                .map(|&i| row[i].as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        };
+        let name = if name.trim().is_empty() {
+            format!("{} {id}", self.ty)
+        } else {
+            name
+        };
+        let mut props = Map::new();
+        for (i, h) in &c.props {
+            if let Some(v) = value(h, &row[*i]) {
+                props.insert(h.clone(), v);
+            }
+        }
+        for (list_table, prop) in self.list_props() {
+            if let Some(vs) = lists.get(list_table).and_then(|m| m.get(&id)) {
+                props.insert((*prop).to_owned(), json!(vs));
+            }
+        }
+        let labels = c
+            .label
+            .filter(|&l| !row[l].is_empty())
+            .map(|l| label(&row[l]))
+            .into_iter()
+            .collect();
+        Ok(NodeRow {
+            id,
+            key: format!("{}/{id}", self.table),
+            name,
+            labels,
+            props,
+        })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Str,
+    Int,
+    Date,
+    DateTime,
+}
+
+/// The kind of a column's values, by column name.
+pub fn kind(col: &str) -> Kind {
+    match col {
+        "creationDate" | "joinDate" => Kind::DateTime,
+        "birthday" => Kind::Date,
+        "length" | "classYear" | "workFrom" => Kind::Int,
+        _ => Kind::Str,
+    }
+}
+
 /// A property value from a CSV cell, by column name; `None` leaves the property out.
 pub fn value(col: &str, cell: &str) -> Option<Json> {
     if cell.is_empty() {
         return None;
     }
-    Some(match col {
-        "creationDate" | "joinDate" => json!({ "$datetime": datetime(cell) }),
-        "birthday" => json!({ "$date": cell }),
-        "length" | "classYear" | "workFrom" => json!(cell.parse::<i64>().ok()?),
-        _ => json!(cell),
+    Some(match kind(col) {
+        Kind::DateTime => json!({ "$datetime": datetime(cell) }),
+        Kind::Date => json!({ "$date": cell }),
+        Kind::Int => json!(cell.parse::<i64>().ok()?),
+        Kind::Str => json!(cell),
     })
 }
 
 /// LDBC writes the offset as `+0000`; MyGraph wants `Z` or `+hh:mm` ([VAL-DT-1]).
-fn datetime(s: &str) -> String {
+pub fn datetime(s: &str) -> String {
     match s.len().checked_sub(5).map(|i| s.split_at(i)) {
         Some((head, "+0000")) => format!("{head}Z"),
         Some((head, off)) if off.starts_with(['+', '-']) => {

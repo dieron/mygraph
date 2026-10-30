@@ -56,8 +56,9 @@ of at most 1000 items ([OP-WRITE-1]): all nodes first, then all links.
 - **Keys** are `<table>/<LDBC id>` (`person/933`), because LDBC ids repeat across tables and
   person names repeat within one. A key also skips name matching ([WRITE-MATCH-NODE-1]).
 - **Names:** persons `firstName lastName`, forums their title, posts and comments `Post <id>` /
-  `Comment <id>`, the rest their LDBC name. All LDBC columns are properties, with LDBC's column
-  names; dates become `$date`, timestamps `$datetime`. A person's emails and languages are list
+  `Comment <id>`, the rest their LDBC name. The other LDBC columns are properties, with LDBC's
+  column names (a column that is the whole name is not repeated; persons keep `firstName` and
+  `lastName`); dates become `$date`, timestamps `$datetime`. A person's emails and languages are list
   properties `email` and `speaks`. Empty values are left out.
 - **Link types** use LDBC's names: `KNOWS` (undirected), `HAS_CREATOR`, `CONTAINER_OF`,
   `HAS_MODERATOR`, `HAS_MEMBER`, `HAS_TAG`, `HAS_INTEREST`, `IS_LOCATED_IN`, `REPLY_OF`, `LIKES`,
@@ -105,9 +106,50 @@ Per object in memory: node 917 bytes (posts and comments carry their text as a p
   compared with 59 MiB of CSV tables (17 MB compressed). Where the bytes go (change log, FTS5 tables,
   indexes) is the next thing to measure.
 
+These SF0.1 numbers were measured before the name column stopped being repeated as a property
+(about 39 000 fewer properties now); rerun them on a quiet machine before relying on them.
+
+### Neo4j with the same graph
+
+`mygraph-ldbc neo4j-csv` writes the graph as input for `neo4j-admin database import full`, from the
+same mapping code as the MyGraph load: label = MyGraph type plus subtype labels, properties `key`,
+`name` and the same properties with the same values. Neo4j relationships are always directed, so
+`KNOWS` is stored once per pair and queried without a direction.
+
+Setup on Windows (no Docker or WSL needed): Neo4j Community 2026.10.1 (zip from
+`dist.neo4j.org`) and the Temurin 21 JRE, unpacked next to the data, outside synced folders. In
+`conf/neo4j.conf`: `dbms.security.auth_enabled=false` (it listens on localhost only),
+`dbms.usage_report.enabled=false`, heap 4 GB, page cache 4 GB.
+
+```powershell
+mygraph-ldbc neo4j-csv --archive <archive> --out <dir>
+$env:JAVA_HOME = '<jre folder>'
+$a = Get-Content <dir>\import.args
+& <neo4j>\bin\neo4j-admin.bat database import full neo4j @a
+& <neo4j>\bin\neo4j.bat console
+```
+
+The database name goes before the arguments (the last `--relationships` would take it as a file),
+and the Windows script does not expand `@file`, hence `Get-Content`. Then one unique constraint on
+`key` per label (`CREATE CONSTRAINT Person_key FOR (n:Person) REQUIRE n.key IS UNIQUE`, …), and
+`CALL db.awaitIndexes()` in a separate transaction.
+
+**SF0.1 in Neo4j**: 327 588 nodes and 1 477 965 relationships; every count per label and per
+relationship type equals MyGraph's.
+
+| | Neo4j 2026.10.1 (offline import) | MyGraph (`write`, no evidence) |
+|---|---|---|
+| Load | 5.6 s (10.5 s with JVM start) | 145 s |
+| On disk | 141 MiB, 151 MiB with the key indexes | 1 224 MiB |
+
+The load times are not like for like: `neo4j-admin import` builds the store offline from sorted
+input, while MyGraph applies every batch as a transaction with matching, validation, the change log
+and the search indexes.
+
 ### Then
 
 1. Load SF1 (3.2 M nodes, ~17 M links); RAM is expected around 10 GB with evidence.
-2. Neo4j on the same data (LDBC's own Neo4j loader) and the comparison harness for group 1.
+2. The comparison harness for group 1: random `neighbors` / `paths` / `find` requests, their
+   Cypher translation, and a diff of the results by `key`.
 3. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
    p50 / p95 / p99 for MyGraph and Neo4j on the same machine.

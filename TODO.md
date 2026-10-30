@@ -40,9 +40,14 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 
 - [x] LDBC SNB loader (`mygraph-ldbc`); SF0.1 loads with exact counts, with and without evidence.
 - [ ] SF1 load numbers.
-- [ ] Where the graph file's bytes go (~650 bytes per object without evidence).
-- [ ] Neo4j with the same data, and the harness that compares `neighbors` / `paths` / `find`
-      results with Cypher.
+- [ ] Where the graph file's bytes go: ~650 bytes per object without evidence, about 21× the raw
+      CSV (Neo4j: about 2×).
+- [ ] Faster large loads: an offline bulk import (like `neo4j-admin import`), larger
+      transactions for trusted loaders, one batch-level citation instead of one per fact.
+      Published SF1 loads: Neo4j 71 s, TypeGraph/SQLite 587 s; ours is estimated at ~25 min.
+- [x] Neo4j Community on Windows with the same data (`mygraph-ldbc neo4j-csv`); SF0.1 counts match.
+- [ ] The harness that compares `neighbors` / `paths` / `find` results with Cypher.
+- [ ] Rerun the SF0.1 and SF1 loads on a quiet machine with the current mapping.
 - [ ] Workload driver: IS1–IS7, update-stream inserts, IC1 / IC13-style reads; MyGraph versus
       Neo4j.
 - [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.

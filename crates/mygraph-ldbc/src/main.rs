@@ -6,21 +6,22 @@
 //! table, then every link (foreign-key columns of the node tables and the edge tables), so every
 //! endpoint exists before its links are written.
 
+mod archive;
+mod neo4j;
 mod schema;
 
+use archive::{Result, col, each_table, rows};
 use clap::{Parser, Subcommand, ValueEnum};
 use mygraph_core::engine::Graph;
 use mygraph_core::model::{Policies, RequireEvidence};
 use mygraph_store_sqlite::{GraphFile, graph_path};
-use schema::{NODE_TABLES, Name, PERSON_LISTS};
+use schema::{NODE_TABLES, PERSON_LISTS, PersonLists};
 use serde_json::{Map, Value as Json, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const ACTOR: &str = "ldbc-loader";
 /// Batch timestamps start here and advance by one second per batch, so files are reproducible.
@@ -54,6 +55,15 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
     },
+    /// Writes the same graph as CSV files for `neo4j-admin database import full`, plus an
+    /// argument file `import.args`.
+    Neo4jCsv {
+        #[arg(long)]
+        archive: PathBuf,
+        /// Output folder.
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -73,54 +83,8 @@ fn main() -> Result<()> {
             provenance,
             replace,
         } => load(&archive, &data, &graph, provenance, replace),
+        Cmd::Neo4jCsv { archive, out } => neo4j::export(&archive, &out),
     }
-}
-
-/// Calls `f` for every table file in the archive with its path below the top folder, its table
-/// name and a reader positioned at its header line. Checksum files and update streams are skipped.
-fn each_table(
-    archive: &Path,
-    mut f: impl FnMut(&str, &str, &mut dyn BufRead) -> Result<()>,
-) -> Result<()> {
-    let mut ar = tar::Archive::new(zstd::Decoder::new(std::fs::File::open(archive)?)?);
-    for entry in ar.entries()? {
-        let entry = entry?;
-        let path = entry.path()?.to_string_lossy().replace('\\', "/");
-        let file_name = path.rsplit('/').next().unwrap_or_default();
-        if file_name.starts_with('.') {
-            continue;
-        }
-        let Some(table) = schema::table_of(file_name) else {
-            continue;
-        };
-        let rel = path.split_once('/').map_or(path.as_str(), |(_, r)| r);
-        f(rel, table, &mut BufReader::with_capacity(1 << 20, entry))?;
-    }
-    Ok(())
-}
-
-/// The header's column names and an iterator over the rows' cells.
-fn rows(r: &mut dyn BufRead) -> Result<(Vec<String>, impl Iterator<Item = Result<Vec<String>>>)> {
-    let mut lines = r.lines();
-    let header = lines.next().ok_or("empty table file")??;
-    let header: Vec<String> = header.split('|').map(str::to_owned).collect();
-    let n = header.len();
-    let rows = lines.map(move |l| {
-        let l = l?;
-        let cells: Vec<String> = l.split('|').map(str::to_owned).collect();
-        if cells.len() != n {
-            return Err(format!("{} cells, header has {n}: {l}", cells.len()).into());
-        }
-        Ok(cells)
-    });
-    Ok((header, rows))
-}
-
-fn col(header: &[String], name: &str) -> Result<usize> {
-    header
-        .iter()
-        .position(|h| h == name)
-        .ok_or_else(|| format!("no column {name} in {header:?}").into())
 }
 
 #[derive(Default)]
@@ -248,70 +212,28 @@ impl Loader {
         rel: &str,
         table: usize,
         r: &mut dyn BufRead,
-        lists: &HashMap<&str, HashMap<i64, Vec<String>>>,
+        lists: &PersonLists,
     ) -> Result<()> {
         let spec = &NODE_TABLES[table];
         let ev = self.evidence_for(rel)?;
         let (header, rows) = rows(r)?;
-        let id_col = col(&header, "id")?;
-        let label_col = spec.label_col.map(|c| col(&header, c)).transpose()?;
-        let skip: Vec<bool> = header
-            .iter()
-            .enumerate()
-            .map(|(i, h)| {
-                i == id_col || Some(i) == label_col || spec.fks.iter().any(|f| f.col == h)
-            })
-            .collect();
-        let name_cols = match spec.name {
-            Name::Col(c) => vec![col(&header, c)?],
-            Name::Person => vec![col(&header, "firstName")?, col(&header, "lastName")?],
-            Name::Id(_) => vec![],
-        };
+        let cols = spec.columns(&header)?;
         for row in rows {
-            let row = row?;
-            let id: i64 = row[id_col].parse()?;
-            let name = match spec.name {
-                Name::Id(prefix) => format!("{prefix} {id}"),
-                _ => name_cols
-                    .iter()
-                    .map(|&i| row[i].as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            };
-            let name = if name.trim().is_empty() {
-                format!("{} {id}", spec.ty)
-            } else {
-                name
-            };
-            let mut props = Map::new();
-            for (i, h) in header.iter().enumerate() {
-                if !skip[i]
-                    && let Some(v) = schema::value(h, &row[i])
-                {
-                    props.insert(h.clone(), v);
-                }
-            }
-            if spec.table == "person" {
-                for (list_table, prop) in PERSON_LISTS {
-                    if let Some(vs) = lists.get(list_table).and_then(|m| m.get(&id)) {
-                        props.insert(prop.to_owned(), json!(vs));
-                    }
-                }
-            }
+            let n = spec.row(&cols, &row?, lists)?;
             let mut item = json!({
-                "key": format!("{}/{id}", spec.table),
+                "key": n.key,
                 "type": spec.ty,
-                "name": name,
-                "props": props,
+                "name": n.name,
+                "props": n.props,
             });
-            if let Some(c) = label_col.filter(|&c| !row[c].is_empty()) {
-                item["labels"] = json!([schema::label(&row[c])]);
+            if !n.labels.is_empty() {
+                item["labels"] = json!(n.labels);
             }
             if let Some(c) = self.cite(&ev) {
                 item["cite"] = c;
             }
             self.tally.entry(spec.ty.to_owned()).or_default().rows += 1;
-            self.push(item, (table, id, ""), "nodes")?;
+            self.push(item, (table, n.id, ""), "nodes")?;
         }
         self.flush("nodes")
     }
@@ -471,19 +393,7 @@ fn load(
     };
 
     // Pass 1: the tables that become list properties of persons.
-    let mut lists: HashMap<&str, HashMap<i64, Vec<String>>> = HashMap::new();
-    each_table(archive, |_, table, r| {
-        let Some(&(t, _)) = PERSON_LISTS.iter().find(|(t, _)| *t == table) else {
-            return Ok(());
-        };
-        let (_, rows) = rows(r)?;
-        let map = lists.entry(t).or_default();
-        for row in rows {
-            let row = row?;
-            map.entry(row[0].parse()?).or_default().push(row[1].clone());
-        }
-        Ok(())
-    })?;
+    let lists = archive::person_lists(archive)?;
 
     // Pass 2: nodes.
     let mut unknown = Vec::new();
