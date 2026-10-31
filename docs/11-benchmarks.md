@@ -436,3 +436,43 @@ target/release/mygraph-agentbench hotpot --data <dir>/distractor-validation.parq
 `--modes graph,direct`, `--model` (default `sonnet`), `--parallel` (default 4). A run directory
 keeps every transcript, graph and per-question `result.json`. An interrupted run resumes where it
 stopped. Runs cost model tokens and are not part of CI.
+
+### Results
+
+**5 questions, seed 1, Claude Sonnet 5.5** (2026-10-31). Averages; costs at list prices. Too few
+questions to compare models or settings, but enough to show where points are lost.
+
+| | `graph`, skill before | `graph`, sentence quotes | `direct` |
+|---|---|---|---|
+| Answer EM / F1 | 0.40 / 0.76 | 0.60 / 0.82 | 0.60 / 0.82 |
+| Supporting facts precision / recall / F1 | 0.26 / 0.70 / 0.36 | 0.80 / 0.70 / 0.73 | 0.73 / 0.80 / 0.76 |
+| Joint F1 | 0.31 | 0.71 | – |
+| Supporting sentences quoted in the graph | 100 % | 100 % | – |
+| Evidence / nodes / links per graph | 18 / 63 / 71 | 42 / 66 / 75 | – |
+| Cost per question | $0.33 ingest + $0.04 answer | $0.27 + $0.04 | $0.016 |
+
+**Findings:**
+
+1. **The agent quoted whole passages.** The skill asked for "the exact sentence that supports the
+   facts", but the ingest agent stored each passage as one `text` evidence and cited it for
+   everything. Cited quotes stood for 5–10 sentences each (precision 0.26). **Fixed in the skill:**
+   each sentence that states a fact is its own `text` evidence, copied exactly, and nodes and links
+   cite the sentences that state them. Answers cite the quotes for each step, not every source of
+   the nodes. Precision rose to 0.80, close to the reader with the passages in its prompt.
+2. **Graph-backed answers can match the reader.** With sentence quotes, answer EM and F1 equalled
+   `direct` on these questions. The misses were the same in both modes: an ambiguous question, and
+   "Los Alamos Laboratory" against the gold "Los Alamos".
+3. **What is not quoted cannot be cited.** With sentence quotes the agent stored 53–84 % of the
+   passages' sentences, the ones that state facts it modelled; every supporting sentence was among
+   them here, but on more questions this is the number to watch.
+4. **"Verbatim" quotes are not always verbatim.** Agents dropped a sentence from a passage quote,
+   or repaired the dataset's text (HotpotQA has "191311 August" where Wikipedia has
+   "1913 – 11 August"); the grader matches word order (85 %) rather than exact text for this reason.
+5. **One large write per source can fail before reaching MyGraph**: a 20–23 KB `write` came out as
+   invalid JSON in 2 of 10 ingests and the agent resent it. Smaller writes (a passage or two each)
+   would avoid that.
+
+### Then
+
+1. 50 questions with the sentence-quote skill, then MuSiQue (2–4 hop questions).
+2. A second model (Haiku) to see how much of this depends on the model.

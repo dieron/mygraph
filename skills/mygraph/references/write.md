@@ -36,7 +36,8 @@ Needs `kind` and at least one of `content`, `uri`, `blob`, `blob_base64`.
 | `blob_base64` / `blob` | A file (≤ 10 MiB, base64 without line breaks) / `{"sha256": …}` of one already stored; set `mime` |
 | `captured_at`, `meta`, `key`, `id` | Capture time (default now), free JSON, natural key, existing ID |
 
-Patterns: page + quote (`url` parent, `text` child with `parent`); a conversation or meeting
+Patterns: page + quotes (`url` parent, one `text` child per supporting sentence, with `parent`;
+not one quote of the whole page); a conversation or meeting
 (`conversation` with the transcript excerpt); your own reasoning (`observation` whose `content`
 says what you concluded and from what).
 

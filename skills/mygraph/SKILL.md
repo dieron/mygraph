@@ -64,9 +64,12 @@ near-duplicates like "C. Babbage" vs "Charles Babbage" and catch type mismatches
 
 What matters here, and why:
 
-- **Evidence first, specific and verbatim.** Put the page as a `url` evidence and the exact sentence
-  that supports the facts as a `text` evidence with `parent` = the page. A precise fragment makes
-  the fact checkable later; a bare URL does not say which part supports what.
+- **Evidence first, specific and verbatim.** Put the page as a `url` evidence, and each sentence
+  that states a fact as its own `text` evidence with `parent` = the page; cite every node and link
+  with the sentence(s) that state it. Copy each sentence exactly, without fixing or shortening it.
+  Do not quote a whole page or paragraph as one evidence: a citation should point at the words that
+  say the fact, so it can be checked at a glance; a bare URL or a long quote does not say which
+  part supports what.
 - **`ref`s** (`"@ada"`) name items inside one write so links and citations can point at them; the
   response's `refs` maps each to its new or matched ID.
 - **Existing nodes** are referenced by ID (`{"ref": "@bab", "id": "n_3kr"}` or directly `"from": "n_3kr"`),
@@ -100,7 +103,8 @@ limits): **read `references/write.md`** before writes that go beyond the pattern
 ## 3. Answering questions from the graph
 
 Answer from the graph, not from memory, when the user asks about what is recorded — and **cite
-evidence IDs** (e.g. "born 1815 [e_2]") so the user can check. Pick the tool by the question:
+evidence IDs** (e.g. "born 1815 [e_2]") so the user can check: the quotes that state each step
+of the answer, not every source of the nodes involved. Pick the tool by the question:
 
 | Question | Tool |
 |---|---|

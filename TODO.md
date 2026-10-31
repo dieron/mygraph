@@ -66,7 +66,13 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [ ] Find the ~10 ms p99 stall on inserts (SQLite checkpoint?); Neo4j's p99 is 3–5 ms.
 - [ ] IS3 over REST: one `get` per 100 links; a way to read link properties with the links.
 - [ ] Run the driver on SF1.
-- [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.
+- [x] HotpotQA runner with citation grading (`mygraph-agentbench hotpot`); a 5-question run.
+- [x] Skill: one `text` evidence per sentence instead of one per page (citation precision
+      0.26 → 0.80 on 5 HotpotQA questions).
+- [ ] HotpotQA on 50 questions with the current skill; a second model (Haiku).
+- [ ] Agents sometimes send one 20+ KB `write` that arrives as invalid JSON; suggest smaller
+      writes in the skill?
+- [ ] MuSiQue with citation grading; then LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 
