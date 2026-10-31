@@ -7,6 +7,7 @@ members = [
   "crates/mygraph-server",
   "crates/mygraph-bench",
   "crates/mygraph-ldbc",
+  "crates/mygraph-agentbench",
 ]
 
 [workspace.package]

@@ -372,3 +372,67 @@ The fixes changed no answer: the engine tests, the conformance vectors, the comp
 
 1. The insert p99 stall; a way for `neighbors` to leave out links (IC1); fewer calls for IS3.
 2. The same runs on SF1.
+
+## 3. Step 2: HotpotQA with citation grading
+
+HotpotQA (Yang et al., 2018) asks questions whose answers need facts from two Wikipedia passages,
+and marks the sentences that support each answer. That makes it a test of MyGraph's purpose, not
+of the engine: can an agent store what it reads, then answer **from the graph** and **cite the
+right sentences**?
+
+### Data
+
+The dev set, distractor setting: 7 405 questions, each with 10 passages, 2 of which hold the
+supporting facts. The original download host no longer resolves; the same split is on Hugging
+Face as `hotpotqa/hotpot_qa`, config `distractor`, file `distractor/validation-00000-of-00001.parquet`
+(27 452 575 bytes, SHA-256 `c20b638ca82b21d04fe12e14ff417ad05153d4d215a65de54497fca4e972f7c6`).
+Questions are sampled with a seed.
+
+### Method
+
+Crate [`mygraph-agentbench`](../crates/mygraph-agentbench) runs each sampled question in two modes.
+
+- **`graph`**: a fresh MyGraph data folder per question, served over MCP by `mygraph mcp
+  --data-dir`.
+  1. An *ingest* agent gets the 10 passages, each presented as a web page at its Wikipedia URL, and
+     is asked to record them so that later questions, including ones combining passages, can be
+     answered from the graph and checked against the exact sentences. It does not see the
+     question.
+  2. An *answer* agent, in a new context, gets only the question. It answers from the graph and
+     ends with `{"answer": …, "evidence": ["e_…"]}`, or `unknown` when the graph does not hold the
+     answer.
+- **`direct`**: the same model reads the passages, with numbered sentences, in its prompt, and
+  names the supporting sentences. This is the usual reader setting, kept as a reference.
+
+The agent is Claude Code in print mode (`claude -p`) with no settings files, hooks, plugins or
+built-in tools, only the MyGraph MCP server. Its system prompt is the repository's skill
+(`skills/mygraph/SKILL.md` with its `write` and `query` references), so the run tests the skill as
+shipped.
+
+**Grading.** Answers are graded with HotpotQA's official exact match and F1. Citations are graded
+with its supporting-fact metrics (sentence-level precision, recall and F1; joint EM and F1).
+- Mapping evidence to sentences: each cited evidence's stored text is mapped back to the
+  passages' sentences. Every sentence wholly inside the quote counts, or the sentence the quote is
+  part of (3 words or more). A quote that is not verbatim maps to the sentences whose words it
+  mostly repeats.
+- Coarse citations: a quote of a whole passage stands for all of the passage's sentences, so it
+  costs precision. `title_f1` grades at passage level instead.
+- Diagnostics:
+  - `supporting_stored`: the share of supporting sentences quoted anywhere in the graph. It tells
+    a storage miss apart from a retrieval miss.
+  - The graph's size.
+  - Cost at list prices, tool calls and time per agent run.
+
+### Running it
+
+```bash
+cargo build --release -p mygraph-server -p mygraph-agentbench
+```
+
+```bash
+target/release/mygraph-agentbench hotpot --data <dir>/distractor-validation.parquet --out <run dir> --questions 50 --seed 1 --mygraph target/release/mygraph
+```
+
+`--modes graph,direct`, `--model` (default `sonnet`), `--parallel` (default 4). A run directory
+keeps every transcript, graph and per-question `result.json`. An interrupted run resumes where it
+stopped. Runs cost model tokens and are not part of CI.

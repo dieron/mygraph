@@ -1,0 +1,21 @@
+[package]
+name = "mygraph-agentbench"
+description = "Runs agent benchmarks (HotpotQA) with MyGraph as the agent's memory and grades answers and citations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mygraph-agentbench"
+path = "src/main.rs"
+
+[dependencies]
+mygraph-core.workspace = true
+mygraph-store-sqlite.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+parquet = { version = "60", default-features = false, features = ["snap", "zstd"] }
+
+[lints]
+workspace = true
