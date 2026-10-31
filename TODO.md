@@ -70,6 +70,22 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 
+## Concurrency (many users on one graph)
+
+A load test on a small graph (8 cores, NVMe, client on the same machine) gave about 6 800 reads/s
+with 8 readers, but only about 1 700 reads/s once 2 writers joined, and writes topped out at
+about 450–550/s per graph however many writers ran. The cause: a write holds the graph's
+exclusive lock through the SQLite commit and its full sync, so every reader waits for the disk.
+docs/05-architecture.md §6 meant the lock to cover only the in-memory apply.
+
+- [ ] Commit to SQLite outside the exclusive lock (a separate writer mutex for validation and
+      the transaction), then take the write lock only to apply the change in memory.
+- [ ] Group commit: concurrent writes share one transaction and sync.
+- [ ] A small pool of read connections for the reads that reach SQLite (evidence text).
+- [ ] Per-key rate limits or quotas.
+- [ ] A concurrency test in the suite, and a mixed read/write benchmark in
+      docs/11-benchmarks.md, including a large graph where long reads delay writers.
+
 ## Observability
 
 - [ ] Example Grafana dashboard for `/metrics` under `deploy/`.
@@ -81,7 +97,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 ## API gaps
 
 - [ ] `GET /v1/graphs/{g}/search` ignores `Accept: text/plain` (the compact format).
-- [ ] Per-request time limits (spec/api/conventions.md [API-LIMIT-1]).
+- [ ] Per-request time limits (spec/api/conventions.md [API-LIMIT-1]); with many users this also
+      keeps one heavy `find` or `paths` from holding a graph up.
 - [ ] Export leaves out the change log and vocabulary notes.
 - [ ] Admin `PATCH` for graph policies and vocabulary notes; JSON Schemas per operation in
       `spec/api/schemas/`.
