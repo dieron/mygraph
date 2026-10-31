@@ -7,7 +7,7 @@
 //! - `direct`: the same model reads the passages in its prompt and names the supporting sentences
 //!   (the usual reader setting, as a reference).
 
-use crate::agent::{Agent, Result, Run, last_json_with};
+use crate::agent::{Agent, Result, Run, last_json_with, read_transcript};
 use crate::grade::{Fact, Sentences, answer_scores, set_scores};
 use mygraph_core::engine::Graph;
 use mygraph_core::ids::ObjectKind;
@@ -46,6 +46,26 @@ pub struct Options {
     pub parallel: usize,
     pub mygraph: PathBuf,
     pub agent: Agent,
+    /// Grade the transcripts and graphs of an earlier run again instead of running agents.
+    pub regrade: bool,
+}
+
+impl Options {
+    /// Runs an agent, or with `regrade` reads the transcript it left.
+    fn agent_run(
+        &self,
+        dir: &Path,
+        name: &str,
+        system: &str,
+        prompt: &str,
+        mcp: Option<&Json>,
+    ) -> Result<Run> {
+        if self.regrade {
+            read_transcript(&dir.join(format!("{name}.jsonl")))
+        } else {
+            self.agent.run(dir, name, system, prompt, mcp)
+        }
+    }
 }
 
 /// The rows of the Hugging Face `hotpotqa/hotpot_qa` parquet file (config `distractor`).
@@ -219,9 +239,7 @@ fn scores(q: &Question, answer: &str, facts: &BTreeSet<Fact>, run: &Run) -> Map<
 }
 
 fn run_direct(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>> {
-    let run = o
-        .agent
-        .run(dir, "direct", SYSTEM_DIRECT, &direct_prompt(q), None)?;
+    let run = o.agent_run(dir, "direct", SYSTEM_DIRECT, &direct_prompt(q), None)?;
     let reply = last_json_with(&run.text, "answer").unwrap_or(Json::Null);
     let facts = reply["facts"]
         .as_array()
@@ -240,26 +258,28 @@ fn run_direct(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>
 fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>> {
     // A graph left by an interrupted run is started over.
     let data = dir.join("data");
-    let _ = fs::remove_dir_all(&data);
-    fs::create_dir_all(&data)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as i64;
-    drop(GraphFile::create(&data, GRAPH, &Policies::default(), now)?);
+    if !o.regrade {
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64;
+        drop(GraphFile::create(&data, GRAPH, &Policies::default(), now)?);
+    }
     let server = |actor: &str| {
         json!({ "mygraph": { "command": o.mygraph, "args": [
             "mcp", "--data-dir", data, "--graph", GRAPH, "--actor", actor
         ] } })
     };
     let system = system_graph();
-    let ingest = o.agent.run(
+    let ingest = o.agent_run(
         dir,
         "ingest",
         &system,
         &ingest_prompt(q),
         Some(&server("ingest-agent")),
     )?;
-    let ans = o.agent.run(
+    let ans = o.agent_run(
         dir,
         "answer",
         &system,
@@ -494,8 +514,21 @@ fn run_question(o: &Options, q: &Question) -> Result<Json> {
         }),
     };
     fs::create_dir_all(&dir)?;
+    // The passages, for reading transcripts and checking the grading.
+    let passages: Vec<Json> = q
+        .context
+        .iter()
+        .map(|(t, ss)| json!({ "title": t, "url": page_url(t), "sentences": ss }))
+        .collect();
+    fs::write(
+        dir.join("question.json"),
+        serde_json::to_string_pretty(&json!({
+            "id": q.id, "question": q.question, "answer": q.answer, "type": q.kind,
+            "supporting": r["supporting"], "passages": passages,
+        }))?,
+    )?;
     for m in &o.modes {
-        if r[m].is_object() {
+        if r[m].is_object() && !o.regrade {
             continue;
         }
         let scored = match m.as_str() {
@@ -503,8 +536,17 @@ fn run_question(o: &Options, q: &Question) -> Result<Json> {
             "direct" => run_direct(o, q, &dir),
             other => Err(format!("unknown mode {other}").into()),
         };
-        // A failed mode is reported and left out of the file, so a rerun tries it again.
+        // A failed mode, or one whose agent run ended in an error (such as a usage limit), is
+        // reported and left out of the file, so a rerun tries it again.
+        let failed_run = |s: &Map<String, Json>| {
+            ["run", "ingest"]
+                .iter()
+                .find_map(|k| s.get(*k)?.get("error")?.as_str().map(str::to_owned))
+        };
         match scored {
+            Ok(scored) if failed_run(&scored).is_some() => {
+                r["error"] = format!("{m}: {}", failed_run(&scored).unwrap_or_default()).into();
+            }
             Ok(scored) => {
                 r[m] = Json::Object(scored);
                 fs::write(&file, serde_json::to_string_pretty(&r)?)?;

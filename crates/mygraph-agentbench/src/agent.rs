@@ -114,7 +114,7 @@ impl Agent {
 
 /// Totals from a `stream-json` transcript: tool calls from the assistant messages, the rest from
 /// the final `result` event.
-fn read_transcript(path: &Path) -> Result<Run> {
+pub fn read_transcript(path: &Path) -> Result<Run> {
     let mut run = Run {
         error: Some("no result event".into()),
         ..Run::default()
@@ -138,14 +138,18 @@ fn read_transcript(path: &Path) -> Result<Run> {
                 run.text = ev["result"].as_str().unwrap_or_default().to_owned();
                 run.cost_usd = ev["total_cost_usd"].as_f64().unwrap_or(0.0);
                 run.turns = ev["num_turns"].as_u64().unwrap_or(0);
+                run.seconds = ev["duration_ms"].as_f64().unwrap_or(0.0) / 1000.0;
                 run.input_tokens = n("input_tokens")
                     + n("cache_creation_input_tokens")
                     + n("cache_read_input_tokens");
                 run.output_tokens = n("output_tokens");
                 run.error = (ev["is_error"] == true).then(|| {
-                    ev["subtype"]
+                    // The subtype says "success" for API errors such as a usage limit; the
+                    // result text says what happened.
+                    ev["result"]
                         .as_str()
-                        .or(ev["result"].as_str())
+                        .filter(|t| !t.is_empty())
+                        .or(ev["subtype"].as_str())
                         .unwrap_or("error")
                         .to_owned()
                 });

@@ -52,6 +52,9 @@ enum Cmd {
         /// Time limit per agent run, in minutes
         #[arg(long, default_value_t = 20)]
         timeout_minutes: u64,
+        /// Grade the transcripts and graphs already in `--out` again, without running agents
+        #[arg(long)]
+        regrade: bool,
     },
 }
 
@@ -70,6 +73,7 @@ fn main() {
             model,
             max_budget_usd,
             timeout_minutes,
+            regrade,
         } => std::path::absolute(&mygraph)
             .and_then(|m| Ok((m, std::path::absolute(&out)?)))
             .map_err(Into::into)
@@ -82,6 +86,7 @@ fn main() {
                     modes,
                     parallel,
                     mygraph,
+                    regrade,
                     agent: Agent {
                         claude,
                         model,

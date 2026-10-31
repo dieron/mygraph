@@ -76,21 +76,23 @@ fn words(s: &str) -> String {
     out
 }
 
-/// The share of `a`'s words (with repeats) that also occur in `b`.
-fn covered(a: &str, b: &str) -> f64 {
-    let mut pool: HashMap<&str, i64> = HashMap::new();
-    for w in b.split_whitespace() {
-        *pool.entry(w).or_default() += 1;
+/// The share of `a`'s words that occur in `b` in the same order (longest common subsequence).
+fn in_order(a: &str, b: &str) -> f64 {
+    let a: Vec<&str> = a.split_whitespace().collect();
+    let b: Vec<&str> = b.split_whitespace().collect();
+    if a.is_empty() {
+        return 0.0;
     }
-    let (mut n, mut hit) = (0, 0);
-    for w in a.split_whitespace() {
-        n += 1;
-        if let Some(c) = pool.get_mut(w).filter(|c| **c > 0) {
-            *c -= 1;
-            hit += 1;
+    let mut row = vec![0usize; b.len() + 1];
+    for x in &a {
+        let mut diag = 0;
+        for (j, y) in b.iter().enumerate() {
+            let up = row[j + 1];
+            row[j + 1] = if x == y { diag + 1 } else { up.max(row[j]) };
+            diag = up;
         }
     }
-    if n == 0 { 0.0 } else { hit as f64 / n as f64 }
+    row[b.len()] as f64 / a.len() as f64
 }
 
 /// The passages' sentences, for mapping quoted text back to supporting facts.
@@ -113,25 +115,27 @@ impl Sentences {
     }
 
     /// The sentences a quoted fragment stands for: every sentence wholly inside it, or the one(s)
-    /// it is a part of (at least 3 words), or, when the quote is not verbatim, the sentences whose
-    /// words it mostly repeats (80 % of a sentence of 5 or more words).
+    /// it is a part of (at least 3 words). A quote that is not verbatim stands for the sentences
+    /// (of 5 or more words) it repeats 85 % of in order; failing those, for the sentence it is a
+    /// lightly edited part of.
     pub fn matching(&self, fragment: &str) -> BTreeSet<Fact> {
         let f = words(fragment);
         let fw = f.split_whitespace().count();
         let mut out: BTreeSet<Fact> = self
             .all
             .iter()
-            .filter(|(_, s)| f.contains(s.as_str()) || (fw >= 3 && s.contains(f.as_str())))
+            .filter(|(_, s)| {
+                f.contains(s.as_str())
+                    || (fw >= 3 && s.contains(f.as_str()))
+                    || (s.split_whitespace().count() >= 5 && in_order(s, &f) >= 0.85)
+            })
             .map(|(k, _)| k.clone())
             .collect();
-        if out.is_empty() {
+        if out.is_empty() && fw >= 5 {
             out = self
                 .all
                 .iter()
-                .filter(|(_, s)| {
-                    let sw = s.split_whitespace().count();
-                    (sw >= 5 && covered(s, &f) >= 0.8) || (fw >= 5 && covered(&f, s) >= 0.9)
-                })
+                .filter(|(_, s)| in_order(&f, s) >= 0.85)
                 .map(|(k, _)| k.clone())
                 .collect();
         }
@@ -191,5 +195,18 @@ mod tests {
             second
         );
         assert!(s.matching("an English").is_empty());
+        // A quote that repairs the dataset's text still counts, next to verbatim sentences.
+        let ctx = vec![(
+            "Peter Cushing".to_owned(),
+            vec![
+                "Peter Cushing (26 May 191311 August 1994) was an English actor.".to_owned(),
+                " He is mainly known for his appearances in Hammer Films.".to_owned(),
+            ],
+        )];
+        let s = Sentences::new(&ctx);
+        assert_eq!(
+            s.matching("Peter Cushing (26 May 1913 – 11 August 1994) was an English actor. He is mainly known for his appearances in Hammer Films."),
+            [("Peter Cushing".into(), 0), ("Peter Cushing".into(), 1)].into()
+        );
     }
 }
