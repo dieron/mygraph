@@ -737,7 +737,13 @@ impl<S: Store> Graph<S> {
 
     /// Candidates from the type index when the condition fixes the type of active nodes or
     /// links: (ids in internal-number order, whether the type alone decides the condition).
-    fn type_candidates(&self, target: Target, cond: Option<&Cond>) -> Option<(Vec<i64>, bool)> {
+    /// `None` also when there would be `fewer_than` or more of them.
+    fn type_candidates(
+        &self,
+        target: Target,
+        cond: Option<&Cond>,
+        fewer_than: Option<usize>,
+    ) -> Option<(Vec<i64>, bool)> {
         let index = match target {
             Target::Nodes => &self.state.nodes_by_type,
             Target::Links => &self.state.links_by_type,
@@ -762,6 +768,14 @@ impl<S: Store> Graph<S> {
             Cond::All(cs) => (cs.iter().find_map(types)?, cs.len() == 1),
             c => (types(c)?, true),
         };
+        let total: usize = ts
+            .iter()
+            .filter_map(|t| index.get(t.as_str()))
+            .map(|s| s.len())
+            .sum();
+        if fewer_than.is_some_and(|n| total >= n) {
+            return None;
+        }
         let mut ids: Vec<i64> = ts
             .iter()
             .filter_map(|t| index.get(t.as_str()))
@@ -772,6 +786,40 @@ impl<S: Store> Graph<S> {
             ids.dedup();
         }
         Some((ids, exact))
+    }
+
+    /// Candidates from the links of the node a `linked` condition names, when the condition
+    /// requires one (alone or within `all`): the active nodes at the other end of its active links
+    /// of that type, in internal-number order. Every condition is still tested on them.
+    fn linked_candidates(&self, target: Target, cond: Option<&Cond>) -> Option<Vec<i64>> {
+        if target != Target::Nodes {
+            return None;
+        }
+        let linked = |c: &Cond| match c {
+            Cond::Linked(t, _, node) => Some((t.clone(), *node)),
+            _ => None,
+        };
+        let (t, node) = match cond? {
+            Cond::All(cs) => cs.iter().find_map(linked)?,
+            c => linked(c)?,
+        };
+        let st = &self.state;
+        let mut ids: Vec<i64> = st
+            .adjacency
+            .get(&node)
+            .into_iter()
+            .flatten()
+            .filter_map(|l| {
+                let l = &st.links[l];
+                let other = if l.src == node { l.dst } else { l.src };
+                (l.status == Status::Active && t.as_ref().is_none_or(|t| **t == *l.type_))
+                    .then_some(other)
+            })
+            .filter(|o| st.nodes.get(o).is_some_and(|n| n.status == Status::Active))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Some(ids)
     }
 
     fn test(&self, target: Target, idx: i64, c: &Cond) -> bool {
@@ -943,13 +991,19 @@ impl<S: Store> Graph<S> {
         }
 
         // Matching objects, by internal number. A condition that fixes the type starts from the
-        // type index instead of scanning the table.
+        // type index, one that requires a linked node from that node's links (whichever is
+        // smaller), instead of scanning the table.
         let st = &self.state;
         let ok_status = |s: Status| s == Status::Active || retracted && s == Status::Retracted;
         let planned = if retracted {
             None
         } else {
-            self.type_candidates(target, cond.as_ref())
+            match self.linked_candidates(target, cond.as_ref()) {
+                Some(ids) => self
+                    .type_candidates(target, cond.as_ref(), Some(ids.len()))
+                    .or(Some((ids, false))),
+                None => self.type_candidates(target, cond.as_ref(), None),
+            }
         };
         let matching: Vec<i64> = match planned {
             Some((ids, true)) => ids,

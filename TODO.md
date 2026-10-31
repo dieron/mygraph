@@ -59,10 +59,12 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       to rewrite; check the skill and tools in use there still send styled names.
 - [x] Workload driver (`mygraph-ldbc bench`): IS1–IS7, IC1-style, IC13 and update-stream
       inserts against Neo4j, in-process and over REST; every answer agrees.
-- [ ] Make `find` with a `linked` condition start from the linked node's links (IS2: 32 ms).
-- [ ] Faster multi-hop `neighbors` over one link type: skip other links cheaply, and maybe an
-      option to leave out links (IC1: 50 ms in-process, 87 ms over REST).
-- [ ] Find the ~10 ms p99 stall on inserts (SQLite checkpoint?).
+- [x] `find` with a `linked` condition starts from the linked node's links (IS2: 32 ms → 0.55 ms).
+- [x] Traversals skip links of other types by a per-link type number (3-hop walk 50 ms → 6 ms).
+- [ ] An option for `neighbors` to leave out links: IC1 still spends ~19 ms building ~13 000
+      link entries it does not need (64 ms over REST).
+- [ ] Find the ~10 ms p99 stall on inserts (SQLite checkpoint?); Neo4j's p99 is 3–5 ms.
+- [ ] IS3 over REST: one `get` per 100 links; a way to read link properties with the links.
 - [ ] Run the driver on SF1.
 - [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.

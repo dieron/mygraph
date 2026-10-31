@@ -307,23 +307,25 @@ checks that both created the same number of nodes and links. Inserts change both
 reload MyGraph and re-import Neo4j to start again.
 
 **SF0.1, seed 1, 20 warmup and 200 measured runs per query, milliseconds** (2026-10-30, the
-machine above, Neo4j 2026.10.1 with heap 4 GB and page cache 4 GB). Neo4j's floor, `RETURN 1` over
-HTTP, is 0.39 ms at p50.
+machine above, Neo4j 2026.10.1 with heap 4 GB and page cache 4 GB), after the fixes below and with
+the 20 000 inserts below applied to both. Neo4j's floor, `RETURN 1` over HTTP, is 0.33 ms at p50.
 
 | Query | MyGraph calls | MyGraph in-process p50 / p95 / p99 | MyGraph REST p50 / p95 / p99 | Neo4j p50 / p95 / p99 |
 |---|---|---|---|---|
-| IS1 | 1 | 0.07 / 0.19 / 0.25 | 0.26 / 0.43 / 0.51 | 0.42 / 0.53 / 0.60 |
-| IS2 | 2.9 | 32.4 / 35.3 / 36.7 | 35.6 / 40.6 / 42.0 | 1.35 / 1.83 / 2.04 |
-| IS3 | 1.9 | 0.22 / 1.45 / 2.59 | 0.65 / 2.74 / 4.63 | 0.66 / 1.29 / 1.94 |
-| IS4 | 1 | 0.02 / 0.03 / 0.05 | 0.19 / 0.24 / 0.25 | 0.44 / 0.62 / 0.74 |
-| IS5 | 1 | 0.03 / 0.05 / 0.06 | 0.17 / 0.23 / 0.24 | 0.45 / 0.61 / 0.91 |
-| IS6 | 2 | 0.04 / 0.07 / 0.08 | 0.29 / 0.38 / 0.41 | 0.51 / 0.64 / 0.71 |
-| IS7 | 1.3 | 0.04 / 0.55 / 0.95 | 0.19 / 1.12 / 1.78 | 0.41 / 0.76 / 0.90 |
-| IC1-style | 2 | 56.8 / 85.0 / 126.3 | 104.6 / 140.3 / 153.6 | 1.82 / 2.46 / 4.19 |
-| IC13 | 1 | 0.41 / 3.29 / 4.15 | 0.58 / 2.87 / 4.15 | 0.75 / 1.53 / 5.94 |
+| IS1 | 1 | 0.08 / 0.20 / 0.30 | 0.25 / 0.39 / 0.46 | 0.47 / 0.57 / 0.79 |
+| IS2 | 2.9 | 0.55 / 0.94 / 1.18 | 1.39 / 1.80 / 2.33 | 0.75 / 1.16 / 1.42 |
+| IS3 | 1.9 | 0.29 / 1.78 / 2.41 | 0.74 / 3.05 / 4.57 | 0.52 / 0.99 / 1.18 |
+| IS4 | 1 | 0.02 / 0.03 / 0.04 | 0.16 / 0.21 / 0.24 | 0.42 / 0.54 / 0.59 |
+| IS5 | 1 | 0.03 / 0.05 / 0.06 | 0.19 / 0.26 / 0.28 | 0.42 / 0.50 / 0.53 |
+| IS6 | 2 | 0.03 / 0.05 / 0.07 | 0.34 / 0.45 / 0.47 | 0.44 / 0.54 / 0.59 |
+| IS7 | 1.3 | 0.04 / 0.55 / 1.04 | 0.20 / 1.45 / 1.72 | 0.39 / 0.60 / 0.73 |
+| IC1-style | 2 | 25.3 / 32.1 / 34.3 | 64.1 / 92.9 / 94.6 | 1.59 / 2.15 / 2.43 |
+| IC13 | 1 | 0.09 / 0.33 / 0.44 | 0.31 / 0.62 / 0.71 | 0.43 / 0.57 / 0.89 |
 
 Every answer agreed with Neo4j's in both runs (1 800 queries each), with no errors. The Neo4j
-column is from the in-process run; the REST run's Neo4j numbers are within 0.2 ms of it.
+column is from the in-process run; the REST run's Neo4j numbers are within 0.1 ms of it. Before the
+fixes (same seed, before the inserts), in-process / REST at p50: IS2 32.4 / 35.6, IC1 56.8 /
+104.6, IC13 0.41 / 0.58; the other queries were within noise of the table.
 
 **Inserts: the first 20 000 events of the update streams**, in scheduled order, applied in-process
 (the first 200 had been applied in a trial and were no-ops on both sides). Both created 7 908 nodes
@@ -344,20 +346,29 @@ no difference.
 **Findings:**
 
 1. **Point reads and inserts are on par with Neo4j or faster**, even over REST: IS1 and IS4–IS7
-   take 0.2–0.3 ms at p50 over HTTP against Neo4j's 0.4–0.5 ms, and 0.02–0.07 ms in-process.
+   take 0.2–0.3 ms at p50 over HTTP against Neo4j's 0.4–0.5 ms, and 0.02–0.08 ms in-process.
    Inserts are faster at p50, but MyGraph's p99 is about 10 ms on every insert type where Neo4j's
-   is 3–5 ms: a periodic stall in the write path (a SQLite checkpoint is the first suspect).
-2. **`find` with a `linked` condition scans every candidate of the type** (IS2: 32 ms, all in
-   `find`): it checks the links of all 286 k posts and comments instead of starting from the
-   linked node's own links, which lead to the few hundred candidates.
-3. **A 3-hop `neighbors` costs 50 ms in-process and 87 ms over REST** (IC1): it examines every link
-   of every person it reaches (their likes and messages too, not only `KNOWS`), testing each
-   link's type against a set of strings, and the result carries every `KNOWS` link among about
-   1 500 persons, which IC1 does not need and REST has to serialize.
+   is 3–5 ms: a periodic stall in the write path (a SQLite checkpoint is the first suspect). Not
+   fixed yet.
+2. **`find` with a `linked` condition scanned every candidate of the type** (IS2: 32 ms, all in
+   `find`), checking the links of all 286 k posts and comments. **Fixed:** when the condition
+   requires a linked node, candidates now come from that node's own links (or from the type index
+   when that is smaller), and every condition is still tested on them. IS2 went from 32 ms to
+   0.55 ms in-process, below Neo4j's 0.75 ms.
+3. **A 3-hop `neighbors` cost 50 ms in-process** (IC1): it read the record of every link of every
+   person it reached (their likes and messages too, not only `KNOWS`) to test its type. **Fixed in
+   part:** the state keeps a compact type number per link, so `neighbors` and `paths` pass over
+   links of other types without reading them. The walk went from about 50 ms to 6 ms, and IC13
+   from 0.41 ms to 0.09 ms. What is left of IC1 (25 ms in-process, 64 ms over REST) is mostly
+   building and sending the response, which lists every `KNOWS` link among about 1 400 persons
+   (some 13 000) when IC1 needs only the hops.
 4. **Each extra call is a round trip over REST**: IS3 for a person with many friends takes a `get`
-   per 100 links (p99 4.6 ms against Neo4j's 1.9 ms).
+   per 100 links (p99 4.6 ms against Neo4j's 1.2 ms).
+
+The fixes changed no answer: the engine tests, the conformance vectors, the comparison harness
+(3 192 cases, seeds 1–4) and the driver's 3 600 compared queries all pass.
 
 ### Then
 
-1. Fix findings 2–4 and the insert p99 stall, then rerun the driver.
+1. The insert p99 stall; a way for `neighbors` to leave out links (IC1); fewer calls for IS3.
 2. The same runs on SF1.

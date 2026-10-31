@@ -91,9 +91,10 @@ All topology, names, types, properties and citation lookups are served from RAM.
 only for full-text search (FTS5) and for evidence content/blobs when they are requested.
 
 ```
-request ──▶ candidate set:  ids/keys → direct  |  name → hash map  |  text → FTS5  |  type → bitmap
+request ──▶ candidate set:  ids/keys → direct  |  name → hash map  |  text → FTS5  |  type → bitmap  |  linked → that node's adjacency
         ──▶ filters:        bitmap intersection, then property predicates on the survivors
-        ──▶ traversal:      adjacency walk with per-hop filters and caps (BFS / bidirectional BFS for paths)
+        ──▶ traversal:      adjacency walk with per-hop filters and caps (BFS / bidirectional BFS for paths);
+                            a compact type number per link skips other link types without reading records
         ──▶ aggregation:    single pass (parallel with rayon above a size threshold)
         ──▶ shaping:        field selection, detail level, support summaries, truncation + cursor
 ```

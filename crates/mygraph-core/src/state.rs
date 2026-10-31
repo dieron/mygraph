@@ -120,6 +120,11 @@ pub struct State {
     pub links_by_type: HashMap<Sym, IdSet>,
     /// node -> links (any status) with that node as an endpoint.
     pub adjacency: DenseIndex,
+    /// The type of every link (any status) by internal number, as a number from
+    /// `link_type_numbers` (0: no such link), so a traversal can pass over links of other types
+    /// without reading their records.
+    link_type_at: Vec<u32>,
+    link_type_numbers: HashMap<Sym, u32>,
     /// Hash of an [`EvidenceIdentity`] -> active evidence with that hash.
     evidence_identity: HashMap<u64, IdSet>,
     /// Citations (any status) by target node and by target link.
@@ -315,9 +320,33 @@ impl State {
 
     // ---- links -------------------------------------------------------------------------
 
+    /// The number standing for link type `t`, or `None` when no link ever had that type.
+    pub fn link_type_number(&self, t: &str) -> Option<u32> {
+        self.link_type_numbers.get(t).copied()
+    }
+
+    /// The type number of link `idx` (0 when there is no such link).
+    pub fn link_type_number_at(&self, idx: i64) -> u32 {
+        usize::try_from(idx)
+            .ok()
+            .and_then(|i| self.link_type_at.get(i))
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub fn put_link(&mut self, mut l: Link) -> Option<Link> {
         let old = self.remove_link(l.idx);
         l.type_ = Self::intern(&mut self.syms, &l.type_);
+        let next = self.link_type_numbers.len() as u32 + 1;
+        let number = *self
+            .link_type_numbers
+            .entry(l.type_.clone())
+            .or_insert(next);
+        let i = usize::try_from(l.idx).expect("internal numbers are not negative");
+        if i >= self.link_type_at.len() {
+            self.link_type_at.resize(i + 1, 0);
+        }
+        self.link_type_at[i] = number;
         l.props.intern_keys(|k| Self::intern(&mut self.syms, k));
         if let Some(k) = &l.key {
             self.link_keys.insert(k.clone(), l.idx);
@@ -337,6 +366,12 @@ impl State {
 
     pub fn remove_link(&mut self, idx: i64) -> Option<Link> {
         let l = self.links.remove(&idx)?;
+        if let Some(t) = usize::try_from(idx)
+            .ok()
+            .and_then(|i| self.link_type_at.get_mut(i))
+        {
+            *t = 0;
+        }
         set_remove(&mut self.links_by_type, &l.type_, idx);
         if let Some(k) = &l.key {
             self.link_keys.remove(k);

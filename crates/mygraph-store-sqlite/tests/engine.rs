@@ -1192,3 +1192,83 @@ fn find_uses_the_type_index() {
         2
     );
 }
+
+#[test]
+fn find_with_linked_starts_from_the_linked_node() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    let rows = |g: &Graph<GraphFile>, w: Json| {
+        ids_of(&g.find(&json!({ "target": "nodes", "where": w })).unwrap()["rows"])
+    };
+    // Who wrote about the engine: alone (from the engine's links), with a type, and under `any`
+    // (a scan) give the same nodes.
+    let wrote =
+        json!({ "linked": { "link_type": "WROTE_ABOUT", "direction": "out", "node": "n_3" } });
+    assert_eq!(rows(&g, wrote.clone()), ["n_1", "n_4"]);
+    let typed = json!({ "all": [{ "field": "type", "op": "eq", "value": "Person" }, wrote] });
+    assert_eq!(rows(&g, typed.clone()), ["n_1", "n_4"]);
+    assert_eq!(rows(&g, json!({ "any": [wrote] })), ["n_1", "n_4"]);
+    // Direction is the candidate's: what Ada wrote about.
+    assert_eq!(
+        rows(
+            &g,
+            json!({ "linked": { "link_type": "WROTE_ABOUT", "direction": "in", "node": "n_1" } })
+        ),
+        ["n_3"]
+    );
+    // No link type: the undirected collaboration counts, Babbage's DESIGNED link points away.
+    assert_eq!(
+        rows(
+            &g,
+            json!({ "linked": { "direction": "out", "node": "n_2" } })
+        ),
+        ["n_1"]
+    );
+    // Retracted links and nodes are not candidates.
+    g.retract(ACTOR, &json!({ "targets": ["l_4"] }), T).unwrap();
+    assert_eq!(rows(&g, typed.clone()), ["n_1"]);
+    g.retract(ACTOR, &json!({ "targets": ["n_1"] }), T).unwrap();
+    assert_eq!(rows(&g, typed), Vec::<String>::new());
+}
+
+#[test]
+fn traversal_link_type_filter_follows_writes_retractions_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    let reach = |g: &Graph<GraphFile>, q: Json| ids_of(&g.neighbors(&q).unwrap()["nodes"]);
+    let inspired = json!({ "start": ["n_1"], "link_types": ["INSPIRED"] });
+    // A link type no link has yet: nothing to follow.
+    assert_eq!(reach(&g, inspired.clone()), ["n_1"]);
+    let res = g
+        .write(
+            ACTOR,
+            &json!({ "evidence": [{ "ref": "@o", "kind": "observation", "content": "later" }],
+                     "links": [{ "type": "INSPIRED", "from": "n_1", "to": "n_4", "cite": ["@o"] }] }),
+            T,
+        )
+        .unwrap();
+    let link = res["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["section"] == "links")
+        .unwrap()["id"]
+        .clone();
+    assert_eq!(reach(&g, inspired.clone()), ["n_1", "n_4"]);
+    let p = g
+        .paths(&json!({ "from": "n_1", "to": "n_4", "link_types": ["INSPIRED"] }))
+        .unwrap();
+    assert_eq!(p["paths"][0]["length"], 1);
+    g.retract(ACTOR, &json!({ "targets": [link] }), T).unwrap();
+    assert_eq!(reach(&g, inspired), ["n_1"]);
+    // After reopening, the numbers are rebuilt from the file.
+    drop(g);
+    let g = open(dir.path());
+    assert_eq!(
+        reach(
+            &g,
+            json!({ "start": ["n_3"], "link_types": ["WROTE_ABOUT"], "direction": "in" })
+        ),
+        ["n_3", "n_1", "n_4"]
+    );
+}

@@ -4,6 +4,7 @@
 use crate::engine::{Graph, OpError};
 use crate::ids::ObjectKind;
 use crate::model::{Link, Status, TargetKind, id_string};
+use crate::state::State;
 use crate::store::Store;
 use crate::values::{self, Parsed, temporal_bounds};
 use crate::vocab::VocabKind;
@@ -37,12 +38,23 @@ impl Dir {
 #[derive(Clone)]
 struct Rule {
     types: Option<HashSet<String>>,
+    /// `types` as link type numbers ([`State::link_type_number`]), checked before a link's
+    /// record is read; types no link has are left out.
+    numbers: Option<Vec<u32>>,
     dir: Dir,
     /// `as_of` interval in milliseconds.
     as_of: Option<(i64, i64)>,
 }
 
 impl Rule {
+    /// Whether link `l`'s type allows following it, from the type numbers alone; a cheap first
+    /// test before [`Rule::follow`] reads the link.
+    fn may_follow(&self, st: &State, l: i64) -> bool {
+        self.numbers
+            .as_ref()
+            .is_none_or(|ns| ns.contains(&st.link_type_number_at(l)))
+    }
+
     /// The other end when `l` can be followed from `n`.
     fn follow(&self, n: i64, l: &Link) -> Option<i64> {
         if l.status != Status::Active || self.types.as_ref().is_some_and(|t| !t.contains(&*l.type_))
@@ -109,13 +121,23 @@ impl<S: Store> Graph<S> {
         as_of: Option<(i64, i64)>,
     ) -> Result<Rule, OpError> {
         let types = self.type_set(op, o, "link_types", VocabKind::LinkType)?;
+        let numbers = types.as_ref().map(|ts| {
+            ts.iter()
+                .filter_map(|t| self.state.link_type_number(t))
+                .collect()
+        });
         let dir = match o.get("direction").map(Json::as_str) {
             None | Some(Some("both")) => Dir::Both,
             Some(Some("out")) => Dir::Out,
             Some(Some("in")) => Dir::In,
             _ => return Err(bad(op, "direction", "out, in or both")),
         };
-        Ok(Rule { types, dir, as_of })
+        Ok(Rule {
+            types,
+            numbers,
+            dir,
+            as_of,
+        })
     }
 
     fn type_set(
@@ -207,6 +229,7 @@ impl<S: Store> Graph<S> {
             .get(&n)
             .into_iter()
             .flatten()
+            .filter(|l| rule.may_follow(st, **l))
             .filter_map(|l| {
                 let link = &st.links[l];
                 rule.follow(n, link).map(|o| (&*link.type_, *l, o))
@@ -350,6 +373,9 @@ impl<S: Store> Graph<S> {
     fn each_followable(&self, n: i64, rule: &Rule, mut f: impl FnMut(i64, i64)) {
         let st = &self.state;
         for l in st.adjacency.get(&n).into_iter().flatten() {
+            if !rule.may_follow(st, *l) {
+                continue;
+            }
             if let Some(o) = rule.follow(n, &st.links[l]) {
                 f(*l, o);
             }
