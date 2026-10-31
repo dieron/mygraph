@@ -7,9 +7,11 @@
 //! endpoint exists before its links are written.
 
 mod archive;
+mod bench;
 mod diff;
 mod neo4j;
 mod schema;
+mod updates;
 
 use archive::{Result, col, each_table, rows};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -84,6 +86,37 @@ enum Cmd {
         #[arg(long)]
         verbose: bool,
     },
+    /// Runs the workload (IS1–IS7, IC1-style, IC13, update-stream inserts) against MyGraph and
+    /// Neo4j with the same parameters; prints latencies and exits with status 1 when any answer
+    /// differs or fails.
+    Bench {
+        /// Data directory, to run MyGraph in this process.
+        #[arg(long)]
+        data: Option<PathBuf>,
+        #[arg(long, default_value = "ldbc")]
+        graph: String,
+        #[arg(long, default_value = "http://localhost:7474")]
+        neo4j: String,
+        /// A running MyGraph server to use over REST instead (authentication off).
+        #[arg(long)]
+        mygraph_url: Option<String>,
+        /// Comma-separated subset of IS1,…,IS7,IC1,IC13.
+        #[arg(long)]
+        queries: Option<String>,
+        /// Measured runs per query, after the warmup runs.
+        #[arg(long, default_value_t = 200)]
+        runs: usize,
+        #[arg(long, default_value_t = 20)]
+        warmup: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Apply the first N update-stream events to both databases (changes them).
+        #[arg(long, default_value_t = 0)]
+        updates: usize,
+        /// The archive holding the update streams.
+        #[arg(long)]
+        archive: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -113,6 +146,43 @@ fn main() -> Result<()> {
             verbose,
         } => {
             if !diff::run(&data, &graph, &neo4j, cases, seed, verbose)? {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Cmd::Bench {
+            data,
+            graph,
+            neo4j,
+            mygraph_url,
+            queries,
+            runs,
+            warmup,
+            seed,
+            updates,
+            archive,
+        } => {
+            let queries = match queries {
+                Some(q) => q
+                    .split(',')
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                None => bench::QUERIES.map(String::from).to_vec(),
+            };
+            let o = bench::Options {
+                data,
+                graph,
+                neo4j,
+                mygraph_url,
+                queries,
+                runs,
+                warmup,
+                seed,
+                updates,
+                archive,
+            };
+            if !bench::run(&o)? {
                 std::process::exit(1);
             }
             Ok(())

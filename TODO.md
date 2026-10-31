@@ -57,8 +57,13 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [ ] Rerun the SF1 load on a quiet machine with the current mapping.
 - [ ] Deployed instance: after this lands, agents get `vocab.not_styled` for names the server used
       to rewrite; check the skill and tools in use there still send styled names.
-- [ ] Workload driver: IS1–IS7, update-stream inserts, IC1 / IC13-style reads; MyGraph versus
-      Neo4j.
+- [x] Workload driver (`mygraph-ldbc bench`): IS1–IS7, IC1-style, IC13 and update-stream
+      inserts against Neo4j, in-process and over REST; every answer agrees.
+- [ ] Make `find` with a `linked` condition start from the linked node's links (IS2: 32 ms).
+- [ ] Faster multi-hop `neighbors` over one link type: skip other links cheaply, and maybe an
+      option to leave out links (IC1: 50 ms in-process, 87 ms over REST).
+- [ ] Find the ~10 ms p99 stall on inserts (SQLite checkpoint?).
+- [ ] Run the driver on SF1.
 - [ ] HotpotQA / MuSiQue with citation grading; then LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).

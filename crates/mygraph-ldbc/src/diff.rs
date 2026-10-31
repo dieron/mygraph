@@ -16,7 +16,7 @@ use serde_json::{Map, Value as Json, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// SplitMix64, as in `mygraph-bench`, so a seed fixes every case.
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 
 impl Rng {
     fn next(&mut self) -> u64 {
@@ -26,10 +26,10 @@ impl Rng {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     }
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % n.max(1) as u64) as usize
     }
-    fn pick<'a, T>(&mut self, xs: &'a [T]) -> &'a T {
+    pub(crate) fn pick<'a, T>(&mut self, xs: &'a [T]) -> &'a T {
         &xs[self.below(xs.len())]
     }
     fn chance(&mut self, p: f64) -> bool {
@@ -155,7 +155,12 @@ impl Neo4j {
 
     /// The rows of one statement; a Neo4j error (a timeout, say) comes back as `Err`.
     fn rows(&self, cypher: &str) -> Result<Vec<Vec<Json>>> {
-        let body = json!({ "statements": [{ "statement": cypher }] });
+        self.query(cypher, &json!({}))
+    }
+
+    /// The rows of one statement with parameters (so Neo4j can reuse its plan).
+    pub(crate) fn query(&self, cypher: &str, params: &Json) -> Result<Vec<Vec<Json>>> {
+        let body = json!({ "statements": [{ "statement": cypher, "parameters": params }] });
         let res: Json = self.agent.post(&self.url).send_json(body)?.into_json()?;
         if let Some(e) = res["errors"].as_array().and_then(|e| e.first()) {
             return Err(format!("neo4j: {}", e["message"]).into());
@@ -166,6 +171,25 @@ impl Neo4j {
             .iter()
             .map(|d| d["row"].as_array().cloned().unwrap_or_default())
             .collect())
+    }
+
+    /// Runs statements in one transaction; returns the nodes and relationships created.
+    pub(crate) fn tx(&self, statements: &[(String, Json)]) -> Result<(u64, u64)> {
+        let body = json!({ "statements": statements.iter().map(|(s, p)| json!({
+            "statement": s, "parameters": p, "includeStats": true })).collect::<Vec<_>>() });
+        let res: Json = self.agent.post(&self.url).send_json(body)?.into_json()?;
+        if let Some(e) = res["errors"].as_array().and_then(|e| e.first()) {
+            return Err(format!("neo4j: {}", e["message"]).into());
+        }
+        let sum = |k: &str| {
+            res["results"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r["stats"][k].as_u64())
+                .sum()
+        };
+        Ok((sum("nodes_created"), sum("relationships_created")))
     }
 }
 
@@ -183,7 +207,7 @@ fn list_lit(xs: &[String]) -> String {
 
 /// One form for both sides: `{"$date": s}` → s, date-times with exactly three fraction digits,
 /// numbers as integers when whole and rounded to 9 decimals otherwise, lists of sets sorted.
-fn norm(v: &Json) -> Json {
+pub(crate) fn norm(v: &Json) -> Json {
     match v {
         Json::Object(o) => {
             if let Some(s) = o

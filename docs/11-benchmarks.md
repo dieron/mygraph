@@ -266,7 +266,98 @@ Not covered yet: SF1; the order of `neighbors` nodes and of equally long paths (
 `include_retracted`; `find` over evidence and citations, `fields` beyond sort keys, `bucket()` and
 `.century`; `search`, `resolve` and `history`, which have no Cypher counterpart.
 
+### Workload driver
+
+`mygraph-ldbc bench` runs LDBC SNB Interactive v1's short reads IS1–IS7, an IC1-style read, IC13
+and the inserts of the update streams against MyGraph and Neo4j with the same parameters, times
+each query on both and compares the two answers, so both did the same work. It exits with status
+1 when any answer differs or fails.
+
+```bash
+mygraph-ldbc bench --data <data dir> --graph ldbc-sf01-none --runs 200 --warmup 20
+mygraph-ldbc bench --mygraph-url http://127.0.0.1:7499 --graph ldbc-sf01-none
+mygraph-ldbc bench --data <data dir> --graph ldbc-sf01-none --queries "" --updates 20000 --archive <archive>
+```
+
+MyGraph answers through its operations, as an agent would, so a query may take several calls;
+the driver counts them and times each operation. It runs in the driver's process or over the REST
+API of a running server (`--mygraph-url`). Neo4j answers one Cypher statement per query, with
+parameters, over its HTTP API. Parameters (persons, messages, first names) are drawn from Neo4j
+with a seed, and the order of the two sides alternates between runs.
+
+| Query | What it returns | MyGraph calls |
+|---|---|---|
+| IS1 | a person's profile and city | `get` with `IS_LOCATED_IN` links |
+| IS2 | a person's 10 latest messages, each with its thread's post and that post's author | `find` (type, `linked` creator, sorted by date, limit 10); `neighbors` up `REPLY_OF` to the posts; `get` the posts with `HAS_CREATOR` |
+| IS3 | a person's friends with the friendship's date | `get` with `KNOWS` links; `get` those links for `creationDate` |
+| IS4 | a message's date and content | `get` |
+| IS5 | a message's author | `get` with `HAS_CREATOR` links |
+| IS6 | the forum holding a message's thread and its moderator | `neighbors` up `REPLY_OF`; `neighbors` with steps `CONTAINER_OF` in, `HAS_MODERATOR` out |
+| IS7 | replies to a message, their authors, and whether each knows the message's author | `get` with `REPLY_OF` / `HAS_CREATOR` links; `get` the replies; `get` the author's `KNOWS` |
+| IC1-style | up to 20 persons with a given first name within 3 `KNOWS` hops, by distance and last name | `find` by `firstName`; `neighbors` 3 hops |
+| IC13 | length of the shortest `KNOWS` path (at most 10) | `paths` |
+| INS1–INS8 | add a person, a like of a post / comment, a forum, a membership, a post, a comment, a friendship | one `write` |
+
+Names stand in for LDBC ids where a MyGraph brief result has no key (posts and comments are named
+`Post <id>` / `Comment <id>`, persons `firstName lastName`). Rows that tie on the sort key are
+compared as sets. IC1 compares (distance, last name) pairs, as the tie-break on the LDBC id is not
+visible in MyGraph's rows. An insert is one MyGraph `write` holding the node and its links, ends
+by key, and on Neo4j one transaction of `MERGE` statements, so both are idempotent; the driver
+checks that both created the same number of nodes and links. Inserts change both databases;
+reload MyGraph and re-import Neo4j to start again.
+
+**SF0.1, seed 1, 20 warmup and 200 measured runs per query, milliseconds** (2026-10-30, the
+machine above, Neo4j 2026.10.1 with heap 4 GB and page cache 4 GB). Neo4j's floor, `RETURN 1` over
+HTTP, is 0.39 ms at p50.
+
+| Query | MyGraph calls | MyGraph in-process p50 / p95 / p99 | MyGraph REST p50 / p95 / p99 | Neo4j p50 / p95 / p99 |
+|---|---|---|---|---|
+| IS1 | 1 | 0.07 / 0.19 / 0.25 | 0.26 / 0.43 / 0.51 | 0.42 / 0.53 / 0.60 |
+| IS2 | 2.9 | 32.4 / 35.3 / 36.7 | 35.6 / 40.6 / 42.0 | 1.35 / 1.83 / 2.04 |
+| IS3 | 1.9 | 0.22 / 1.45 / 2.59 | 0.65 / 2.74 / 4.63 | 0.66 / 1.29 / 1.94 |
+| IS4 | 1 | 0.02 / 0.03 / 0.05 | 0.19 / 0.24 / 0.25 | 0.44 / 0.62 / 0.74 |
+| IS5 | 1 | 0.03 / 0.05 / 0.06 | 0.17 / 0.23 / 0.24 | 0.45 / 0.61 / 0.91 |
+| IS6 | 2 | 0.04 / 0.07 / 0.08 | 0.29 / 0.38 / 0.41 | 0.51 / 0.64 / 0.71 |
+| IS7 | 1.3 | 0.04 / 0.55 / 0.95 | 0.19 / 1.12 / 1.78 | 0.41 / 0.76 / 0.90 |
+| IC1-style | 2 | 56.8 / 85.0 / 126.3 | 104.6 / 140.3 / 153.6 | 1.82 / 2.46 / 4.19 |
+| IC13 | 1 | 0.41 / 3.29 / 4.15 | 0.58 / 2.87 / 4.15 | 0.75 / 1.53 / 5.94 |
+
+Every answer agreed with Neo4j's in both runs (1 800 queries each), with no errors. The Neo4j
+column is from the in-process run; the REST run's Neo4j numbers are within 0.2 ms of it.
+
+**Inserts: the first 20 000 events of the update streams**, in scheduled order, applied in-process
+(the first 200 had been applied in a trial and were no-ops on both sides). Both created 7 908 nodes
+and 43 698 links, with no errors, and the comparison harness afterwards (seed 1, 700 cases) found
+no difference.
+
+| Operation | Events | MyGraph p50 / p95 / p99 | Neo4j p50 / p95 / p99 |
+|---|---|---|---|
+| INS1 person | 14 | 3.84 / 27.9 / 27.9 | 6.54 / 62.9 / 62.9 |
+| INS2 like post | 2 640 | 0.74 / 1.32 / 10.2 | 1.12 / 2.33 / 3.75 |
+| INS3 like comment | 2 204 | 0.74 / 1.32 / 10.1 | 1.11 / 2.31 / 3.47 |
+| INS4 forum | 268 | 1.23 / 8.95 / 19.9 | 1.56 / 4.39 / 11.7 |
+| INS5 membership | 6 824 | 0.75 / 1.29 / 9.98 | 1.12 / 2.39 / 3.45 |
+| INS6 post | 2 905 | 1.30 / 7.65 / 16.1 | 1.74 / 3.81 / 4.86 |
+| INS7 comment | 4 795 | 1.39 / 9.56 / 18.1 | 1.82 / 3.53 / 4.66 |
+| INS8 friendship | 350 | 0.75 / 1.42 / 11.3 | 1.14 / 2.51 / 9.65 |
+
+**Findings:**
+
+1. **Point reads and inserts are on par with Neo4j or faster**, even over REST: IS1 and IS4–IS7
+   take 0.2–0.3 ms at p50 over HTTP against Neo4j's 0.4–0.5 ms, and 0.02–0.07 ms in-process.
+   Inserts are faster at p50, but MyGraph's p99 is about 10 ms on every insert type where Neo4j's
+   is 3–5 ms: a periodic stall in the write path (a SQLite checkpoint is the first suspect).
+2. **`find` with a `linked` condition scans every candidate of the type** (IS2: 32 ms, all in
+   `find`): it checks the links of all 286 k posts and comments instead of starting from the
+   linked node's own links, which lead to the few hundred candidates.
+3. **A 3-hop `neighbors` costs 50 ms in-process and 87 ms over REST** (IC1): it examines every link
+   of every person it reaches (their likes and messages too, not only `KNOWS`), testing each
+   link's type against a set of strings, and the result carries every `KNOWS` link among about
+   1 500 persons, which IC1 does not need and REST has to serialize.
+4. **Each extra call is a round trip over REST**: IS3 for a person with many friends takes a `get`
+   per 100 links (p99 4.6 ms against Neo4j's 1.9 ms).
+
 ### Then
 
-1. Workload driver: IS1–IS7, the inserts of the update streams, and IC1 / IC13-style reads, with
-   p50 / p95 / p99 for MyGraph and Neo4j on the same machine.
+1. Fix findings 2–4 and the insert p99 stall, then rerun the driver.
+2. The same runs on SF1.
