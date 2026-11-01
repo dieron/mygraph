@@ -657,3 +657,115 @@ By hop count (answer EM / F1, supporting paragraphs F1):
 1. HotpotQA on Sonnet when the plan's limits allow.
 2. Answer F1 is held back by wording more than by retrieval in both datasets. A grader that
    accepts a containing or contained answer (or an LLM judge) would separate the two.
+
+## 4. Step 3: LoCoMo and LongMemEval
+
+HotpotQA and MuSiQue give the agent all the passages at once and a fresh graph per question.
+These two test memory as it is used: a long history recorded over time, facts that change,
+questions about when things happened, and one graph that answers many questions. Published memory
+systems report scores on both.
+
+### LoCoMo
+
+**Data.** LoCoMo (Maharana et al., 2024), `data/locomo10.json` of the `snap-research/locomo`
+repository (2 805 274 bytes, SHA-256
+`79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`):
+- 10 conversations between two people, 19–32 sessions each, weeks apart and dated, 369–689
+  messages. A shared photo appears as its caption.
+- 1 986 questions, each marked with its evidence messages, in five categories: 1 multi-hop (282),
+  2 temporal (321), 3 open-domain (96), 4 single-hop (841), 5 adversarial (446).
+- The category numbers follow the repository. The mean number of evidence messages (3.1 for
+  category 1, 1.1 for category 4) confirms which category is multi-hop.
+- Adversarial questions ask about something the conversation does not say, often by swapping the
+  two people; they have no answer, and the right reply is to abstain.
+
+**Method.** The same runner (`mygraph-agentbench locomo`), agents and skill as in step 2.
+- **`graph`**: one graph per conversation, built by an ingest agent one session at a time, in
+  order, each session in a new context. The agent is told the session's date and that relative
+  times count from it, and that the graph already holds the earlier sessions. It never sees the
+  questions. Then each question gets a new answering agent on a copy of the graph.
+- **`direct`**: the whole conversation, with dated sessions and message IDs, in the prompt, the
+  question last (so the prefix is cached).
+- Both modes get step 2's answer rules, plus one: give times as dates or periods, worked out from
+  the session date.
+
+**Grading.**
+- **Answers** are graded by a model, correct or wrong, as published memory systems report LoCoMo
+  (the "LLM judge" score). The judge sees the question, the gold answer and the answer; it is told
+  to be generous about wording and date formats. The main score covers categories 1–4.
+- Token F1 is also reported: multi-hop answers part by part, open-domain against the first gold
+  alternative, as LoCoMo's script does, but without stemming.
+- **Adversarial questions** count as correct when the answer abstains (`unknown`, or LoCoMo's own
+  check: "not mentioned", "no information"). They are reported apart.
+- **Citations** are graded against the evidence messages (precision, recall, F1). Each cited
+  quote is mapped back to the messages it quotes. A message of fewer than 4 words counts only when
+  quoted alone, as "Thanks!" is inside many quotes. A `conversation` evidence (the session as a
+  source, which may hold its whole transcript) cites no message.
+- `evidence_stored`: the share of evidence messages quoted anywhere in the graph.
+
+```bash
+target/release/mygraph-agentbench locomo --data <dir>/locomo10.json --out <run dir> --conversations conv-30 --mygraph target/release/mygraph
+```
+
+`--conversations` picks conversations (default all), `--questions` samples per conversation
+(default all), `--judge-model` (default the agents' model) and `--judge-reasoning-effort`
+(default `low`). The run folder has one folder per conversation: its graph, `conversation.json`,
+`ingest.json` and a transcript per session, and a folder per question. Resume, `--regrade` and
+`--reanswer` work as in step 2. An interrupted ingest resumes at the next session.
+
+**Pilot: conversation conv-30 on GPT-6.1 Terra** (judge: Terra at low effort; 2026-11-01):
+19 sessions, 369 messages, 105 questions (11 multi-hop, 26 temporal, 44 single-hop,
+24 adversarial; this conversation has no open-domain questions).
+
+| | `graph` | `direct` |
+|---|---|---|
+| Correct, categories 1–4 (judge) | 0.83 (67 of 81) | 0.91 (74 of 81) |
+| Multi-hop / temporal / single-hop | 0.55 / 0.85 / 0.89 | 0.73 / 0.96 / 0.93 |
+| Token F1, categories 1–4 | 0.62 | 0.62 |
+| Evidence messages precision / recall / F1 | 0.70 / 0.74 / 0.70 | 0.70 / 0.84 / 0.73 |
+| Adversarial: abstained | 2 of 24 | 7 of 24 |
+| Evidence messages quoted in the graph | 96.5 % | – |
+| Per question | 6.8 tool calls, 12 s, $0.011 | 2 s, $0.014 |
+
+Ingest: 19 agent runs, 227 tool calls, 17.5 minutes, $0.93, giving 165 nodes, 232 links,
+363 evidence and 952 citations. Judge: $0.04 for all answers. The pilot cost about $3.60.
+
+22. **Answering from the graph is behind reading the whole conversation**, by 7 of 81 questions,
+    unlike step 2. That is expected for this conversation: at about 11 000 tokens it fits in the
+    prompt with room to spare. A graph pays off when the history does not fit, which this pilot
+    does not test.
+23. **Where the graph loses:**
+    - **Text search misses other word forms.** "When did Gina open her online clothing store?"
+      The message ("My online clothes store is open!", 16 March) is in the graph, but the
+      answering agent searched for "clothing store", "store opened" and "store started" and never
+      got it back. "Clothing" does not find "clothes", nor "opened" "open". It answered from an
+      earlier ad campaign instead: "By 29 January 2023".
+    - **Hedged dates, 2 questions.** The agent found the day and still answered relative to the
+      session: "By 21 June 2023" (it had read that Jon went on 20 June), "Shortly before 27 May
+      2023" for 27 May. The judge marks both wrong.
+    - **Lists gathered over many sessions, 1–2 questions.** "How did Gina promote her clothes
+      store?" collects four promotions from different sessions; the answering agent found one.
+    - **Wording, 2–3 questions.** "Make memories with Gina" against "savor all the good vibes";
+      the judge marks the shorter answer wrong.
+24. **Storage is nearly complete.** The agent recorded each session as one source with its
+    messages quoted one by one, and 96.5 % of the evidence messages are in the graph. The losses
+    are in finding and combining what was kept, not in keeping it.
+25. **Adversarial questions are hard in both modes, harder from the graph.** Most swap the two
+    people ("What temporary job did Gina take?" when Jon took it). The graph agent often notices
+    and answers anyway: "unspecified temporary job (Jon, not Gina)". The shared answer rule, give
+    the best-supported answer and say `unknown` only when nothing answers, pushes against
+    abstaining. Published results usually leave this category out.
+26. **Citations are as good as `direct`'s on temporal and single-hop questions** (F1 0.90 and
+    0.64 against 0.92 and 0.64), and weaker on multi-hop, where answers are also weaker.
+
+**Full run, estimated:** the other conversations have up to 1.9× as many messages. Ingest would
+cost about $15 and take about 35 minutes with the conversations in parallel. Answers about
+$22 from the graph and about $40–60 for `direct`, whose prompt grows with the conversation.
+
+### Then
+
+1. LoCoMo on all 10 conversations, both modes.
+2. Text search that matches word forms (stemming: "clothing" / "clothes", "opened" / "open").
+   It is a MyGraph change, not a benchmark change, and should help any agent using `search`.
+3. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
+   graph per question cheaply. Start with a sample.

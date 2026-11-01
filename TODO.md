@@ -86,7 +86,15 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       are questions whose paragraphs do not support the key; $6.99.
 - [x] HotpotQA again with the shared answer rules (`--reanswer` on the same graphs): graph 0.799
       vs direct 0.815 answer F1, 0.853 vs 0.879 citation F1; no change to the conclusion.
-- [ ] LongMemEval and LoCoMo.
+- [x] LoCoMo runner (`mygraph-agentbench locomo`): ingest session by session, a model as judge,
+      citations graded against the evidence messages.
+- [x] LoCoMo pilot, conv-30 on Terra: graph 0.83 correct vs direct 0.91 (categories 1–4);
+      96.5 % of evidence messages stored; losses in search, hedged dates and lists across
+      sessions; $3.60.
+- [ ] LoCoMo on all 10 conversations (about $80–100 with `direct`).
+- [ ] Text search: match word forms (stemming). In the LoCoMo pilot a stored message ("clothes
+      store is open") was missed by searches for "clothing store" and "store opened".
+- [ ] LongMemEval (a sample first).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 

@@ -13,10 +13,7 @@
 
 use crate::agent::{Agent, Result, Run, last_json_with, read_transcript};
 use crate::grade::{Fact, Sentences, best_answer_scores, set_scores, split_sentences};
-use mygraph_core::engine::Graph;
-use mygraph_core::ids::ObjectKind;
-use mygraph_core::model::{Policies, Status, id_string};
-use mygraph_store_sqlite::GraphFile;
+use crate::graph;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::Field;
 use serde_json::{Map, Value as Json, json};
@@ -25,11 +22,6 @@ use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-
-const SKILL: &str = include_str!("../../../skills/mygraph/SKILL.md");
-const SKILL_WRITE: &str = include_str!("../../../skills/mygraph/references/write.md");
-const SKILL_QUERY: &str = include_str!("../../../skills/mygraph/references/query.md");
-const GRAPH: &str = "default";
 
 #[derive(Clone, Copy)]
 pub enum Dataset {
@@ -93,7 +85,7 @@ pub struct Options {
 
 impl Options {
     /// Runs an agent, or with `regrade` reads the transcript it left.
-    fn agent_run(
+    pub(crate) fn agent_run(
         &self,
         dir: &Path,
         name: &str,
@@ -207,8 +199,8 @@ fn to_json(f: &Field) -> Json {
     }
 }
 
-/// `n` distinct questions, the same for the same seed (splitmix64, partial Fisher–Yates).
-fn sample(all: Vec<Question>, n: usize, seed: u64) -> Vec<Question> {
+/// `n` distinct items, the same for the same seed (splitmix64, partial Fisher–Yates).
+pub(crate) fn sample<T>(all: Vec<T>, n: usize, seed: u64) -> Vec<T> {
     let mut s = seed;
     let mut next = move || {
         s = s.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -217,7 +209,7 @@ fn sample(all: Vec<Question>, n: usize, seed: u64) -> Vec<Question> {
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     };
-    let mut all: Vec<Option<Question>> = all.into_iter().map(Some).collect();
+    let mut all: Vec<Option<T>> = all.into_iter().map(Some).collect();
     let n = n.min(all.len());
     for i in 0..n {
         let j = i + (next() % (all.len() - i) as u64) as usize;
@@ -243,16 +235,6 @@ fn passage_text(p: &Passage) -> String {
     p.sentences.concat().trim().to_owned()
 }
 
-fn system_graph() -> String {
-    let body = |s: &'static str| s.splitn(3, "---\n").nth(2).unwrap_or(s);
-    format!(
-        "You are an assistant that keeps knowledge in MyGraph, a knowledge graph where every fact \
-         cites its evidence, through the `mygraph` MCP tools. This is your guide to it, followed \
-         by its references for writing and querying.\n\n{}\n\n{SKILL_WRITE}\n\n{SKILL_QUERY}",
-        body(SKILL)
-    )
-}
-
 fn ingest_prompt(q: &Question) -> String {
     let mut p = format!(
         "Below are {} Wikipedia passages. Record what they say in MyGraph, so that later \
@@ -274,7 +256,7 @@ fn ingest_prompt(q: &Question) -> String {
 }
 
 /// The same in both modes: the answer's form, and when to say `unknown`.
-const ANSWER_RULES: &str = "The answer is as short as possible: a name, a date, a number, a short \
+pub(crate) const ANSWER_RULES: &str = "The answer is as short as possible: a name, a date, a number, a short \
      phrase, or yes or no. When the sources point to an answer without settling every detail, give \
      the best-supported answer; answer \"unknown\" only when they hold nothing that answers the \
      question.";
@@ -363,19 +345,10 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
     let data = dir.join("data");
     let keep_graph = o.regrade || o.reanswer;
     if !keep_graph {
-        let _ = fs::remove_dir_all(&data);
-        fs::create_dir_all(&data)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_millis() as i64;
-        drop(GraphFile::create(&data, GRAPH, &Policies::default(), now)?);
+        graph::create(&data)?;
     }
-    let server = |actor: &str| {
-        json!({ "mygraph": { "command": o.mygraph, "args": [
-            "mcp", "--data-dir", data, "--graph", GRAPH, "--actor", actor
-        ] } })
-    };
-    let system = system_graph();
+    let server = |actor: &str| graph::server(&o.mygraph, &data, actor);
+    let system = graph::system();
     let ingest = if keep_graph {
         read_transcript(&dir.join("ingest.jsonl"))?
     } else {
@@ -402,40 +375,17 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
         .filter_map(|e| e.as_str().map(str::to_owned))
         .collect();
 
-    let file = GraphFile::open(&data, GRAPH)?;
-    let policies = file.policies()?;
-    let g = Graph::open(file, GRAPH, policies)?;
-    let sentences = Sentences::new(q.passages.iter().map(|p| p.sentences.as_slice()));
     // Every evidence in the graph and the sentences it quotes.
-    let st = g.state();
-    let mut stored = BTreeSet::new();
-    let mut evidence: BTreeMap<String, BTreeSet<Fact>> = BTreeMap::new();
-    let ids: Vec<i64> = st
-        .evidence
-        .iter()
-        .filter(|(_, e)| e.status == Status::Active)
-        .map(|(i, _)| i)
+    let (texts, size) = graph::contents(&data)?;
+    let sentences = Sentences::new(q.passages.iter().map(|p| p.sentences.as_slice()));
+    let evidence: BTreeMap<String, BTreeSet<Fact>> = texts
+        .into_iter()
+        .map(|(id, e)| {
+            let facts = sentences.matching(&e.content);
+            (id, facts)
+        })
         .collect();
-    for chunk in ids.chunks(100) {
-        let refs: Vec<String> = chunk
-            .iter()
-            .map(|i| id_string(ObjectKind::Evidence, *i))
-            .collect();
-        let r = g
-            .get(&json!({ "refs": refs, "detail": "brief", "include": {"content": true} }))
-            .map_err(|e| e.to_json().to_string())?;
-        for (idx, item) in chunk
-            .iter()
-            .zip(r["items"].as_array().into_iter().flatten())
-        {
-            let facts = item["content"]
-                .as_str()
-                .map(|c| sentences.matching(c))
-                .unwrap_or_default();
-            stored.extend(facts.iter().cloned());
-            evidence.insert(id_string(ObjectKind::Evidence, *idx), facts);
-        }
-    }
+    let stored: BTreeSet<Fact> = evidence.values().flatten().cloned().collect();
     let mut facts = BTreeSet::new();
     let mut unknown_refs = Vec::new();
     for c in &cited {
@@ -458,20 +408,12 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
         "sentences_stored".into(),
         (stored.len() as f64 / total.max(1) as f64).into(),
     );
-    m.insert(
-        "graph".into(),
-        json!({
-            "nodes": st.nodes.iter().filter(|(_, n)| n.status == Status::Active).count(),
-            "links": st.links.iter().filter(|(_, l)| l.status == Status::Active).count(),
-            "evidence": ids.len(),
-            "citations": st.citations.iter().filter(|(_, c)| c.status == Status::Active).count(),
-        }),
-    );
+    m.insert("graph".into(), size);
     m.insert("ingest".into(), ingest.to_json());
     Ok(m)
 }
 
-fn mean(rs: &[&Json], f: impl Fn(&Json) -> Option<f64>) -> Json {
+pub(crate) fn mean(rs: &[&Json], f: impl Fn(&Json) -> Option<f64>) -> Json {
     let v: Vec<f64> = rs.iter().filter_map(|r| f(r)).collect();
     if v.is_empty() {
         Json::Null

@@ -1,10 +1,11 @@
 //! `mygraph-agentbench`: agent benchmarks with MyGraph as the agent's memory
-//! (docs/11-benchmarks.md §3). The agents are Claude Code in print mode, or this crate's own loop
-//! on the OpenAI API, with only the MyGraph MCP server; each question gets its own graph in a
-//! scratch folder.
+//! (docs/11-benchmarks.md §3–4). The agents are Claude Code in print mode, or this crate's own loop
+//! on the OpenAI API, with only the MyGraph MCP server; graphs live in the run folder.
 
 mod agent;
 mod grade;
+mod graph;
+mod locomo;
 mod mcp;
 mod multihop;
 mod openai;
@@ -37,6 +38,24 @@ enum Cmd {
     /// MuSiQue-Ans: 2–4 hop questions over 20 paragraphs, citations graded on the supporting
     /// paragraphs. `--data`: `musique_ans_v1.0_dev.jsonl`
     Musique(RunArgs),
+    /// LoCoMo: long conversations recorded session by session, then questions about them, graded
+    /// by a model and against the evidence messages. `--data`: `locomo10.json`
+    Locomo(LocomoArgs),
+}
+
+#[derive(Args)]
+struct LocomoArgs {
+    #[command(flatten)]
+    run: RunArgs,
+    /// Conversations to run (`conv-26,conv-30`); default all
+    #[arg(long, value_delimiter = ',')]
+    conversations: Vec<String>,
+    /// The model that grades answers; default the agents' model
+    #[arg(long)]
+    judge_model: Option<String>,
+    /// `reasoning_effort` of the grading model (OpenAI)
+    #[arg(long, default_value = "low")]
+    judge_reasoning_effort: String,
 }
 
 #[derive(Args)]
@@ -47,8 +66,9 @@ struct RunArgs {
     /// Folder for transcripts, graphs and results; an interrupted run resumes from it
     #[arg(long)]
     out: PathBuf,
-    #[arg(long, default_value_t = 50)]
-    questions: usize,
+    /// Questions, sampled (default 50); LoCoMo: per conversation (default all)
+    #[arg(long)]
+    questions: Option<usize>,
     #[arg(long, default_value_t = 1)]
     seed: u64,
     /// `graph` (store, then answer from the graph) and / or `direct` (passages in the prompt)
@@ -92,36 +112,75 @@ struct RunArgs {
     reanswer: bool,
 }
 
-fn options(dataset: Dataset, a: RunArgs) -> agent::Result<multihop::Options> {
+fn prices(a: &RunArgs) -> agent::Result<Option<openai::Prices>> {
+    match a.prices.as_deref() {
+        None => Ok(None),
+        Some(&[input, cached_input, output]) => Ok(Some(openai::Prices {
+            input,
+            cached_input,
+            output,
+        })),
+        Some(_) => Err("--prices takes input,cached_input,output".into()),
+    }
+}
+
+/// An agent on `model` with the provider, limits and prices of `a`.
+fn agent(a: &RunArgs, model: Option<&str>, effort: Option<String>) -> agent::Result<Agent> {
     let backend = match a.provider {
-        Provider::ClaudeCode => Backend::ClaudeCode(a.claude),
+        Provider::ClaudeCode => Backend::ClaudeCode(a.claude.clone()),
         Provider::Openai => Backend::OpenAi(openai::OpenAi {
-            base_url: a.openai_base_url,
+            base_url: a.openai_base_url.clone(),
             // A regrade reads transcripts and needs no key.
             key: std::env::var("OPENAI_API_KEY")
                 .or_else(|e| if a.regrade { Ok(String::new()) } else { Err(e) })
                 .map_err(|_| "set OPENAI_API_KEY to use --provider openai")?,
-            reasoning_effort: a.reasoning_effort,
-            prices: match a.prices.as_deref() {
-                None => None,
-                Some(&[input, cached_input, output]) => Some(openai::Prices {
-                    input,
-                    cached_input,
-                    output,
-                }),
-                Some(_) => return Err("--prices takes input,cached_input,output".into()),
-            },
+            reasoning_effort: effort,
+            prices: prices(a)?,
         }),
     };
-    let model = match (a.model, a.provider) {
-        (Some(m), _) => m,
+    let model = match (model, a.provider) {
+        (Some(m), _) => m.to_owned(),
         (None, Provider::ClaudeCode) => "sonnet".to_owned(),
         (None, Provider::Openai) => return Err("--provider openai needs --model".into()),
     };
+    Ok(Agent {
+        backend,
+        model,
+        max_budget_usd: a.max_budget_usd,
+        timeout: Duration::from_secs(a.timeout_minutes * 60),
+    })
+}
+
+fn options(dataset: Dataset, a: RunArgs) -> agent::Result<multihop::Options> {
     Ok(multihop::Options {
+        agent: agent(&a, a.model.as_deref(), a.reasoning_effort.clone())?,
         dataset,
         data: a.data,
         out: std::path::absolute(&a.out)?,
+        questions: a.questions.unwrap_or(50),
+        seed: a.seed,
+        modes: a.modes,
+        parallel: a.parallel,
+        mygraph: std::path::absolute(&a.mygraph)?,
+        regrade: a.regrade,
+        reanswer: a.reanswer,
+    })
+}
+
+fn locomo_options(l: LocomoArgs) -> agent::Result<locomo::Options> {
+    let a = l.run;
+    let agent_model = a.model.clone();
+    let judge_model = l.judge_model.or_else(|| agent_model.clone());
+    let judge_effort = match a.provider {
+        Provider::Openai => Some(l.judge_reasoning_effort),
+        Provider::ClaudeCode => None,
+    };
+    Ok(locomo::Options {
+        agent: agent(&a, agent_model.as_deref(), a.reasoning_effort.clone())?,
+        judge: agent(&a, judge_model.as_deref(), judge_effort)?,
+        data: a.data,
+        out: std::path::absolute(&a.out)?,
+        conversations: l.conversations,
         questions: a.questions,
         seed: a.seed,
         modes: a.modes,
@@ -129,21 +188,16 @@ fn options(dataset: Dataset, a: RunArgs) -> agent::Result<multihop::Options> {
         mygraph: std::path::absolute(&a.mygraph)?,
         regrade: a.regrade,
         reanswer: a.reanswer,
-        agent: Agent {
-            backend,
-            model,
-            max_budget_usd: a.max_budget_usd,
-            timeout: Duration::from_secs(a.timeout_minutes * 60),
-        },
     })
 }
 
 fn main() {
-    let (dataset, args) = match Cli::parse().cmd {
-        Cmd::Hotpot(a) => (Dataset::Hotpot, a),
-        Cmd::Musique(a) => (Dataset::Musique, a),
+    let result = match Cli::parse().cmd {
+        Cmd::Hotpot(a) => options(Dataset::Hotpot, a).and_then(|o| multihop::run(&o)),
+        Cmd::Musique(a) => options(Dataset::Musique, a).and_then(|o| multihop::run(&o)),
+        Cmd::Locomo(l) => locomo_options(l).and_then(|o| locomo::run(&o)),
     };
-    match options(dataset, args).and_then(|o| multihop::run(&o)) {
+    match result {
         Ok(summary) => println!(
             "{}",
             serde_json::to_string_pretty(&summary).unwrap_or_default()

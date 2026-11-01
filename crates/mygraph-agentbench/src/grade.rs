@@ -132,6 +132,8 @@ fn in_order(a: &str, b: &str) -> f64 {
 /// The passages' sentences, for mapping quoted text back to supporting facts.
 pub struct Sentences {
     all: Vec<(Fact, String)>,
+    /// Words a sentence needs to count when it lies inside a longer quote.
+    min_inside: usize,
 }
 
 impl Sentences {
@@ -143,7 +145,14 @@ impl Sentences {
             .flat_map(|(p, ss)| ss.iter().enumerate().map(move |(i, s)| ((p, i), words(s))))
             .filter(|(_, w)| !w.trim().is_empty())
             .collect();
-        Sentences { all }
+        Sentences { all, min_inside: 1 }
+    }
+
+    /// Sentences shorter than `n` words count only when quoted alone, not because a longer quote
+    /// contains them: in a conversation, "Thanks!" is inside many quotes it does not stand for.
+    pub fn with_min_inside(mut self, n: usize) -> Self {
+        self.min_inside = n;
+        self
     }
 
     /// The sentences a quoted fragment stands for: every sentence wholly inside it, or the one(s)
@@ -157,7 +166,8 @@ impl Sentences {
             .all
             .iter()
             .filter(|(_, s)| {
-                f.contains(s.as_str())
+                (f.contains(s.as_str())
+                    && (f == *s || s.split_whitespace().count() >= self.min_inside))
                     || (fw >= 3 && s.contains(f.as_str()))
                     || (s.split_whitespace().count() >= 5 && in_order(s, &f) >= 0.85)
             })
