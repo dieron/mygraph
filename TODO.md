@@ -91,12 +91,14 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] LoCoMo pilot, conv-30 on Terra: graph 0.83 correct vs direct 0.91 (categories 1–4);
       96.5 % of evidence messages stored; losses in search, hedged dates and lists across
       sessions; $3.60.
-- [ ] LoCoMo on all 10 conversations (about $80–100 with `direct`).
+- [x] LoCoMo, 7 conversations × 20 questions on Terra ($14): graph 0.85 vs direct 0.84 correct
+      (a tie within judge noise), citation F1 0.77 vs 0.74, half the cost per question. The full
+      run (about $80–100) is not planned.
 - [x] Text search matches word forms (English stemming, storage format 2 with migration 0002;
       the tantivy index rebuilds itself). In the LoCoMo pilot a stored message ("clothes store is
       open") was missed by searches for "clothing store" and "store opened".
-- [ ] Rerun the LoCoMo pilot's graph answers with stemming (`--reanswer` needs a reingest:
-      the pilot's graph is format 1 and migrates on open).
+- [ ] Stemming's effect: answer the pilot's 105 conv-30 questions again from its graph
+      (`--reanswer --modes graph`, about $1.20).
 - [ ] LongMemEval (a sample first).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).

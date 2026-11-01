@@ -758,14 +758,54 @@ Ingest: 19 agent runs, 227 tool calls, 17.5 minutes, $0.93, giving 165 nodes, 23
 26. **Citations are as good as `direct`'s on temporal and single-hop questions** (F1 0.90 and
     0.64 against 0.92 and 0.64), and weaker on multi-hop, where answers are also weaker.
 
-**Full run, estimated:** the other conversations have up to 1.9× as many messages. Ingest would
-cost about $15 and take about 35 minutes with the conversations in parallel. Answers about
-$22 from the graph and about $40–60 for `direct`, whose prompt grows with the conversation.
+**Full run, estimated:** the other conversations have up to 1.9× as many messages. Storing all
+10 would cost about $15, answering all 1 986 questions about $22 from the graph and $40–60 for
+`direct`, whose prompt grows with the conversation: $80–100 in all, more than this step is worth.
+A sample of the conversations and questions tells the same story for a sixth of that.
+
+**7 conversations, 20 questions each, on GPT-6.1 Terra** (judge: Terra at low effort, seed 1;
+2026-11-01; with stemming, [RANK-6]). conv-30 plus the six smallest others (conv-26, -41, -42,
+-44, -49, -50; 19–32 sessions, 369–675 messages); conv-30's graph is the pilot's, upgraded to
+storage format 2 on open. 140 questions: 26 multi-hop, 20 temporal, 6 open-domain, 56
+single-hop, 32 adversarial.
+
+| | `graph` | `direct` |
+|---|---|---|
+| Correct, categories 1–4 (judge) | 0.85 (92 of 108) | 0.84 (91 of 108) |
+| Multi-hop / temporal / open-domain / single-hop | 0.73 / 0.95 / 0.33 / 0.93 | 0.73 / 0.90 / 0.17 / 0.95 |
+| Token F1, categories 1–4 | 0.64 | 0.64 |
+| Evidence messages precision / recall / F1 | 0.77 / 0.84 / 0.77 | 0.69 / 0.87 / 0.74 |
+| Adversarial: abstained | 5 of 32 | 8 of 32 |
+| Evidence messages quoted in the graph | 98.9 % | – |
+| Per question | 7.2 tool calls, $0.011 | $0.022 |
+
+Storing the six new conversations: 162 sessions, 2 628 tool calls, $9.35, 25–40 minutes each
+(in parallel), giving 359–598 nodes and 471–697 evidence per graph. With the answers ($1.58 from
+the graph, $3.13 `direct`) and the judge ($0.06), the run cost $14.12.
+
+27. **On a sample of seven conversations, answering from the graph ties with reading the whole
+    conversation**: 92 against 91 of 108. The modes disagree on 7 questions, 4 one way and 3 the
+    other, and the judge is part of the noise: it marked the same answer, "Yoga tips" (gold:
+    "Support and tips"), correct for `graph` and wrong for `direct`. A difference of one or two
+    questions is not a result.
+28. **The pilot's gap does not hold up across conversations.** In the pilot, on conv-30 alone,
+    `graph` trailed by 7 of 81. Here the conversations go both ways: `graph` ahead on conv-26
+    (16 against 14) and conv-49 (13 against 12), behind on conv-50 (10 against 12), level on the
+    other four, conv-30 included (12 and 12 of its 14 sampled questions). Of the 20 conv-30
+    questions asked again with stemming, 19 got the pilot's verdict; the other became a correct
+    abstention. The pilot's store question is not in this sample, so stemming's effect is not
+    measured here.
+29. **Citations are better from the graph** (F1 0.77 against 0.74): more precise (0.77 against
+    0.69), as the graph answers cite the quoted messages and `direct` tends to cite neighbours.
+30. **The graph costs half as much per question** ($0.011 against $0.022), and the gap grows with
+    the history: `direct` resends the whole conversation for every question. Storing costs
+    about $0.25 per 100 messages, once.
+31. **Adversarial questions stay low in both modes** (5 and 8 of 32), for the reason in finding
+    25.
 
 ### Then
 
-1. LoCoMo on all 10 conversations, both modes.
-2. Text search that matches word forms (stemming: "clothing" / "clothes", "opened" / "open").
-   It is a MyGraph change, not a benchmark change, and should help any agent using `search`.
-3. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
+1. Stemming's effect on one conversation: answer the pilot's 105 conv-30 questions again from its
+   graph (`--reanswer`, graph only, about $1.20) and compare with the pilot.
+2. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
    graph per question cheaply. Start with a sample.

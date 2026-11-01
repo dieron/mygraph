@@ -764,6 +764,10 @@ fn run_question(
             "evidence": q.evidence.iter().map(|i| &c.turns[*i].id).collect::<Vec<_>>(),
         }),
     };
+    // An error saved by an earlier run is about that run; the modes it left out run again.
+    if let Some(m) = r.as_object_mut() {
+        m.remove("error");
+    }
     fs::create_dir_all(&dir)?;
     for m in &o.modes {
         if r[m].is_object() && !o.regrade && !o.reanswer {

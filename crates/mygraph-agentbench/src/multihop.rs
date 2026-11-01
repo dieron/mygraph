@@ -555,6 +555,10 @@ fn run_question(o: &Options, q: &Question) -> Result<Json> {
             "supporting": facts(&q.supporting()),
         }),
     };
+    // An error saved by an earlier run is about that run; the modes it left out run again.
+    if let Some(m) = r.as_object_mut() {
+        m.remove("error");
+    }
     fs::create_dir_all(&dir)?;
     // The passages, for reading transcripts and checking the grading.
     let passages: Vec<Json> = q
