@@ -586,7 +586,53 @@ told it could answer `unknown`.)
 14. **What separates the modes now is answer wording** on one question ("Prosperity" against "a
     long period of prosperity for the British people"). Five questions are too few to say more.
 
+**50 questions on GPT-6.1 Terra** (seed 1, the same rules in both modes; 2026-11-01): 27 2-hop,
+15 3-hop, 8 4-hop. The run took 34 minutes at 6 questions at a time and cost $6.99.
+
+| | `graph` | `direct` |
+|---|---|---|
+| Answer EM / F1 | 0.56 / 0.747 | 0.58 / 0.763 |
+| Supporting paragraphs precision / recall / F1 | 0.92 / 0.86 / 0.868 | 0.94 / 0.85 / 0.877 |
+| Joint EM / F1 | 0.40 / 0.678 | 0.44 / 0.703 |
+| `unknown` answers | 5 | 5 |
+| Supporting paragraphs quoted in the graph | 100 % | – |
+| Per question | 29 ingest calls, 210 s, $0.124; answer 10 calls, 19 s, $0.012 | 3 s, $0.003 |
+| Graph | 131 nodes, 139 links, 90 evidence, 335 citations | – |
+
+By hop count (answer EM / F1, supporting paragraphs F1):
+
+| | Questions | `graph` | `direct` |
+|---|---|---|---|
+| 2-hop | 27 | 0.56 / 0.74, 0.88 | 0.56 / 0.75, 0.90 |
+| 3-hop | 15 | 0.40 / 0.66, 0.80 | 0.47 / 0.69, 0.79 |
+| 4-hop | 8 | 0.88 / 0.94, 0.95 | 0.88 / 0.93, 0.96 |
+
+15. **Answering from the graph matches reading the passages on MuSiQue too.** Answers differ in
+    only 5 of 50 questions, and 4 of those differ by wording ("International Tennis Federation"
+    against "… (ITF)", "38" against "38 games", "Sarmatians and Goths" against the full phrase).
+    One is a real difference: the 3-hop Hyper-V question, which both modes got wrong in the
+    5-question run and `direct` now got right. That is run-to-run variation more than a mode
+    difference.
+16. **Every `unknown` is a broken question, and both modes abstained on the same 5.** In each the
+    supporting paragraphs do not support the expected answer:
+    - Robert Mills designed the Washington Monument, but nothing links him to Greek Revival.
+    - The paragraph names Arthur Peel as Sir Robert Peel's *son*; the key says father.
+    - Sherry Boucher co-starred with George Peppard; nothing says she married him.
+    - Edwin Lutyens was named after Landseer; nothing says he was Landseer's child.
+    - The Coles Creek in the paragraphs is in Pennsylvania; the key's death-penalty answer is
+      for Oregon.
+    Without these, EM is 0.62 for `graph` and 0.64 for `direct`.
+17. **Most other misses are wording against a long or unusual gold answer**, the same in both
+    modes: "1950s to 1970s" against "From the 1950s to the 1970s", "Season 3" against "season
+    three", "Koh Phi Phi" against "island Koh Phi Phi". Two are wrong in both modes (1852 against
+    1853; "5 years" answering a question about a title).
+18. **Hops do not hurt the graph more than the passages.** 3-hop questions are the hardest for
+    both. The 4-hop scores are high in both modes because those 8 answers are short names.
+19. **Storage is complete.** Every supporting paragraph of all 50 questions was quoted in the
+    graph, and ingest was steady at about 29 calls and 3.5 minutes per question.
+
 ### Then
 
-1. MuSiQue on 50 questions, both modes, with a breakdown by hop count.
-2. HotpotQA again with the shared answer rules, and on Sonnet when the plan's limits allow.
+1. HotpotQA again with the shared answer rules, and on Sonnet when the plan's limits allow.
+2. Answer F1 is held back by wording more than by retrieval in both datasets. A grader that
+   accepts a containing or contained answer (or an LLM judge) would separate the two.

@@ -81,7 +81,10 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] MuSiQue in the same runner (`mygraph-agentbench musique`); 5 questions on Terra. Both modes
       now share the answer rules: with `unknown` offered only to the graph agent, it abstained on
       the 3- and 4-hop questions.
-- [ ] MuSiQue on 50 questions; HotpotQA again with the shared answer rules.
+- [x] MuSiQue on 50 questions on Terra: graph matches direct (answer F1 0.747 vs 0.763,
+      supporting-paragraph F1 0.868 vs 0.877); the 5 `unknown` answers, the same in both modes,
+      are questions whose paragraphs do not support the key; $6.99.
+- [ ] HotpotQA again with the shared answer rules.
 - [ ] LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
