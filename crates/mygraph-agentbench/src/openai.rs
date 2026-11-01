@@ -1,11 +1,12 @@
-//! An agent loop on the OpenAI Chat Completions API (or a compatible endpoint): the MCP servers'
-//! tools are offered as functions, calls go to the servers, until the model replies without a
-//! tool call. The transcript is written in the same shape as Claude Code's `stream-json`, so the
+//! An agent loop on the OpenAI Responses API (or a compatible endpoint): the MCP servers' tools
+//! are offered as functions, calls go to the servers, until the model replies without a tool call.
+//! Nothing is stored at OpenAI (`store: false`): each call sends the whole conversation, with the
+//! model's reasoning passed back encrypted. The transcript is written in the same shape as Claude Code's `stream-json`, so the
 //! same readers grade and display both.
 
 use crate::agent::{Agent, Result, Run};
 use crate::mcp::Server;
-use serde_json::{Map, Value as Json, json};
+use serde_json::{Value as Json, json};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -90,10 +91,10 @@ pub fn run(
             } else {
                 format!("{server_name}__{tool}")
             };
-            functions.push(json!({ "type": "function", "function": {
-                "name": offered, "description": t["description"],
+            functions.push(json!({
+                "type": "function", "name": offered, "description": t["description"],
                 "parameters": t["inputSchema"],
-            } }));
+            }));
             tools.push((
                 offered,
                 Tool {
@@ -119,10 +120,7 @@ pub fn run(
     let http = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(600))
         .build();
-    let mut messages = vec![
-        json!({ "role": "system", "content": system }),
-        json!({ "role": "user", "content": prompt }),
-    ];
+    let mut input = vec![json!({ "role": "user", "content": prompt })];
     let mut usage = Usage::default();
     let mut run = Run::default();
     let mut error = None;
@@ -140,12 +138,15 @@ pub fn run(
             error = Some(format!("over the budget of {} USD", agent.max_budget_usd));
             break;
         }
-        let mut body = json!({ "model": agent.model, "messages": messages });
+        let mut body = json!({
+            "model": agent.model, "instructions": system, "input": input,
+            "store": false, "include": ["reasoning.encrypted_content"],
+        });
         if !functions.is_empty() {
             body["tools"] = Json::Array(functions.clone());
         }
         if let Some(e) = &cfg.reasoning_effort {
-            body["reasoning_effort"] = e.as_str().into();
+            body["reasoning"] = json!({ "effort": e });
         }
         let resp = match complete(&http, cfg, &body) {
             Ok(r) => r,
@@ -156,35 +157,49 @@ pub fn run(
         };
         run.turns += 1;
         let u = &resp["usage"];
-        usage.input += u["prompt_tokens"].as_u64().unwrap_or(0);
-        usage.cached += u["prompt_tokens_details"]["cached_tokens"]
+        usage.input += u["input_tokens"].as_u64().unwrap_or(0);
+        usage.cached += u["input_tokens_details"]["cached_tokens"]
             .as_u64()
             .unwrap_or(0);
-        usage.output += u["completion_tokens"].as_u64().unwrap_or(0);
-        let msg = &resp["choices"][0]["message"];
-        let text = msg["content"].as_str().unwrap_or_default().to_owned();
-        let calls = msg["tool_calls"].as_array().cloned().unwrap_or_default();
+        usage.output += u["output_tokens"].as_u64().unwrap_or(0);
+        let output = resp["output"].as_array().cloned().unwrap_or_default();
+        let text = output
+            .iter()
+            .filter(|o| o["type"] == "message")
+            .flat_map(|o| o["content"].as_array().cloned().unwrap_or_default())
+            .filter_map(|c| c["text"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            );
+        let calls: Vec<Json> = output
+            .iter()
+            .filter(|o| o["type"] == "function_call")
+            .cloned()
+            .collect();
+        // The output items, reasoning included, go back as input with the calls' results.
+        input.extend(output.iter().cloned());
 
         let mut content = Vec::new();
         if !text.is_empty() {
             content.push(json!({ "type": "text", "text": text }));
         }
-        let mut assistant = Map::new();
-        assistant.insert("role".into(), "assistant".into());
-        assistant.insert("content".into(), msg["content"].clone());
-        if !calls.is_empty() {
-            assistant.insert("tool_calls".into(), Json::Array(calls.clone()));
-        }
-        messages.push(Json::Object(assistant));
         if calls.is_empty() {
+            if resp["status"] != "completed" {
+                error = Some(format!(
+                    "response {}: {}",
+                    resp["status"], resp["incomplete_details"]
+                ));
+            }
             run.text = text;
             done = true;
         }
         let mut results = Vec::new();
         for c in &calls {
-            let (id, f) = (&c["id"], &c["function"]);
-            let fname = f["name"].as_str().unwrap_or_default();
-            let raw = f["arguments"].as_str().unwrap_or("{}");
+            let id = &c["call_id"];
+            let fname = c["name"].as_str().unwrap_or_default();
+            let raw = c["arguments"].as_str().unwrap_or("{}");
             let args: std::result::Result<Json, _> = serde_json::from_str(raw);
             content.push(json!({
                 "type": "tool_use", "id": id, "name": fname,
@@ -201,7 +216,7 @@ pub fn run(
             results.push(json!({
                 "type": "tool_result", "tool_use_id": id, "content": out, "is_error": is_error,
             }));
-            messages.push(json!({ "role": "tool", "tool_call_id": id, "content": out }));
+            input.push(json!({ "type": "function_call_output", "call_id": id, "output": out }));
         }
         emit(json!({ "type": "assistant", "message": { "content": content } }))?;
         if !results.is_empty() {
@@ -231,9 +246,9 @@ pub fn run(
     Ok(run)
 }
 
-/// One Chat Completions call, retried with backoff while the API is busy.
+/// One Responses call, retried with backoff while the API is busy.
 fn complete(http: &ureq::Agent, cfg: &OpenAi, body: &Json) -> Result<Json> {
-    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+    let url = format!("{}/responses", cfg.base_url.trim_end_matches('/'));
     let mut wait = Duration::from_secs(2);
     for attempt in 1..=ATTEMPTS {
         let r = http

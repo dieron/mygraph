@@ -436,7 +436,7 @@ target/release/mygraph-agentbench hotpot --data <dir>/distractor-validation.parq
 `--modes graph,direct`, `--model` (default `sonnet`), `--parallel` (default 4).
 
 **Other models.** `--provider openai --model <model>` runs the agents with the crate's own loop on
-the OpenAI Chat Completions API instead of Claude Code. The loop starts the same `mygraph mcp`
+the OpenAI Responses API instead of Claude Code (nothing stored at OpenAI). The loop starts the same `mygraph mcp`
 server, offers its tools as functions and runs the calls, until the model replies without one. The
 system prompt (the skill plus the server's instructions, as Claude Code adds them), the prompts and
 the grading are the same, so the model is the only difference.
