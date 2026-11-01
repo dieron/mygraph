@@ -489,6 +489,10 @@ pub fn run(o: &Options) -> Result<Json> {
     let mut summary = json!({
         "dataset": { "file": o.data.file_name().map(|f| f.to_string_lossy()), "questions": total },
         "sample": { "questions": qs.len(), "seed": o.seed },
+        "provider": match &o.agent.backend {
+            crate::agent::Backend::ClaudeCode(_) => "claude-code",
+            crate::agent::Backend::OpenAi(_) => "openai",
+        },
         "model": o.agent.model,
         "failed": results.iter().filter(|r| r.get("error").is_some()).count(),
     });

@@ -1279,6 +1279,7 @@ dependencies = [
  "mygraph-store-sqlite",
  "parquet",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

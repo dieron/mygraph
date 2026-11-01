@@ -433,7 +433,18 @@ cargo build --release -p mygraph-server -p mygraph-agentbench
 target/release/mygraph-agentbench hotpot --data <dir>/distractor-validation.parquet --out <run dir> --questions 50 --seed 1 --mygraph target/release/mygraph
 ```
 
-`--modes graph,direct`, `--model` (default `sonnet`), `--parallel` (default 4). A run directory
+`--modes graph,direct`, `--model` (default `sonnet`), `--parallel` (default 4).
+
+**Other models.** `--provider openai --model <model>` runs the agents with the crate's own loop on
+the OpenAI Chat Completions API instead of Claude Code. The loop starts the same `mygraph mcp`
+server, offers its tools as functions and runs the calls, until the model replies without one. The
+system prompt (the skill plus the server's instructions, as Claude Code adds them), the prompts and
+the grading are the same, so the model is the only difference.
+- The key comes from `OPENAI_API_KEY`.
+- `--openai-base-url` points at any compatible endpoint.
+- `--reasoning-effort` is passed through.
+- `--prices input,cached,output` (USD per million tokens) gives costs and enforces
+  `--max-budget-usd`. A run directory
 keeps every transcript, graph and per-question `result.json`. An interrupted run resumes where it
 stopped. Runs cost model tokens and are not part of CI.
 

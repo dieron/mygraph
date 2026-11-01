@@ -69,7 +69,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] HotpotQA runner with citation grading (`mygraph-agentbench hotpot`); a 5-question run.
 - [x] Skill: one `text` evidence per sentence instead of one per page (citation precision
       0.26 → 0.80 on 5 HotpotQA questions).
-- [ ] HotpotQA on 50 questions with the current skill; a second model (Haiku).
+- [x] OpenAI models in the HotpotQA runner (`--provider openai`: own agent loop over the MCP tools).
+- [ ] HotpotQA on 50 questions with the current skill; other models (Haiku, OpenAI).
 - [ ] Agents sometimes send one 20+ KB `write` that arrives as invalid JSON; suggest smaller
       writes in the skill?
 - [ ] MuSiQue with citation grading; then LongMemEval and LoCoMo.

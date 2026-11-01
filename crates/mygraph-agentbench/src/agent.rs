@@ -1,5 +1,6 @@
-//! Runs one agent turn with Claude Code in print mode (`claude -p`): no settings files, hooks,
-//! plugins or built-in tools, only the MCP servers given. The transcript is kept as JSON lines.
+//! Runs one agent turn: with Claude Code in print mode (`claude -p`: no settings files, hooks,
+//! plugins or built-in tools, only the MCP servers given), or with this crate's own loop on the
+//! OpenAI API ([`crate::openai`]). The transcript is kept as JSON lines.
 
 use serde_json::{Value as Json, json};
 use std::fs::{self, File};
@@ -10,9 +11,14 @@ use std::time::{Duration, Instant};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-pub struct Agent {
+pub enum Backend {
     /// The `claude` executable.
-    pub claude: String,
+    ClaudeCode(String),
+    OpenAi(crate::openai::OpenAi),
+}
+
+pub struct Agent {
+    pub backend: Backend,
     pub model: String,
     /// Spending limit per run, at list prices.
     pub max_budget_usd: f64,
@@ -55,10 +61,16 @@ impl Agent {
         prompt: &str,
         mcp: Option<&Json>,
     ) -> Result<Run> {
+        let claude = match &self.backend {
+            Backend::ClaudeCode(claude) => claude,
+            Backend::OpenAi(cfg) => {
+                return crate::openai::run(cfg, self, dir, name, system, prompt, mcp);
+            }
+        };
         let system_file = dir.join(format!("{name}.system.md"));
         fs::write(&system_file, system)?;
         let transcript = dir.join(format!("{name}.jsonl"));
-        let mut cmd = Command::new(&self.claude);
+        let mut cmd = Command::new(claude);
         cmd.current_dir(dir)
             .args(["-p", "--model", &self.model, "--setting-sources", ""])
             .args([
