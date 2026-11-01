@@ -503,7 +503,33 @@ through the crate's own loop; sentence-quote skill), next to Sonnet 5.5:
    empty type as a type name and answered `ref.not_found`, so the agent had to retry. **Fixed:**
    empty top-level tool arguments now count as absent ([MCP-TOOL-5]).
 
+**50 questions on GPT-6.1 Terra** (seed 1, sentence-quote skill, empty arguments ignored;
+2026-11-01; $4.56 in all):
+
+| | `graph` | `direct` |
+|---|---|---|
+| Answer EM / F1 | 0.62 / 0.785 | 0.62 / 0.788 |
+| Supporting facts precision / recall / F1 | 0.86 / 0.83 / 0.83 | 0.91 / 0.81 / 0.84 |
+| Supporting facts EM | 0.54 | 0.58 |
+| Joint EM / F1 | 0.32 / 0.66 | 0.36 / 0.66 |
+| Passage-level (title) F1 | 0.90 | 0.91 |
+| Supporting sentences quoted in the graph | 99.5 % | – |
+| Per question | 16 ingest calls, 138 s, $0.081; 6.5 answer calls, 14 s, $0.008 | 2 s, $0.002 |
+| Graph | 77 nodes, 95 links, 52 evidence, 210 citations | – |
+
+9. **Answering through the graph costs nothing in quality on HotpotQA.** Answers and citations
+   are within 0.01–0.05 of reading the passages, and the two modes miss the same questions.
+   Graph-only losses: 2 of 50. One is the ambiguous Tales from the Crypt question. In the other,
+   the agent stored an opera under its French title and answered with it. Direct-only losses:
+   1 of 50.
+10. **Most misses are answer wording, not facts**: "4" for "four operas", "Bayern Munich" for
+    "Bayern Munich of West Germany", "1241–1250" for "1241 until his death in 1250". Both modes
+    give the same words, so F1 is the fairer number, and EM is low for any reader.
+11. **Storage is not the bottleneck.** Terra quoted nearly every sentence (99.8 %), so the graph
+    held 99.5 % of the supporting facts, and retrieval found them.
+
 ### Then
 
-1. 50 questions with the sentence-quote skill, on both models, then MuSiQue (2–4 hop questions).
-2. A second dataset in the same runner: MuSiQue.
+1. MuSiQue (2–4 hop questions, with unanswerable ones) in the same runner, where retrieval from the
+   graph has more to do.
+2. The same 50 questions on Sonnet when the plan's limits allow.

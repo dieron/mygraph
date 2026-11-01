@@ -71,7 +71,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       0.26 → 0.80 on 5 HotpotQA questions).
 - [x] OpenAI models in the HotpotQA runner (`--provider openai`: own agent loop over the MCP tools).
 - [x] HotpotQA, 5 questions on GPT-6.1 Terra: same graph-mode scores as Sonnet at ~40 % of the cost.
-- [ ] HotpotQA on 50 questions with the current skill, on Sonnet and Terra.
+- [x] HotpotQA, 50 questions on Terra: graph-backed answers and citations within 0.01–0.05 of
+      reading the passages (answer F1 0.785 vs 0.788, citation F1 0.83 vs 0.84); $4.56.
+- [ ] HotpotQA, the same 50 questions on Sonnet.
 - [x] Tool calls treat empty top-level values (`"type": ""`, `[]`, `{}`, `null`) as absent
       ([MCP-TOOL-5]); agents on OpenAI models send them.
 - [ ] Agents sometimes send one 20+ KB `write` that arrives as invalid JSON; suggest smaller
