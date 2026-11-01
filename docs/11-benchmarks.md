@@ -483,7 +483,27 @@ questions to compare models or settings, but enough to show where points are los
    invalid JSON in 2 of 10 ingests and the agent resent it. Smaller writes (a passage or two each)
    would avoid that.
 
+**The same 5 questions on OpenAI's GPT-6.1 Terra** (`gpt-6.1-terra`, default reasoning effort,
+through the crate's own loop; sentence-quote skill), next to Sonnet 5.5:
+
+| | Sonnet `graph` | Terra `graph` | Sonnet `direct` | Terra `direct` |
+|---|---|---|---|---|
+| Answer EM / F1 | 0.60 / 0.82 | 0.60 / 0.82 | 0.60 / 0.82 | 0.60 / 0.94 |
+| Supporting facts precision / recall / F1 | 0.80 / 0.70 / 0.73 | 0.80 / 0.70 / 0.73 | 0.73 / 0.80 / 0.76 | 1.00 / 0.90 / 0.93 |
+| Ingest tool calls / seconds | 3.8 / 74 | 24 / 178 | – | – |
+| Evidence / nodes / links per graph | 42 / 66 / 75 | 56 / 108 / 128 | – | – |
+| Cost per question | $0.31 | $0.12 | $0.016 | $0.002 |
+
+6. **Through the graph, both models scored the same**, and the misses were the same questions.
+   Reading the passages directly, Terra did better: it alone resolved the ambiguous "actor in Tales
+   from the Crypt" to the film's cast. The graph agents both took the TV series.
+7. **Agents use the tools differently.** Terra wrote in a dozen small batches, with no failed
+   writes, and recorded more nodes; Sonnet sent one large write per question.
+8. **Terra fills every optional parameter**, e.g. `overview` with `"type": ""`. MyGraph took the
+   empty type as a type name and answered `ref.not_found`, so the agent had to retry. Empty
+   optional values should mean "not given".
+
 ### Then
 
-1. 50 questions with the sentence-quote skill, then MuSiQue (2–4 hop questions).
-2. A second model (Haiku) to see how much of this depends on the model.
+1. 50 questions with the sentence-quote skill, on both models, then MuSiQue (2–4 hop questions).
+2. Treat empty optional values in tool calls as absent.

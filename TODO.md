@@ -70,7 +70,10 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] Skill: one `text` evidence per sentence instead of one per page (citation precision
       0.26 → 0.80 on 5 HotpotQA questions).
 - [x] OpenAI models in the HotpotQA runner (`--provider openai`: own agent loop over the MCP tools).
-- [ ] HotpotQA on 50 questions with the current skill; other models (Haiku, OpenAI).
+- [x] HotpotQA, 5 questions on GPT-6.1 Terra: same graph-mode scores as Sonnet at ~40 % of the cost.
+- [ ] HotpotQA on 50 questions with the current skill, on Sonnet and Terra.
+- [ ] Tool calls: treat empty optional values (`"type": ""`, `[]`) as absent; agents on OpenAI
+      models send them (`overview` answered `ref.not_found`).
 - [ ] Agents sometimes send one 20+ KB `write` that arrives as invalid JSON; suggest smaller
       writes in the skill?
 - [ ] MuSiQue with citation grading; then LongMemEval and LoCoMo.
