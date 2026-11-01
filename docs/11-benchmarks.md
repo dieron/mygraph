@@ -534,6 +534,27 @@ through the crate's own loop; sentence-quote skill), next to Sonnet 5.5:
 11. **Storage is not the bottleneck.** Terra quoted nearly every sentence (99.8 %), so the graph
     held 99.5 % of the supporting facts, and retrieval found them.
 
+**The same 50 with the shared protocol** (below, under MuSiQue: the same answer rules in both
+modes, and `direct` cites sentences by passage number; 2026-11-01). The ingest prompt is
+unchanged, so the run kept the 50 graphs and only answered again (`--reanswer`, $0.52):
+
+| | `graph` | `direct` |
+|---|---|---|
+| Answer EM / F1 | 0.64 / 0.799 | 0.66 / 0.815 |
+| Supporting facts precision / recall / F1 | 0.89 / 0.86 / 0.853 | 0.93 / 0.85 / 0.879 |
+| Supporting facts EM | 0.58 | 0.64 |
+| Joint EM / F1 | 0.38 / 0.69 | 0.46 / 0.73 |
+| Passage-level (title) F1 | 0.915 | 0.928 |
+| `unknown` answers | 1 | 1 |
+
+20. **The shared rules change little; the conclusion stands.** Both modes moved up by 0.01–0.04.
+    Most of that is run-to-run variation in a handful of answers: "Dialogues des Carmélites"
+    became "Dialogues of the Carmelites" in `graph`, and "4" became "four" in `direct`. Exact
+    match now separates the modes on one question, and only by wording ("Broadcasting House,
+    London" against "Broadcasting House in London"). Both answer `unknown` on the same question.
+21. **`direct` cites a little better** (supporting-fact F1 0.879 against 0.853), mostly by
+    precision (0.93 against 0.89), as in the first run.
+
 ### MuSiQue
 
 MuSiQue (Trivedi et al., 2022) composes 2–4 single-hop questions into one, over 20 Wikipedia
@@ -561,8 +582,8 @@ target/release/mygraph-agentbench musique --data <dir>/musique_ans_v1.0_dev.json
 Both datasets share one protocol. Each prompt has the same rules for the answer: as short as
 possible, the best-supported answer when the sources point to one without settling every detail,
 and `unknown` only when they hold nothing that answers the question. `direct` cites sentences by
-passage number. (The HotpotQA results above predate both changes; there only the graph agent was
-told it could answer `unknown`.)
+passage number. (The first HotpotQA results above predate both changes; there only the graph
+agent was told it could answer `unknown`. The rerun of the same 50 uses them.)
 
 **5 questions on GPT-6.1 Terra** (seed 1; 2026-11-01): three 2-hop, one 3-hop, one 4-hop.
 
@@ -633,6 +654,6 @@ By hop count (answer EM / F1, supporting paragraphs F1):
 
 ### Then
 
-1. HotpotQA again with the shared answer rules, and on Sonnet when the plan's limits allow.
+1. HotpotQA on Sonnet when the plan's limits allow.
 2. Answer F1 is held back by wording more than by retrieval in both datasets. A grader that
    accepts a containing or contained answer (or an LLM judge) would separate the two.

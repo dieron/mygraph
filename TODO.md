@@ -84,7 +84,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] MuSiQue on 50 questions on Terra: graph matches direct (answer F1 0.747 vs 0.763,
       supporting-paragraph F1 0.868 vs 0.877); the 5 `unknown` answers, the same in both modes,
       are questions whose paragraphs do not support the key; $6.99.
-- [ ] HotpotQA again with the shared answer rules.
+- [x] HotpotQA again with the shared answer rules (`--reanswer` on the same graphs): graph 0.799
+      vs direct 0.815 answer F1, 0.853 vs 0.879 citation F1; no change to the conclusion.
 - [ ] LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
