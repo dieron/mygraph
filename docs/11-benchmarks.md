@@ -373,7 +373,7 @@ The fixes changed no answer: the engine tests, the conformance vectors, the comp
 1. The insert p99 stall; a way for `neighbors` to leave out links (IC1); fewer calls for IS3.
 2. The same runs on SF1.
 
-## 3. Step 2: HotpotQA with citation grading
+## 3. Step 2: HotpotQA and MuSiQue with citation grading
 
 HotpotQA (Yang et al., 2018) asks questions whose answers need facts from two Wikipedia passages,
 and marks the sentences that support each answer. That makes it a test of MyGraph's purpose, not
@@ -444,9 +444,15 @@ the grading are the same, so the model is the only difference.
 - `--openai-base-url` points at any compatible endpoint.
 - `--reasoning-effort` is passed through.
 - `--prices input,cached,output` (USD per million tokens) gives costs and enforces
-  `--max-budget-usd`. A run directory
-keeps every transcript, graph and per-question `result.json`. An interrupted run resumes where it
-stopped. Runs cost model tokens and are not part of CI.
+  `--max-budget-usd`.
+
+A run directory keeps every transcript, graph, per-question `result.json` and `question.json`
+(the passages as given). An interrupted run resumes where it stopped.
+- `--regrade` grades a run again from its transcripts and graphs, without calling a model.
+- `--reanswer` keeps the graphs and runs only the answering agents (and `direct`) again, for
+  changes to the answer prompts.
+
+Runs cost model tokens and are not part of CI.
 
 ### Results
 
@@ -528,8 +534,59 @@ through the crate's own loop; sentence-quote skill), next to Sonnet 5.5:
 11. **Storage is not the bottleneck.** Terra quoted nearly every sentence (99.8 %), so the graph
     held 99.5 % of the supporting facts, and retrieval found them.
 
+### MuSiQue
+
+MuSiQue (Trivedi et al., 2022) composes 2–4 single-hop questions into one, over 20 Wikipedia
+paragraphs, 2–4 of which support the answer. The questions were filtered so that they cannot be
+answered by shortcut: a reader has to follow the hops, which gives retrieval from the graph more
+to do than HotpotQA does.
+
+**Data.** MuSiQue-Ans dev (`musique_ans_v1.0_dev.jsonl`, 2 417 questions, all answerable), from
+the Hugging Face mirror `voidful/MuSiQue` of the original release (30 439 728 bytes, SHA-256
+`15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b`).
+
+```bash
+target/release/mygraph-agentbench musique --data <dir>/musique_ans_v1.0_dev.jsonl --out <run dir> --questions 50 --seed 1 --mygraph target/release/mygraph
+```
+
+**Differences from HotpotQA:**
+- MuSiQue marks supporting *paragraphs*, so `sp_*` is graded per paragraph, as in its official
+  evaluation.
+- Paragraphs are split into sentences at `. ` + capital letter, for mapping quotes back and for
+  numbering in `direct`; imperfect splits do not change paragraph-level grades.
+- Answers count when they match the answer or one of its aliases.
+- Passages are told apart by position, as titles repeat in more than half of the questions.
+- Results are also broken down by hop count.
+
+Both datasets share one protocol. Each prompt has the same rules for the answer: as short as
+possible, the best-supported answer when the sources point to one without settling every detail,
+and `unknown` only when they hold nothing that answers the question. `direct` cites sentences by
+passage number. (The HotpotQA results above predate both changes; there only the graph agent was
+told it could answer `unknown`.)
+
+**5 questions on GPT-6.1 Terra** (seed 1; 2026-11-01): three 2-hop, one 3-hop, one 4-hop.
+
+| | `graph`, first prompts | `graph`, same rules | `direct`, same rules |
+|---|---|---|---|
+| Answer EM / F1 | 0.20 / 0.49 | 0.40 / 0.63 | 0.40 / 0.80 |
+| Supporting paragraphs precision / recall / F1 | 0.85 / 0.80 / 0.78 | 0.83 / 0.85 / 0.80 | 0.83 / 0.88 / 0.85 |
+| `unknown` answers | 2 | 0 | 0 |
+| Supporting paragraphs quoted in the graph | 100 % | 100 % | – |
+| Per question | 31 ingest calls, 212 s, $0.13; answer $0.011 | answer $0.012 | $0.004 |
+| Graph | 129 nodes, 135 links, 93 evidence | – | – |
+
+12. **The first prompts made the graph agent abstain.** On the 3-hop and 4-hop questions it found
+    every needed fact but answered `unknown`. On the 4-hop question the link between a city and
+    "borders Columbia" is only implied. On the 3-hop question it would not choose between two
+    candidate systems. Only its prompt mentioned `unknown`, which made the comparison unfair.
+    With the same rules in both modes it answered both questions as `direct` did: right on the
+    4-hop, and the same wrong system on the 3-hop.
+13. **Ingest scales with the passages**: 20 paragraphs took about 30 tool calls and 3.5 minutes,
+    and every supporting paragraph was quoted.
+14. **What separates the modes now is answer wording** on one question ("Prosperity" against "a
+    long period of prosperity for the British people"). Five questions are too few to say more.
+
 ### Then
 
-1. MuSiQue (2–4 hop questions, with unanswerable ones) in the same runner, where retrieval from the
-   graph has more to do.
-2. The same 50 questions on Sonnet when the plan's limits allow.
+1. MuSiQue on 50 questions, both modes, with a breakdown by hop count.
+2. HotpotQA again with the shared answer rules, and on Sonnet when the plan's limits allow.

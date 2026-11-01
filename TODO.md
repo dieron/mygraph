@@ -78,7 +78,11 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       ([MCP-TOOL-5]); agents on OpenAI models send them.
 - [ ] Agents sometimes send one 20+ KB `write` that arrives as invalid JSON; suggest smaller
       writes in the skill?
-- [ ] MuSiQue with citation grading; then LongMemEval and LoCoMo.
+- [x] MuSiQue in the same runner (`mygraph-agentbench musique`); 5 questions on Terra. Both modes
+      now share the answer rules: with `unknown` offered only to the graph agent, it abstained on
+      the 3- and 4-hop questions.
+- [ ] MuSiQue on 50 questions; HotpotQA again with the shared answer rules.
+- [ ] LongMemEval and LoCoMo.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 

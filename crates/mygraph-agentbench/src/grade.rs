@@ -3,8 +3,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-/// A supporting fact: passage title and sentence number.
-pub type Fact = (String, usize);
+/// A sentence: passage number and sentence number, both from 0.
+pub type Fact = (usize, usize);
 
 /// HotpotQA's `normalize_answer`: lower case, no punctuation, no articles, single spaces.
 pub fn normalize_answer(s: &str) -> String {
@@ -45,6 +45,40 @@ pub fn answer_scores(pred: &str, gold: &str) -> (f64, f64, f64, f64) {
     let prec = same as f64 / p.split_whitespace().count() as f64;
     let rec = same as f64 / g.split_whitespace().count() as f64;
     (em, 2.0 * prec * rec / (prec + rec), prec, rec)
+}
+
+/// The best answer scores against any of the accepted answers (MuSiQue lists aliases).
+pub fn best_answer_scores(pred: &str, golds: &[String]) -> (f64, f64, f64, f64) {
+    golds
+        .iter()
+        .map(|g| answer_scores(pred, g))
+        .fold((0.0, 0.0, 0.0, 0.0), |best, s| {
+            if (s.1, s.0) > (best.1, best.0) {
+                s
+            } else {
+                best
+            }
+        })
+}
+
+/// Splits a paragraph into sentences after `.`, `!` or `?` followed by a space and a capital
+/// letter, digit or quote; the space starts the next sentence, so the parts join back to the text.
+pub fn split_sentences(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for i in 1..chars.len().saturating_sub(1) {
+        let next = chars[i + 1];
+        if chars[i] == ' '
+            && matches!(chars[i - 1], '.' | '!' | '?')
+            && (next.is_uppercase() || next.is_ascii_digit() || next == '"')
+        {
+            out.push(chars[start..i].iter().collect());
+            start = i;
+        }
+    }
+    out.push(chars[start..].iter().collect());
+    out
 }
 
 /// Set exact match and (F1, precision, recall), as HotpotQA's `update_sp`.
@@ -101,14 +135,12 @@ pub struct Sentences {
 }
 
 impl Sentences {
-    pub fn new(context: &[(String, Vec<String>)]) -> Self {
-        let all = context
-            .iter()
-            .flat_map(|(t, ss)| {
-                ss.iter()
-                    .enumerate()
-                    .map(move |(i, s)| ((t.clone(), i), words(s)))
-            })
+    /// From each passage's sentences, in passage order.
+    pub fn new<'a>(passages: impl IntoIterator<Item = &'a [String]>) -> Self {
+        let all = passages
+            .into_iter()
+            .enumerate()
+            .flat_map(|(p, ss)| ss.iter().enumerate().map(move |(i, s)| ((p, i), words(s))))
             .filter(|(_, w)| !w.trim().is_empty())
             .collect();
         Sentences { all }
@@ -129,14 +161,14 @@ impl Sentences {
                     || (fw >= 3 && s.contains(f.as_str()))
                     || (s.split_whitespace().count() >= 5 && in_order(s, &f) >= 0.85)
             })
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| *k)
             .collect();
         if out.is_empty() && fw >= 5 {
             out = self
                 .all
                 .iter()
                 .filter(|(_, s)| in_order(&f, s) >= 0.85)
-                .map(|(k, _)| k.clone())
+                .map(|(k, _)| *k)
                 .collect();
         }
         out
@@ -169,17 +201,14 @@ mod tests {
 
     #[test]
     fn quotes_map_to_sentences() {
-        let ctx = vec![(
-            "Ada".to_owned(),
-            vec![
-                "Ada Lovelace was an English mathematician.".to_owned(),
-                " She worked on the Analytical Engine, a proposed computer.".to_owned(),
-            ],
-        )];
-        let s = Sentences::new(&ctx);
-        let both: BTreeSet<Fact> = [("Ada".into(), 0), ("Ada".into(), 1)].into();
-        let first: BTreeSet<Fact> = [("Ada".into(), 0)].into();
-        let second: BTreeSet<Fact> = [("Ada".into(), 1)].into();
+        let ctx = [vec![
+            "Ada Lovelace was an English mathematician.".to_owned(),
+            " She worked on the Analytical Engine, a proposed computer.".to_owned(),
+        ]];
+        let s = Sentences::new(ctx.iter().map(Vec::as_slice));
+        let both: BTreeSet<Fact> = [(0, 0), (0, 1)].into();
+        let first: BTreeSet<Fact> = [(0, 0)].into();
+        let second: BTreeSet<Fact> = [(0, 1)].into();
         // The whole passage, one sentence, part of one, a lightly edited quote.
         assert_eq!(
             s.matching("Ada Lovelace was an English mathematician. She worked on the Analytical Engine, a proposed computer."),
@@ -196,17 +225,31 @@ mod tests {
         );
         assert!(s.matching("an English").is_empty());
         // A quote that repairs the dataset's text still counts, next to verbatim sentences.
-        let ctx = vec![(
-            "Peter Cushing".to_owned(),
-            vec![
-                "Peter Cushing (26 May 191311 August 1994) was an English actor.".to_owned(),
-                " He is mainly known for his appearances in Hammer Films.".to_owned(),
-            ],
-        )];
-        let s = Sentences::new(&ctx);
+        let ctx = [vec![
+            "Peter Cushing (26 May 191311 August 1994) was an English actor.".to_owned(),
+            " He is mainly known for his appearances in Hammer Films.".to_owned(),
+        ]];
+        let s = Sentences::new(ctx.iter().map(Vec::as_slice));
         assert_eq!(
             s.matching("Peter Cushing (26 May 1913 – 11 August 1994) was an English actor. He is mainly known for his appearances in Hammer Films."),
-            [("Peter Cushing".into(), 0), ("Peter Cushing".into(), 1)].into()
+            [(0, 0), (0, 1)].into()
         );
+    }
+
+    #[test]
+    fn paragraphs_split_into_sentences_that_join_back() {
+        let t = "Green is an album by Steve Hillage. It was released in 1978 by Virgin. \"Musick\"                  followed! Was it 3.5 hours long? 1999 came.";
+        let ss = split_sentences(t);
+        assert_eq!(ss.concat(), t);
+        assert_eq!(ss.len(), 5, "{ss:?}");
+        assert_eq!(ss[1], " It was released in 1978 by Virgin.");
+        assert_eq!(split_sentences("One."), vec!["One."]);
+    }
+
+    #[test]
+    fn aliases_count_as_answers() {
+        let golds = ["Miquette Giraudy".to_owned(), "Giraudy".to_owned()];
+        assert_eq!(best_answer_scores("Giraudy", &golds).0, 1.0);
+        assert_eq!(best_answer_scores("Steve", &golds).1, 0.0);
     }
 }

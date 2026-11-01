@@ -1,14 +1,18 @@
-//! HotpotQA, distractor setting (docs/11-benchmarks.md §3). Two ways to answer each question:
+//! Multi-hop question answering over given passages: HotpotQA (distractor setting) and MuSiQue
+//! (docs/11-benchmarks.md §3). Two ways to answer each question:
 //!
-//! - `graph`: one agent records the ten passages in a fresh MyGraph graph without seeing the
+//! - `graph`: one agent records the passages in a fresh MyGraph graph without seeing the
 //!   question; a second agent, with a new context, gets only the question and answers from the
 //!   graph, citing evidence IDs. Each cited evidence's text is mapped back to the passages'
 //!   sentences, which are graded against the supporting facts.
 //! - `direct`: the same model reads the passages in its prompt and names the supporting sentences
 //!   (the usual reader setting, as a reference).
+//!
+//! Supporting facts are graded where the dataset marks them: sentences for HotpotQA, paragraphs
+//! for MuSiQue. Passage-level scores are reported for both.
 
 use crate::agent::{Agent, Result, Run, last_json_with, read_transcript};
-use crate::grade::{Fact, Sentences, answer_scores, set_scores};
+use crate::grade::{Fact, Sentences, best_answer_scores, set_scores, split_sentences};
 use mygraph_core::engine::Graph;
 use mygraph_core::ids::ObjectKind;
 use mygraph_core::model::{Policies, Status, id_string};
@@ -18,6 +22,7 @@ use parquet::record::Field;
 use serde_json::{Map, Value as Json, json};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -26,18 +31,52 @@ const SKILL_WRITE: &str = include_str!("../../../skills/mygraph/references/write
 const SKILL_QUERY: &str = include_str!("../../../skills/mygraph/references/query.md");
 const GRAPH: &str = "default";
 
+#[derive(Clone, Copy)]
+pub enum Dataset {
+    Hotpot,
+    Musique,
+}
+
+pub struct Passage {
+    pub title: String,
+    /// Joined, the passage's text.
+    pub sentences: Vec<String>,
+}
+
 pub struct Question {
     pub id: String,
     pub question: String,
-    pub answer: String,
-    /// `bridge` or `comparison`.
+    /// The answer, then accepted aliases.
+    pub answers: Vec<String>,
+    /// HotpotQA: `bridge` or `comparison`; MuSiQue: `2hop`, `3hop` or `4hop`.
     pub kind: String,
-    pub supporting: BTreeSet<Fact>,
-    /// Passages: title and sentences.
-    pub context: Vec<(String, Vec<String>)>,
+    pub passages: Vec<Passage>,
+    /// Supporting sentences, where the dataset marks them (HotpotQA).
+    pub supporting_sentences: Option<BTreeSet<Fact>>,
+    pub supporting_passages: BTreeSet<usize>,
+}
+
+impl Question {
+    /// The supporting facts graded as `sp_*`: sentences where known, else passages (as sentence
+    /// sets are compared, a passage is written `(passage, 0)`).
+    fn supporting(&self) -> BTreeSet<Fact> {
+        self.supporting_sentences
+            .clone()
+            .unwrap_or_else(|| self.supporting_passages.iter().map(|p| (*p, 0)).collect())
+    }
+
+    /// `facts` at the granularity of [`Question::supporting`].
+    fn graded(&self, facts: &BTreeSet<Fact>) -> BTreeSet<Fact> {
+        if self.supporting_sentences.is_some() {
+            facts.clone()
+        } else {
+            facts.iter().map(|(p, _)| (*p, 0)).collect()
+        }
+    }
 }
 
 pub struct Options {
+    pub dataset: Dataset,
     pub data: PathBuf,
     pub out: PathBuf,
     pub questions: usize,
@@ -48,6 +87,8 @@ pub struct Options {
     pub agent: Agent,
     /// Grade the transcripts and graphs of an earlier run again instead of running agents.
     pub regrade: bool,
+    /// Keep the graphs of an earlier run and run only the answering agents again.
+    pub reanswer: bool,
 }
 
 impl Options {
@@ -68,38 +109,82 @@ impl Options {
     }
 }
 
+fn strs(v: &Json) -> Vec<String> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| s.as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
 /// The rows of the Hugging Face `hotpotqa/hotpot_qa` parquet file (config `distractor`).
-pub fn load(path: &Path) -> Result<Vec<Question>> {
+pub fn load_hotpot(path: &Path) -> Result<Vec<Question>> {
     let reader = SerializedFileReader::new(fs::File::open(path)?)?;
     let mut out = Vec::new();
     for row in reader.get_row_iter(None)? {
         let row = to_json(&Field::Group(row?));
-        let strs = |v: &Json| -> Vec<String> {
-            v.as_array()
-                .into_iter()
-                .flatten()
-                .map(|s| s.as_str().unwrap_or_default().to_owned())
-                .collect()
-        };
-        let sf = &row["supporting_facts"];
-        let supporting = strs(&sf["title"])
-            .into_iter()
-            .zip(sf["sent_id"].as_array().into_iter().flatten())
-            .map(|(t, i)| (t, i.as_u64().unwrap_or(0) as usize))
-            .collect();
         let ctx = &row["context"];
-        let context = strs(&ctx["title"])
+        let passages: Vec<Passage> = strs(&ctx["title"])
             .into_iter()
             .zip(ctx["sentences"].as_array().into_iter().flatten())
-            .map(|(t, ss)| (t, strs(ss)))
+            .map(|(title, ss)| Passage {
+                title,
+                sentences: strs(ss),
+            })
+            .collect();
+        // Titles are unique within a HotpotQA question.
+        let number = |t: &str| passages.iter().position(|p| p.title == t);
+        let sf = &row["supporting_facts"];
+        let sentences: BTreeSet<Fact> = strs(&sf["title"])
+            .iter()
+            .zip(sf["sent_id"].as_array().into_iter().flatten())
+            .filter_map(|(t, i)| Some((number(t)?, i.as_u64()? as usize)))
             .collect();
         out.push(Question {
             id: row["id"].as_str().unwrap_or_default().to_owned(),
             question: row["question"].as_str().unwrap_or_default().to_owned(),
-            answer: row["answer"].as_str().unwrap_or_default().to_owned(),
+            answers: vec![row["answer"].as_str().unwrap_or_default().to_owned()],
             kind: row["type"].as_str().unwrap_or_default().to_owned(),
-            supporting,
-            context,
+            supporting_passages: sentences.iter().map(|(p, _)| *p).collect(),
+            supporting_sentences: Some(sentences),
+            passages,
+        });
+    }
+    Ok(out)
+}
+
+/// The lines of MuSiQue's `musique_ans_v1.0_dev.jsonl` (answerable questions; paragraphs are split
+/// into sentences here, as MuSiQue marks only supporting paragraphs).
+pub fn load_musique(path: &Path) -> Result<Vec<Question>> {
+    let mut out = Vec::new();
+    for line in std::io::BufReader::new(fs::File::open(path)?).lines() {
+        let row: Json = serde_json::from_str(&line?)?;
+        if row["answerable"] == false {
+            continue;
+        }
+        let paragraphs = row["paragraphs"].as_array().cloned().unwrap_or_default();
+        let id = row["id"].as_str().unwrap_or_default().to_owned();
+        let mut answers = vec![row["answer"].as_str().unwrap_or_default().to_owned()];
+        answers.extend(strs(&row["answer_aliases"]));
+        out.push(Question {
+            kind: format!("{}hop", id.chars().next().unwrap_or('?')),
+            id,
+            question: row["question"].as_str().unwrap_or_default().to_owned(),
+            answers,
+            supporting_sentences: None,
+            supporting_passages: paragraphs
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p["is_supporting"] == true)
+                .map(|(i, _)| i)
+                .collect(),
+            passages: paragraphs
+                .iter()
+                .map(|p| Passage {
+                    title: p["title"].as_str().unwrap_or_default().to_owned(),
+                    sentences: split_sentences(p["paragraph_text"].as_str().unwrap_or_default()),
+                })
+                .collect(),
         });
     }
     Ok(out)
@@ -154,8 +239,8 @@ fn page_url(title: &str) -> String {
     u
 }
 
-fn passage_text(sentences: &[String]) -> String {
-    sentences.concat().trim().to_owned()
+fn passage_text(p: &Passage) -> String {
+    p.sentences.concat().trim().to_owned()
 }
 
 fn system_graph() -> String {
@@ -175,22 +260,32 @@ fn ingest_prompt(q: &Question) -> String {
          passages, can be answered from the graph alone and checked against the exact sentences. \
          Treat each passage as a web page at the URL given. When you are done, reply with one \
          line: done.\n",
-        q.context.len()
+        q.passages.len()
     );
-    for (t, ss) in &q.context {
-        p += &format!("\n## {t}\nURL: {}\n\n{}\n", page_url(t), passage_text(ss));
+    for passage in &q.passages {
+        p += &format!(
+            "\n## {}\nURL: {}\n\n{}\n",
+            passage.title,
+            page_url(&passage.title),
+            passage_text(passage)
+        );
     }
     p
 }
+
+/// The same in both modes: the answer's form, and when to say `unknown`.
+const ANSWER_RULES: &str = "The answer is as short as possible: a name, a date, a number, a short \
+     phrase, or yes or no. When the sources point to an answer without settling every detail, give \
+     the best-supported answer; answer \"unknown\" only when they hold nothing that answers the \
+     question.";
 
 fn answer_prompt(q: &Question) -> String {
     format!(
         "Answer the question below from what is recorded in MyGraph only, not from your own \
          knowledge, and cite the evidence behind the answer.\n\nQuestion: {}\n\nEnd your reply \
-         with one line of JSON: {{\"answer\": \"...\", \"evidence\": [\"e_...\"]}}. The answer is \
-         as short as possible: a name, a date, a number, a short phrase, or yes or no. \
+         with one line of JSON: {{\"answer\": \"...\", \"evidence\": [\"e_...\"]}}. \
          \"evidence\" lists the IDs of the evidence (the text fragments) that support each step \
-         of the reasoning. If the graph does not hold the answer, answer \"unknown\".",
+         of the reasoning. {ANSWER_RULES}",
         q.question
     )
 }
@@ -199,28 +294,28 @@ const SYSTEM_DIRECT: &str = "You answer questions from the passages you are give
 
 fn direct_prompt(q: &Question) -> String {
     let mut p = String::from("Passages:\n");
-    for (t, ss) in &q.context {
-        p += &format!("\n## {t}\n");
-        for (i, s) in ss.iter().enumerate() {
+    for (n, passage) in q.passages.iter().enumerate() {
+        p += &format!("\n## Passage {n}: {}\n", passage.title);
+        for (i, s) in passage.sentences.iter().enumerate() {
             p += &format!("[{i}] {}\n", s.trim());
         }
     }
     p += &format!(
-        "\nQuestion: {}\n\nEnd your reply with one line of JSON: {{\"answer\": \"...\", \
-         \"facts\": [[\"Passage title\", 0]]}}. The answer is as short as possible: a name, a \
-         date, a number, a short phrase, or yes or no. \"facts\" lists the sentences (passage \
-         title and sentence number) that support each step of the reasoning.",
+        "\nQuestion: {}\n\nAnswer from the passages only, not from your own knowledge. End your \
+         reply with one line of JSON: {{\"answer\": \"...\", \"facts\": [[0, 0]]}}. \"facts\" \
+         lists the sentences (passage number and sentence number) that support each step of the \
+         reasoning. {ANSWER_RULES}",
         q.question
     );
     p
 }
 
-/// Per-question scores for one mode.
+/// Per-question scores for one mode, from the answer and the sentences it cites.
 fn scores(q: &Question, answer: &str, facts: &BTreeSet<Fact>, run: &Run) -> Map<String, Json> {
-    let (em, f1, prec, rec) = answer_scores(answer, &q.answer);
-    let (sp_em, sp_f1, sp_prec, sp_rec) = set_scores(facts, &q.supporting);
-    let titles = |s: &BTreeSet<Fact>| s.iter().map(|(t, _)| t.clone()).collect::<BTreeSet<_>>();
-    let (_, title_f1, _, _) = set_scores(&titles(facts), &titles(&q.supporting));
+    let (em, f1, prec, rec) = best_answer_scores(answer, &q.answers);
+    let (sp_em, sp_f1, sp_prec, sp_rec) = set_scores(&q.graded(facts), &q.supporting());
+    let passages: BTreeSet<usize> = facts.iter().map(|(p, _)| *p).collect();
+    let (_, passage_f1, passage_prec, passage_rec) = set_scores(&passages, &q.supporting_passages);
     let (jp, jr) = (prec * sp_prec, rec * sp_rec);
     let joint_f1 = if jp + jr > 0.0 {
         2.0 * jp * jr / (jp + jr)
@@ -230,8 +325,9 @@ fn scores(q: &Question, answer: &str, facts: &BTreeSet<Fact>, run: &Run) -> Map<
     let m = json!({
         "answer": answer, "em": em, "f1": f1,
         "sp_em": sp_em, "sp_f1": sp_f1, "sp_prec": sp_prec, "sp_recall": sp_rec,
-        "title_f1": title_f1, "joint_em": em * sp_em, "joint_f1": joint_f1,
-        "facts": facts.iter().map(|(t, i)| json!([t, i])).collect::<Vec<_>>(),
+        "passage_f1": passage_f1, "passage_prec": passage_prec, "passage_recall": passage_rec,
+        "joint_em": em * sp_em, "joint_f1": joint_f1,
+        "facts": facts.iter().map(|(p, i)| json!([p, i])).collect::<Vec<_>>(),
         "unknown": answer.trim().eq_ignore_ascii_case("unknown"),
         "run": run.to_json(),
     });
@@ -245,7 +341,14 @@ fn run_direct(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|f| Some((f[0].as_str()?.to_owned(), f[1].as_u64()? as usize)))
+        .filter_map(|f| {
+            // Passage numbers; runs before they were numbered named the passage by title.
+            let p = f[0].as_u64().map(|p| p as usize).or_else(|| {
+                let t = f[0].as_str()?;
+                q.passages.iter().position(|p| p.title == t)
+            })?;
+            Some((p, f[1].as_u64()? as usize))
+        })
         .collect();
     Ok(scores(
         q,
@@ -258,7 +361,8 @@ fn run_direct(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>
 fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>> {
     // A graph left by an interrupted run is started over.
     let data = dir.join("data");
-    if !o.regrade {
+    let keep_graph = o.regrade || o.reanswer;
+    if !keep_graph {
         let _ = fs::remove_dir_all(&data);
         fs::create_dir_all(&data)?;
         let now = std::time::SystemTime::now()
@@ -272,13 +376,17 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
         ] } })
     };
     let system = system_graph();
-    let ingest = o.agent_run(
-        dir,
-        "ingest",
-        &system,
-        &ingest_prompt(q),
-        Some(&server("ingest-agent")),
-    )?;
+    let ingest = if keep_graph {
+        read_transcript(&dir.join("ingest.jsonl"))?
+    } else {
+        o.agent.run(
+            dir,
+            "ingest",
+            &system,
+            &ingest_prompt(q),
+            Some(&server("ingest-agent")),
+        )?
+    };
     let ans = o.agent_run(
         dir,
         "answer",
@@ -297,16 +405,11 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
     let file = GraphFile::open(&data, GRAPH)?;
     let policies = file.policies()?;
     let g = Graph::open(file, GRAPH, policies)?;
-    let sentences = Sentences::new(&q.context);
-    let urls: BTreeMap<String, String> = q
-        .context
-        .iter()
-        .map(|(t, _)| (page_url(t).to_lowercase(), t.clone()))
-        .collect();
-    // Every evidence in the graph: what it quotes, and the page it belongs to.
+    let sentences = Sentences::new(q.passages.iter().map(|p| p.sentences.as_slice()));
+    // Every evidence in the graph and the sentences it quotes.
     let st = g.state();
     let mut stored = BTreeSet::new();
-    let mut evidence: BTreeMap<String, (BTreeSet<Fact>, Option<String>)> = BTreeMap::new();
+    let mut evidence: BTreeMap<String, BTreeSet<Fact>> = BTreeMap::new();
     let ids: Vec<i64> = st
         .evidence
         .iter()
@@ -330,37 +433,26 @@ fn run_graph(o: &Options, q: &Question, dir: &Path) -> Result<Map<String, Json>>
                 .map(|c| sentences.matching(c))
                 .unwrap_or_default();
             stored.extend(facts.iter().cloned());
-            let e = &st.evidence[idx];
-            let page = [Some(*idx), e.parent]
-                .into_iter()
-                .flatten()
-                .filter_map(|i| st.evidence.get(&i)?.uri.as_ref())
-                .find_map(|u| urls.get(&u.to_lowercase()).cloned());
-            evidence.insert(id_string(ObjectKind::Evidence, *idx), (facts, page));
+            evidence.insert(id_string(ObjectKind::Evidence, *idx), facts);
         }
     }
     let mut facts = BTreeSet::new();
-    let mut pages = BTreeSet::new();
     let mut unknown_refs = Vec::new();
     for c in &cited {
         match evidence.get(c) {
-            Some((f, p)) => {
-                facts.extend(f.iter().cloned());
-                pages.extend(p.iter().cloned());
-            }
+            Some(f) => facts.extend(f.iter().cloned()),
             None => unknown_refs.push(c.clone()),
         }
     }
     let mut m = scores(q, reply["answer"].as_str().unwrap_or(""), &facts, &ans);
-    let gold_titles: BTreeSet<String> = q.supporting.iter().map(|(t, _)| t.clone()).collect();
-    let (_, page_f1, _, _) = set_scores(&pages, &gold_titles);
-    let total: usize = q.context.iter().map(|(_, ss)| ss.len()).sum();
+    let support = q.supporting();
+    let stored_graded = q.graded(&stored);
+    let total: usize = q.passages.iter().map(|p| p.sentences.len()).sum();
     m.insert("cited".into(), json!(cited));
     m.insert("cited_unknown".into(), json!(unknown_refs));
-    m.insert("cited_page_f1".into(), page_f1.into());
     m.insert(
         "supporting_stored".into(),
-        (q.supporting.intersection(&stored).count() as f64 / q.supporting.len() as f64).into(),
+        (support.intersection(&stored_graded).count() as f64 / support.len().max(1) as f64).into(),
     );
     m.insert(
         "sentences_stored".into(),
@@ -400,7 +492,7 @@ fn summarize(results: &[Json], mode: &str) -> Json {
         "em": metric("em"), "f1": metric("f1"),
         "sp_em": metric("sp_em"), "sp_f1": metric("sp_f1"),
         "sp_prec": metric("sp_prec"), "sp_recall": metric("sp_recall"),
-        "title_f1": metric("title_f1"),
+        "passage_f1": metric("passage_f1"),
         "joint_em": metric("joint_em"), "joint_f1": metric("joint_f1"),
         "unknown": rs.iter().filter(|r| r["unknown"] == true).count(),
         "errors": rs.iter().filter(|r| !r["run"]["error"].is_null()).count(),
@@ -411,7 +503,6 @@ fn summarize(results: &[Json], mode: &str) -> Json {
     if mode == "graph" {
         let ingest = |k: &'static str| mean(&rs, move |r| r["ingest"][k].as_f64());
         let graph = |k: &'static str| mean(&rs, move |r| r["graph"][k].as_f64());
-        s["cited_page_f1"] = metric("cited_page_f1");
         s["supporting_stored"] = metric("supporting_stored");
         s["sentences_stored"] = metric("sentences_stored");
         s["ingest"] = json!({
@@ -424,8 +515,9 @@ fn summarize(results: &[Json], mode: &str) -> Json {
             "evidence": graph("evidence"), "citations": graph("citations"),
         });
     }
+    let kinds: BTreeSet<&str> = results.iter().filter_map(|r| r["type"].as_str()).collect();
     let mut by_kind = Map::new();
-    for kind in ["bridge", "comparison"] {
+    for kind in kinds {
         let k: Vec<&Json> = results
             .iter()
             .filter(|r| r["type"] == kind && r[mode].is_object())
@@ -446,7 +538,10 @@ fn summarize(results: &[Json], mode: &str) -> Json {
 }
 
 pub fn run(o: &Options) -> Result<Json> {
-    let all = load(&o.data)?;
+    let all = match o.dataset {
+        Dataset::Hotpot => load_hotpot(&o.data)?,
+        Dataset::Musique => load_musique(&o.data)?,
+    };
     let total = all.len();
     let qs = sample(all, o.questions, o.seed);
     fs::create_dir_all(&o.out)?;
@@ -510,29 +605,32 @@ pub fn run(o: &Options) -> Result<Json> {
 fn run_question(o: &Options, q: &Question) -> Result<Json> {
     let dir = o.out.join(format!("q-{}", q.id));
     let file = dir.join("result.json");
+    let facts = |s: &BTreeSet<Fact>| s.iter().map(|(p, i)| json!([p, i])).collect::<Vec<_>>();
     let mut r = match fs::read_to_string(&file) {
         Ok(s) => serde_json::from_str(&s)?,
         Err(_) => json!({
-            "id": q.id, "type": q.kind, "question": q.question, "gold": q.answer,
-            "supporting": q.supporting.iter().map(|(t, i)| json!([t, i])).collect::<Vec<_>>(),
+            "id": q.id, "type": q.kind, "question": q.question, "gold": q.answers,
+            "supporting": facts(&q.supporting()),
         }),
     };
     fs::create_dir_all(&dir)?;
     // The passages, for reading transcripts and checking the grading.
     let passages: Vec<Json> = q
-        .context
+        .passages
         .iter()
-        .map(|(t, ss)| json!({ "title": t, "url": page_url(t), "sentences": ss }))
+        .map(|p| json!({ "title": p.title, "url": page_url(&p.title), "sentences": p.sentences }))
         .collect();
     fs::write(
         dir.join("question.json"),
         serde_json::to_string_pretty(&json!({
-            "id": q.id, "question": q.question, "answer": q.answer, "type": q.kind,
-            "supporting": r["supporting"], "passages": passages,
+            "id": q.id, "question": q.question, "answers": q.answers, "type": q.kind,
+            "supporting_passages": q.supporting_passages,
+            "supporting_sentences": q.supporting_sentences.as_ref().map(facts),
+            "passages": passages,
         }))?,
     )?;
     for m in &o.modes {
-        if r[m].is_object() && !o.regrade {
+        if r[m].is_object() && !o.regrade && !o.reanswer {
             continue;
         }
         let scored = match m.as_str() {
@@ -575,5 +673,24 @@ mod tests {
             page_url("Café #1?"),
             "https://en.wikipedia.org/wiki/Caf%C3%A9_%231%3F"
         );
+    }
+
+    #[test]
+    fn musique_support_is_graded_by_passage() {
+        let q = Question {
+            id: "2hop__1_2".into(),
+            question: "?".into(),
+            answers: vec!["x".into()],
+            kind: "2hop".into(),
+            passages: Vec::new(),
+            supporting_sentences: None,
+            supporting_passages: [1, 4].into(),
+        };
+        let cited: BTreeSet<Fact> = [(1, 0), (1, 2), (4, 1), (7, 0)].into();
+        let m = scores(&q, "x", &cited, &Run::default());
+        assert_eq!(m["sp_recall"], 1.0);
+        assert!((m["sp_prec"].as_f64().unwrap() - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(m["passage_recall"], 1.0);
+        assert_eq!(m["em"], 1.0);
     }
 }
