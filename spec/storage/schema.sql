@@ -1,8 +1,8 @@
 -- =====================================================================================
--- MyGraph storage format, version 1                          spec 0.1.0-draft · Draft
+-- MyGraph storage format, version 2                          spec 0.1.0-draft · Draft
 --
 -- NORMATIVE. This file is the complete schema of one graph database file. It is equal to
--- applying spec/storage/migrations/ in order (currently only 0001_init.sql).
+-- applying spec/storage/migrations/ in order (0001_init.sql, 0002_stemming.sql).
 -- Comments marked [STORE-…] are normative rules; other comments are informative.
 -- Column encodings not yet detailed here (change-log diff format, derivation of the
 -- full-text columns) are specified in storage/storage-format.md (planned, M1).
@@ -32,11 +32,11 @@
 --                listed are invalid.
 
 PRAGMA application_id = 1297696594;   -- 0x4D594752 "MYGR"
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 -- -------------------------------------------------------------------------------------
 -- Graph metadata
--- [STORE-META-1] Required rows: format = 'mygraph', format_version = '1' (inserted below),
+-- [STORE-META-1] Required rows: format = 'mygraph', format_version = '2' (inserted below),
 --                and, written when the graph is created: graph_name, created_at (decimal
 --                milliseconds), spec_version (of the creating implementation), policies (JSON
 --                object: require_evidence, inline_text_limit, naming; older files: normalize_types).
@@ -47,7 +47,7 @@ CREATE TABLE meta (
   v TEXT NOT NULL
 ) WITHOUT ROWID;
 
-INSERT INTO meta (k, v) VALUES ('format', 'mygraph'), ('format_version', '1');
+INSERT INTO meta (k, v) VALUES ('format', 'mygraph'), ('format_version', '2');
 
 -- -------------------------------------------------------------------------------------
 -- Actors and batches
@@ -267,11 +267,12 @@ CREATE INDEX changelog_batch ON changelog (batch);
 -- [STORE-FTS-3] fts_evidence is an external-content table over evidence(title, content):
 --               its rows are inserted with the evidence and re-indexed when title changes.
 -- [STORE-FTS-4] Tokenizer settings below are part of the format; changing them requires a new
---               storage format version.
+--               storage format version. Since version 2 the word tables stem English words
+--               (`porter`), and queries are stemmed the same way (search-ranking.md, RANK-6).
 -- -------------------------------------------------------------------------------------
 CREATE VIRTUAL TABLE fts_node USING fts5 (
   name, aliases, summary, props_text,
-  tokenize = 'unicode61 remove_diacritics 2',
+  tokenize = 'porter unicode61 remove_diacritics 2',
   prefix = '2 3'
 );
 
@@ -282,11 +283,11 @@ CREATE VIRTUAL TABLE fts_name USING fts5 (       -- fuzzy and substring matching
 
 CREATE VIRTUAL TABLE fts_link USING fts5 (
   type_text, props_text,
-  tokenize = 'unicode61 remove_diacritics 2'
+  tokenize = 'porter unicode61 remove_diacritics 2'
 );
 
 CREATE VIRTUAL TABLE fts_evidence USING fts5 (
   title, content,
   content = 'evidence', content_rowid = 'idx',
-  tokenize = 'unicode61 remove_diacritics 2'
+  tokenize = 'porter unicode61 remove_diacritics 2'
 );

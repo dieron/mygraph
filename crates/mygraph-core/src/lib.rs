@@ -35,4 +35,4 @@ pub use reason::Reason;
 pub const SPEC_VERSION: &str = include_str!("../../../spec/VERSION").trim_ascii();
 
 /// Storage format version this build reads and writes (`spec/storage/schema.sql`).
-pub const STORAGE_FORMAT_VERSION: u32 = 1;
+pub const STORAGE_FORMAT_VERSION: u32 = 2;

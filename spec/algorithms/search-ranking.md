@@ -43,7 +43,11 @@ text hits the full-text engine returned, in its relevance order (BM25 for SQLite
 
 **[RANK-6]** The **full-text query** is built from the raw query text: split it into tokens, each a
 maximal run of letters (L*), marks (M*) and numbers (N*); all tokens must match (AND), and the last
-token also matches as a prefix of a word. No tokens → no text hits. Implementations may rank documents that contain the
+token also matches as a prefix of a word. Words of the query and of the texts are compared
+lowercased, with diacritics removed and English words reduced to their stem, so other forms of a
+word match ("clothing" finds "clothes", "opened" finds "open"); the stored tables use FTS5's
+`porter` stemmer ([STORE-FTS-4]), and a derived index may use another English stemmer that agrees
+on common words. Prefixes are matched against stems. No tokens → no text hits. Implementations may rank documents that contain the
 whole last word before documents that only contain a longer word starting with it. Evidence and links are found
 only by full text: evidence by `title` and `content`, links by their type (with `_` read as a
 space) and string properties.

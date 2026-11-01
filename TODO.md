@@ -92,8 +92,11 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       96.5 % of evidence messages stored; losses in search, hedged dates and lists across
       sessions; $3.60.
 - [ ] LoCoMo on all 10 conversations (about $80–100 with `direct`).
-- [ ] Text search: match word forms (stemming). In the LoCoMo pilot a stored message ("clothes
-      store is open") was missed by searches for "clothing store" and "store opened".
+- [x] Text search matches word forms (English stemming, storage format 2 with migration 0002;
+      the tantivy index rebuilds itself). In the LoCoMo pilot a stored message ("clothes store is
+      open") was missed by searches for "clothing store" and "store opened".
+- [ ] Rerun the LoCoMo pilot's graph answers with stemming (`--reanswer` needs a reingest:
+      the pilot's graph is format 1 and migrates on open).
 - [ ] LongMemEval (a sample first).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).

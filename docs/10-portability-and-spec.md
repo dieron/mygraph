@@ -62,8 +62,9 @@ spec/
     pagination.md            cursor format guarantees and stability
   storage/
     storage-format.md        column encodings, FTS sync rules, change-log diff format, blob layout
-    schema.sql               storage format v1 (normative)
+    schema.sql               storage format v2 (normative)
     migrations/0001_init.sql
+    migrations/0002_stemming.sql
 conformance/
   README.md                  how to run the suite against any implementation (base URL + API key)
   vectors/                   pure-function test vectors (JSON): ids, normalization, dates, casing, ranking

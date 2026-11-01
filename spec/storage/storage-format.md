@@ -1,6 +1,6 @@
 # Storage format details
 
-Status: **Draft** · spec 0.1.0-draft · storage format version 1
+Status: **Draft** · spec 0.1.0-draft · storage format version 2
 
 Completes [schema.sql](schema.sql): how API values map to columns, how the full-text tables are
 kept in sync, the change-log diff format, the blob store and the data directory.

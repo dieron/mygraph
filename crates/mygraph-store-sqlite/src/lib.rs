@@ -1,4 +1,4 @@
-//! Storage format v1 on SQLite — spec/storage/schema.sql and spec/storage/storage-format.md.
+//! Storage format v2 on SQLite — spec/storage/schema.sql and spec/storage/storage-format.md.
 //!
 //! Opens and creates graph files; `records.rs` implements the engine's `Store` trait.
 
@@ -19,10 +19,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 pub const APPLICATION_ID: i32 = 0x4D59_4752;
 
 /// Migrations in order: (format version reached, SQL). The SQL files are the spec's own.
-const MIGRATIONS: &[(u32, &str)] = &[(
-    1,
-    include_str!("../../../spec/storage/migrations/0001_init.sql"),
-)];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (
+        1,
+        include_str!("../../../spec/storage/migrations/0001_init.sql"),
+    ),
+    (
+        2,
+        include_str!("../../../spec/storage/migrations/0002_stemming.sql"),
+    ),
+];
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -306,11 +312,11 @@ mod tests {
 
         let g = GraphFile::open(dir.path(), "research").unwrap();
         assert_eq!(g.meta("format").unwrap().as_deref(), Some("mygraph"));
-        assert_eq!(g.meta("format_version").unwrap().as_deref(), Some("1"));
+        assert_eq!(g.meta("format_version").unwrap().as_deref(), Some("2"));
         assert_eq!(g.meta("graph_name").unwrap().as_deref(), Some("research"));
         assert_eq!(g.meta("created_at").unwrap(), Some(NOW.to_string()));
         assert_eq!(g.policies().unwrap(), policies);
-        assert_eq!(g.format_version().unwrap(), 1);
+        assert_eq!(g.format_version().unwrap(), 2);
         let mode: String = g
             .connection()
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
@@ -405,8 +411,59 @@ mod tests {
             GraphFile::open(dir.path(), "newer"),
             Err(StoreError::TooNew {
                 found: 99,
-                supported: 1
+                supported: 2
             })
         ));
+    }
+
+    /// A version-1 file opens as version 2: its full-text rows are carried over and now match
+    /// other word forms ([STORE-FTS-4]).
+    #[test]
+    fn version_1_files_are_upgraded_to_stemmed_full_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = graph_path(dir.path(), "old");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(MIGRATIONS[0].1).unwrap();
+            c.execute_batch(
+                "INSERT INTO meta (k, v) VALUES ('graph_name', 'old'), ('created_at', '1'),
+                   ('spec_version', '0.1.0-draft'), ('policies', '{}');
+                 INSERT INTO fts_node (rowid, name, aliases, summary, props_text)
+                   VALUES (7, 'Gina''s clothes store', NULL, NULL, NULL);
+                 INSERT INTO fts_link (rowid, type_text, props_text) VALUES (3, 'OPENED', NULL);
+                 INSERT INTO actor (idx, name, kind, created_at) VALUES (1, 'test', 'agent', 1);
+                 INSERT INTO evidence (idx, kind, content, content_sha256, captured_at,
+                   created_at, created_by, updated_at, updated_by)
+                   VALUES (5, 'text', 'My online clothes store is open!', printf('%064d', 0),
+                     1, 1, 1, 1, 1);
+                 INSERT INTO fts_evidence (rowid, title, content)
+                   VALUES (5, NULL, 'My online clothes store is open!');",
+            )
+            .unwrap();
+        }
+        let g = GraphFile::open(dir.path(), "old").unwrap();
+        assert_eq!(g.format_version().unwrap(), 2);
+        assert_eq!(g.meta("format_version").unwrap().as_deref(), Some("2"));
+        let hits = |sql: &str| -> Vec<i64> {
+            let c = g.connection();
+            let mut st = c.prepare(sql).unwrap();
+            st.query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(
+            hits("SELECT rowid FROM fts_node WHERE fts_node MATCH 'clothing'"),
+            vec![7]
+        );
+        assert_eq!(
+            hits("SELECT rowid FROM fts_link WHERE fts_link MATCH 'opens'"),
+            vec![3]
+        );
+        assert_eq!(
+            hits("SELECT rowid FROM fts_evidence WHERE fts_evidence MATCH 'clothing opened'"),
+            vec![5]
+        );
     }
 }

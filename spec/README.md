@@ -1,6 +1,6 @@
 # MyGraph specification
 
-Spec version: see [VERSION](VERSION) (`0.1.0-draft`) · storage format version: `1`
+Spec version: see [VERSION](VERSION) (`0.1.0-draft`) · storage format version: `2`
 
 This folder is the **normative definition** of MyGraph: what any implementation, in any language,
 must do and store. It never refers to a particular implementation. Rationale and design history

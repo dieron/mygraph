@@ -5,8 +5,9 @@
 //! the change-log sequence number it is complete up to. Documents are searchable as soon as they
 //! are indexed; commits (slow: segment files and fsync) are batched by the caller, and until then
 //! recent documents are matched from memory. Tokenizing approximates the FTS5
-//! `unicode61 remove_diacritics` tables: words of letters and digits, lowercased, diacritics
-//! folded.
+//! `porter unicode61 remove_diacritics` tables: words of letters and digits, lowercased,
+//! diacritics folded, English words stemmed (Snowball English here, Porter in FTS5; they agree on
+//! common words).
 
 use mygraph_core::store::{StoreFailure, TextDoc, TextHit, TextIndex, TextTarget};
 use std::collections::{HashMap, HashSet};
@@ -18,11 +19,15 @@ use tantivy::schema::{
     Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions,
 };
 use tantivy::tokenizer::{
-    AsciiFoldingFilter, LowerCaser, RemoveLongFilter, SimpleTokenizer, TextAnalyzer,
+    AsciiFoldingFilter, Language, LowerCaser, RemoveLongFilter, SimpleTokenizer, Stemmer,
+    TextAnalyzer,
 };
 use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
-const TOKENIZER: &str = "mygraph";
+/// The analyzer's name is part of the schema: a new name for a new way of tokenizing makes
+/// [`TantivyText::open`] replace an index built the old way, and the engine rebuilds it from the
+/// records. `mygraph` was the analyzer without stemming.
+const TOKENIZER: &str = "mygraph-stem";
 /// Bytes of RAM the writer may buffer before flushing a segment.
 const WRITER_BUFFER: usize = 128 * 1024 * 1024;
 /// Indexing commits by itself when this many documents are pending.
@@ -89,6 +94,7 @@ fn analyzer() -> TextAnalyzer {
         .filter(RemoveLongFilter::limit(64))
         .filter(LowerCaser)
         .filter(AsciiFoldingFilter)
+        .filter(Stemmer::new(Language::English))
         .build()
 }
 
@@ -460,6 +466,60 @@ mod tests {
         let t = TantivyText::open(dir.path(), "g").unwrap();
         assert_eq!(t.applied_seq(), Some(8));
         assert_eq!(ids(&t, TextTarget::Nodes, &["darwin"]), vec![1]);
+    }
+
+    #[test]
+    fn other_word_forms_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        t.index(
+            vec![doc(
+                TextTarget::Evidence,
+                1,
+                "My online clothes store is open!",
+            )],
+            1,
+        )
+        .unwrap();
+        for commit in [false, true] {
+            if commit {
+                t.commit().unwrap();
+            }
+            assert_eq!(
+                ids(&t, TextTarget::Evidence, &["clothing", "store"]),
+                vec![1]
+            );
+            assert_eq!(ids(&t, TextTarget::Evidence, &["store", "opened"]), vec![1]);
+            assert_eq!(ids(&t, TextTarget::Evidence, &["stores"]), vec![1]);
+        }
+    }
+
+    #[test]
+    fn an_index_built_without_stemming_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            // An index as the previous analyzer named it.
+            let path = index_dir(dir.path(), "g");
+            std::fs::create_dir_all(&path).unwrap();
+            let mut sb = Schema::builder();
+            sb.add_u64_field("key", NumericOptions::default().set_indexed().set_fast());
+            let options = TextOptions::default().set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("mygraph")
+                    .set_index_option(IndexRecordOption::WithFreqs),
+            );
+            for name in ["text_nodes", "text_links", "text_evidence"] {
+                sb.add_text_field(name, options.clone());
+            }
+            let index = Index::create_in_dir(&path, sb.build()).unwrap();
+            let mut writer: IndexWriter<TantivyDocument> = index.writer(15_000_000).unwrap();
+            let mut prepared = writer.prepare_commit().unwrap();
+            prepared.set_payload("42");
+            prepared.commit().unwrap();
+        }
+        // Nothing applied: the engine rebuilds it from the records.
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        assert_eq!(t.applied_seq(), None);
     }
 
     #[test]

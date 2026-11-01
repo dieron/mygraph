@@ -28,7 +28,7 @@ swappable, and lets us pick the easiest correct option for the PoC.
 | Get by ID / key | In-RAM hash maps (key → internal index), dense `Vec` of records | — |
 | Exact name / alias (case- and accent-insensitive) | In-RAM hash map: normalized name → node indexes | — |
 | Prefix and fuzzy (typos) on names | SQLite FTS5 with the `trigram` tokenizer | `fst` crate: Levenshtein automata over a sorted name set, rebuilt in background, plus a small delta map for recent writes |
-| Full-text (words, BM25 ranking) over names, summaries, string properties, evidence text | SQLite **FTS5** (`unicode61` tokenizer, remove diacritics), transactional with the data | **tantivy** if FTS5 misses targets: richer scoring, faster on large corpora, but near-real-time and a second store to keep in sync |
+| Full-text (words, BM25 ranking) over names, summaries, string properties, evidence text | SQLite **FTS5** (`porter` stemming over the `unicode61` tokenizer, remove diacritics; stemming since storage format 2), transactional with the data | **tantivy** if FTS5 misses targets: richer scoring, faster on large corpora, but near-real-time and a second store to keep in sync |
 | Neighbourhood, k-hop, paths | In-RAM adjacency lists (out / in per node, undirected links in both) | Compressed sparse row (CSR) base + delta for very large graphs |
 | Filter by type / label | In-RAM roaring bitmaps: type → node set, link type → link set | — |
 | Property filters | Scan of the type-filtered set (RAM, parallel with rayon) | Per-property sorted indexes, created on demand or automatically for hot properties |
@@ -153,9 +153,9 @@ CREATE TABLE meta      (k TEXT PRIMARY KEY, v TEXT);        -- schema version, g
 
 -- Full-text (external-content FTS5 tables kept in sync by the engine in the same transaction)
 CREATE VIRTUAL TABLE fts_node     USING fts5(name, aliases, summary, props_text,
-                                             tokenize = 'unicode61 remove_diacritics 2');
+                                             tokenize = 'porter unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE fts_evidence USING fts5(title, content,
-                                             tokenize = 'unicode61 remove_diacritics 2');
+                                             tokenize = 'porter unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE fts_name_tri USING fts5(name, tokenize = 'trigram');
 ```
 
