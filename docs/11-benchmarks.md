@@ -500,10 +500,10 @@ through the crate's own loop; sentence-quote skill), next to Sonnet 5.5:
 7. **Agents use the tools differently.** Terra wrote in a dozen small batches, with no failed
    writes, and recorded more nodes; Sonnet sent one large write per question.
 8. **Terra fills every optional parameter**, e.g. `overview` with `"type": ""`. MyGraph took the
-   empty type as a type name and answered `ref.not_found`, so the agent had to retry. Empty
-   optional values should mean "not given".
+   empty type as a type name and answered `ref.not_found`, so the agent had to retry. **Fixed:**
+   empty top-level tool arguments now count as absent ([MCP-TOOL-5]).
 
 ### Then
 
 1. 50 questions with the sentence-quote skill, on both models, then MuSiQue (2–4 hop questions).
-2. Treat empty optional values in tool calls as absent.
+2. A second dataset in the same runner: MuSiQue.

@@ -137,6 +137,28 @@ async fn mcp_over_http() {
         text.contains("  -> WROTE_ABOUT n_2 Machine \"Analytical Engine\" (l_1)"),
         "{text}"
     );
+    // [MCP-TOOL-5] empty optional arguments, as some models send them.
+    let (err, text) = tool(
+        &r,
+        "overview",
+        json!({"type": "", "graph": "", "format": "", "recent": null}),
+    )
+    .await;
+    assert!(!err && text.starts_with("graph research"), "{text}");
+    let (err, text) = tool(
+        &r,
+        "search",
+        json!({"query": "Ada", "types": [], "in": [], "include": {}}),
+    )
+    .await;
+    assert!(
+        !err && text.contains("n_1 Person \"Ada Lovelace\""),
+        "{text}"
+    );
+    let (err, text) = tool(&r, "graphs", json!({"action": ""})).await;
+    assert!(!err && text.starts_with("graphs: lab"), "{text}");
+    let (err, text) = tool(&r, "get", json!({"refs": []})).await;
+    assert!(err && text.contains("refs"), "{text}");
     let (_, text) = tool(&r, "paths", json!({"from": "n_2", "to": "n_1"})).await;
     assert!(
         text.starts_with("1: n_2 \"Analytical Engine\" <-[WROTE_ABOUT]- n_1 \"Ada Lovelace\""),

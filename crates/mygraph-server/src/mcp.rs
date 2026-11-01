@@ -106,18 +106,29 @@ pub async fn handle(backend: &Backend, msg: Json) -> Option<Json> {
 }
 
 /// [MCP-TOOL-2] [MCP-TOOL-3]
+/// [MCP-TOOL-5] Top-level arguments that are `null`, `""`, `[]` or `{}` count as absent.
+fn given(args: &mut Map<String, Json>) {
+    args.retain(|_, v| match v {
+        Json::Null => false,
+        Json::String(s) => !s.is_empty(),
+        Json::Array(a) => !a.is_empty(),
+        Json::Object(o) => !o.is_empty(),
+        _ => true,
+    });
+}
+
 async fn call(backend: &Backend, params: &Json) -> Result<Json, (i64, String)> {
     let name = params["name"].as_str().unwrap_or("");
-    if name == "graphs" {
-        let args = params["arguments"].as_object().cloned().unwrap_or_default();
-        return Ok(graphs_tool(backend, args).await);
-    }
-    let op = crate::api::operation(name).ok_or((-32602, format!("unknown tool: {name}")))?;
     let mut args: Map<String, Json> = match params.get("arguments") {
         None | Some(Json::Null) => Map::new(),
         Some(Json::Object(m)) => m.clone(),
         Some(_) => return Err((-32602, "arguments must be an object".into())),
     };
+    given(&mut args);
+    if name == "graphs" {
+        return Ok(graphs_tool(backend, args).await);
+    }
+    let op = crate::api::operation(name).ok_or((-32602, format!("unknown tool: {name}")))?;
     let graph = args.remove("graph");
     let json_format = match args.remove("format") {
         None => false,

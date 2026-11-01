@@ -44,6 +44,11 @@ each with its status, and `default`: the graph of [MCP-TOOL-2] when it exists, e
 ([ADMIN-GRAPH-2]; admin role), and returns it as `created`. Compact text: `graphs: research (ready,
 default) · lab (unloaded)`; `created graph lab · policies {…}`.
 
+**[MCP-TOOL-5]** A top-level tool argument that is `null`, `""`, `[]` or `{}` counts as absent:
+some models send every optional parameter, filled with empty values (`"type": ""`). A required
+argument sent empty therefore fails as missing. Values inside arguments (a `write`'s items, an
+`include` object's members) are passed on as sent.
+
 ## 3. Transports
 
 **[MCP-HTTP-1]** Streamable HTTP at `POST /mcp`: one JSON-RPC message per request, authenticated
