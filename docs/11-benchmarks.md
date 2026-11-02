@@ -793,8 +793,7 @@ the graph, $3.13 `direct`) and the judge ($0.06), the run cost $14.12.
     (16 against 14) and conv-49 (13 against 12), behind on conv-50 (10 against 12), level on the
     other four, conv-30 included (12 and 12 of its 14 sampled questions). Of the 20 conv-30
     questions asked again with stemming, 19 got the pilot's verdict; the other became a correct
-    abstention. The pilot's store question is not in this sample, so stemming's effect is not
-    measured here.
+    abstention. The pilot's store question is not in this sample; the next run measures it.
 29. **Citations are better from the graph** (F1 0.77 against 0.74): more precise (0.77 against
     0.69), as the graph answers cite the quoted messages and `direct` tends to cite neighbours.
 30. **The graph costs half as much per question** ($0.011 against $0.022), and the gap grows with
@@ -803,9 +802,32 @@ the graph, $3.13 `direct`) and the judge ($0.06), the run cost $14.12.
 31. **Adversarial questions stay low in both modes** (5 and 8 of 32), for the reason in finding
     25.
 
+**Stemming, on the pilot's questions** (2026-11-01). All 105 conv-30 questions answered again
+from the pilot's graph, now upgraded to storage format 2, graph mode only (`--reanswer`); same
+model, judge and prompts. $1.15 for the answers, $0.02 for the judge.
+
+| `graph` | Pilot | With stemming |
+|---|---|---|
+| Correct, categories 1–4 (judge) | 0.83 (67 of 81) | 0.86 (70 of 81) |
+| Multi-hop / temporal / single-hop | 0.55 / 0.85 / 0.89 | 0.64 / 0.92 / 0.89 |
+| Evidence messages F1 | 0.70 | 0.72 |
+| Adversarial: abstained | 2 of 24 | 3 of 24 |
+| Tool calls per question (all 105) | 6.8 | 6.6 |
+
+32. **Stemming fixes the miss it was added for.** "When did Gina open her online clothing store?"
+    The same first search, "clothing store", now returns "My online clothes store is open!" (both
+    words stem to "cloth"); the agent read that message and answered "By 16 March 2023", correct.
+    In the pilot that search did not return it and the answer was January.
+33. **The rest of the change is mostly noise.** 7 verdicts changed on categories 1–4, 5 to correct
+    and 2 to wrong. Besides the store question, the gains are a date no longer hedged ("Around 27
+    May 2023"), a fuller list of promotions, and two rewordings; one of them, "a support system"
+    against "a good support system", the judge had marked wrong before and correct now. The two
+    losses are wording ("Clothing" for "Hoodies"; another description of Jon's studio). A gain of
+    3 of 81 is within the noise of one run; stemming's measured effect is the one question it
+    was meant to fix, at no cost in calls or citations. The 7-conversation tie (finding 27) is
+    unchanged by it: those graph answers already ran with stemming.
+
 ### Then
 
-1. Stemming's effect on one conversation: answer the pilot's 105 conv-30 questions again from its
-   graph (`--reanswer`, graph only, about $1.20) and compare with the pilot.
-2. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
+1. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
    graph per question cheaply. Start with a sample.

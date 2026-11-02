@@ -97,8 +97,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] Text search matches word forms (English stemming, storage format 2 with migration 0002;
       the tantivy index rebuilds itself). In the LoCoMo pilot a stored message ("clothes store is
       open") was missed by searches for "clothing store" and "store opened".
-- [ ] Stemming's effect: answer the pilot's 105 conv-30 questions again from its graph
-      (`--reanswer --modes graph`, about $1.20).
+- [x] Stemming's effect: the pilot's 105 conv-30 questions answered again from its graph; the
+      store question is now found and correct, graph 0.83 → 0.86 on categories 1–4 (the rest
+      within noise); $1.17.
 - [ ] LongMemEval (a sample first).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
