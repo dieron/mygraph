@@ -29,13 +29,24 @@ pub fn system() -> String {
 
 /// A data folder with an empty graph, replacing whatever was there.
 pub fn create(data: &Path) -> Result<()> {
+    drop(create_with(data, &Policies::default())?);
+    Ok(())
+}
+
+/// Milliseconds since the Unix epoch.
+pub fn now_ms() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_millis() as i64)
+}
+
+/// A data folder with an empty graph under `policies`, replacing whatever was there, opened for
+/// writing in this process.
+pub fn create_with(data: &Path, policies: &Policies) -> Result<Graph<GraphFile>> {
     let _ = fs::remove_dir_all(data);
     fs::create_dir_all(data)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as i64;
-    drop(GraphFile::create(data, GRAPH, &Policies::default(), now)?);
-    Ok(())
+    let file = GraphFile::create(data, GRAPH, policies, now_ms()?)?;
+    Graph::open(file, GRAPH, policies.clone())
 }
 
 /// The `mcpServers` map for an agent working on the graph in `data`.

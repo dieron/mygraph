@@ -827,7 +827,51 @@ model, judge and prompts. $1.15 for the answers, $0.02 for the judge.
     was meant to fix, at no cost in calls or citations. The 7-conversation tie (finding 27) is
     unchanged by it: those graph answers already ran with stemming.
 
+### LongMemEval
+
+**Data.** LongMemEval (Wu et al., 2025), the `_s` set: `longmemeval_s_cleaned.json` of the
+Hugging Face dataset `xiaowu0162/longmemeval-cleaned` (277 383 467 bytes, SHA-256
+`d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442`):
+- 500 questions from a user to their chat assistant. Each has its own history: 38–62 dated chat
+  sessions, 396–616 messages, about 490 000 characters (about 120 000 tokens). Most sessions
+  are filler from other chats; one to a few hold the answer.
+- Question types: multi-session (133), temporal reasoning (133), knowledge update (78),
+  single-session user (70), single-session assistant (56), single-session preference (30).
+  30 questions, marked `_abs`, cannot be answered from the history; the right reply says so.
+- Messages that hold the answer carry `has_answer`, and the sessions that hold it are listed.
+
+**Method** (`mygraph-agentbench longmemeval`). Building a graph per question with an ingest agent,
+as for LoCoMo, would cost about $5–10 per question at LoCoMo's rate, as every question has its
+own history. So a script stores it instead:
+- **`graph`**: a fresh graph per question, written by the runner through `write`, with no model.
+  Each session becomes a `conversation` evidence and a `ChatSession` node with its date; each
+  message a `text` evidence of that session, titled with the date, session, message number and
+  speaker (so search results show when it was said). About 0.25 s per question. Then an answering
+  agent works on the graph with the skill and the MCP tools, as in LoCoMo. This tests finding the
+  right messages in a long history, not extracting facts from it; LoCoMo covers that.
+- **`direct`**: the whole history in the prompt, with dated sessions and message IDs.
+- Both modes are told the question's date and to answer briefly, or with one or two sentences
+  using what the user said for a request for advice; `unknown` when nothing answers.
+
+**Grading.** A model judges each answer correct or wrong, with a rule per question type after
+LongMemEval's own grading prompts: temporal reasoning forgives off-by-one counts of days, weeks
+or months; knowledge update needs the latest value; preference questions are judged against a
+description of the answer wanted; abstention questions need the answer to say the information is
+not there. Citations are graded against the `has_answer` messages (precision, recall, F1) and
+the answer sessions (recall), except on abstention questions.
+
+```bash
+target/release/mygraph-agentbench longmemeval --data <dir>/longmemeval_s_cleaned.json --out <run dir> --questions 20 --mygraph target/release/mygraph
+```
+
+`--questions` samples evenly over the six question types (default all). The run folder has a
+folder per question with its transcripts, `result.json` and `graph.json` (which evidence is which
+message); the graph itself is removed after the answer and rebuilt when needed.
+
+**Sample, priced** (seed 1): 20 questions, 3–4 per type, 3 of them abstention; their histories
+total 10.0 million characters. `direct` reads about 2.5 million input tokens, about $2.50 on
+Terra; `graph` answers about $0.02–0.05 each; with the judge, about $3–3.50.
+
 ### Then
 
-1. LongMemEval: each question has its own history of about 115 000 tokens, too long to rebuild a
-   graph per question cheaply. Start with a sample.
+1. LongMemEval: run the 20-question sample priced above.

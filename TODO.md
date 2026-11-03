@@ -100,7 +100,10 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] Stemming's effect: the pilot's 105 conv-30 questions answered again from its graph; the
       store question is now found and correct, graph 0.83 → 0.86 on categories 1–4 (the rest
       within noise); $1.17.
-- [ ] LongMemEval (a sample first).
+- [x] LongMemEval runner (`mygraph-agentbench longmemeval`): the history stored by a script,
+      not an agent (an agent ingest would cost $5–10 per question); a judge rule per question
+      type.
+- [ ] LongMemEval, 20 questions on Terra (about $3–3.50).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 
