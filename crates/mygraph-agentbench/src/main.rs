@@ -45,13 +45,16 @@ enum Cmd {
     /// LongMemEval: a long chat history per question, stored by a script, then the question,
     /// graded by a model and against the messages that hold the answer. `--data`:
     /// `longmemeval_s_cleaned.json`
-    Longmemeval(JudgedArgs),
+    Longmemeval(LongmemevalArgs),
 }
 
 #[derive(Args)]
-struct JudgedArgs {
+struct LongmemevalArgs {
     #[command(flatten)]
     run: RunArgs,
+    /// Question types to run (`multi-session,temporal-reasoning`); default all
+    #[arg(long, value_delimiter = ',')]
+    types: Vec<String>,
     /// The model that grades answers; default the agents' model
     #[arg(long)]
     judge_model: Option<String>,
@@ -222,7 +225,7 @@ fn locomo_options(l: LocomoArgs) -> agent::Result<locomo::Options> {
     })
 }
 
-fn longmemeval_options(l: JudgedArgs) -> agent::Result<longmemeval::Options> {
+fn longmemeval_options(l: LongmemevalArgs) -> agent::Result<longmemeval::Options> {
     let a = l.run;
     let (agent, judge) = agent_and_judge(&a, l.judge_model, l.judge_reasoning_effort)?;
     Ok(longmemeval::Options {
@@ -230,6 +233,7 @@ fn longmemeval_options(l: JudgedArgs) -> agent::Result<longmemeval::Options> {
         judge,
         data: a.data,
         out: std::path::absolute(&a.out)?,
+        types: l.types,
         questions: a.questions,
         seed: a.seed,
         modes: a.modes,

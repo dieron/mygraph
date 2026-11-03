@@ -28,6 +28,8 @@ use std::sync::Mutex;
 pub struct Options {
     pub data: PathBuf,
     pub out: PathBuf,
+    /// Question types (`multi-session`); empty for all.
+    pub types: Vec<String>,
     /// Questions, sampled evenly over the question types; `None` for all.
     pub questions: Option<usize>,
     pub seed: u64,
@@ -589,6 +591,17 @@ fn summarize(results: &[Json], mode: &str) -> Json {
 pub fn run(o: &Options) -> Result<Json> {
     let all = load(&o.data)?;
     let total = all.len();
+    if let Some(t) = o.types.iter().find(|t| !KINDS.contains(&t.as_str())) {
+        return Err(format!(
+            "unknown question type {t}; the types are {}",
+            KINDS.join(", ")
+        )
+        .into());
+    }
+    let all: Vec<Question> = all
+        .into_iter()
+        .filter(|q| o.types.is_empty() || o.types.contains(&q.kind))
+        .collect();
     let questions = match o.questions {
         Some(n) => sample_by_kind(all, n, o.seed),
         None => all,
@@ -636,7 +649,7 @@ pub fn run(o: &Options) -> Result<Json> {
     results.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
     let mut summary = json!({
         "dataset": { "file": o.data.file_name().map(|f| f.to_string_lossy()), "questions": total },
-        "sample": { "questions": results.len(), "seed": o.seed },
+        "sample": { "questions": results.len(), "types": o.types, "seed": o.seed },
         "provider": match &o.agent.backend {
             crate::agent::Backend::ClaudeCode(_) => "claude-code",
             crate::agent::Backend::OpenAi(_) => "openai",

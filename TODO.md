@@ -106,7 +106,13 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] LongMemEval, 20 questions on Terra ($2.35): graph 0.85 vs direct 0.90 correct, the one
       difference a reading of the question; the same answer messages cited; $0.010 vs $0.107 per
       question.
-- [ ] LongMemEval on more multi-session and temporal questions (about $0.12 per question).
+- [x] LongMemEval, 50 multi-session and temporal questions (`--types`; $5.30): graph 0.82 vs
+      direct 0.86, citation F1 0.81 vs 0.91; the graph's misses are messages worded unlike the
+      question ("kitchen appliance" vs "a smoker"), which word search cannot reach.
+- [ ] Semantic search (docs/09-roadmap.md), then rerun those 50 questions in graph mode
+      (`--reanswer --modes graph`, about $0.55).
+- [ ] Skill or API: once the agent has found sessions by date, read their messages (it listed
+      the right session, then kept guessing search words).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 

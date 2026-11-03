@@ -906,7 +906,49 @@ $2.14 `direct`; judge $0.01.
     model reading everything. What an extracting agent would add (entities, links, resolved
     dates) is not tested here; LoCoMo shows it costs about $0.25 per 100 messages.
 
+**50 multi-session and temporal questions on GPT-6.1 Terra** (`--types
+multi-session,temporal-reasoning`, judge as above, seed 1; 2026-11-02): 25 of each, 3 of them
+abstention; 6 were also in the first sample and got the same verdicts.
+
+| | `graph` | `direct` |
+|---|---|---|
+| Correct (judge) | 0.82 (41 of 50) | 0.86 (43 of 50) |
+| Multi-session / temporal / abstention | 17/22, 21/25, 3/3 | 18/22, 22/25, 3/3 |
+| Answer messages precision / recall / F1 | 0.81 / 0.83 / 0.81 | 0.91 / 0.92 / 0.91 |
+| Answer sessions recall | 0.84 | 0.90 |
+| Per question | 7.3 tool calls, 72 000 input tokens, 12 s, $0.011 | 106 000 input tokens, 3 s, $0.095 |
+
+Answers $0.54 from the graph, $4.74 `direct`; judge $0.02; $5.30 in all.
+
+38. **Where answers need everything said across sessions, reading it all finds more.** The modes
+    disagree on 8 questions, 3 for the graph and 5 for `direct`, and `direct` cites the answer
+    messages better (F1 0.91 against 0.81). Three of the five `graph` losses are a message it did
+    not find; one is another art event, two days earlier, picked without checking which was two
+    weeks before the question; the fifth is finding 35's question again.
+39. **The messages it did not find use other words than the question.** "What kitchen appliance
+    did I buy 10 days ago?": the message says "I just got a smoker today". The agent even listed
+    the sessions of those days (`find` on `ChatSession` by `date`: 12 sessions, the right one
+    among them), then searched "appliance", "bought", "blender", "fryer" and nine other words
+    instead of reading their messages. "How many plants did I acquire?" missed "my snake plant, which I got from
+    my sister"; "kitchen items I replaced or fixed" missed "I donated my old coffee maker". Search
+    matches words (now with stemming); it does not match meaning. Semantic search
+    (docs/09-roadmap.md) is what these questions need, and this run is a way to measure it.
+40. **The `graph` wins are answers, not retrieval**: "4" properties where `direct` counted 5 for
+    the same messages, a described band ("a bluegrass band featuring a banjo player") where
+    `direct` said `unknown`, and "About 54 days" against "At least 54 days", which the judge
+    marked wrong.
+41. **The shared misses are counting and ordering over many sessions** (9 bakes for 4, 4 and 5
+    weddings for 3, two museums swapped) and finding 36's inconsistent dates. All three
+    abstention questions were answered `unknown` by both.
+
+**Over the 64 LongMemEval questions run** (6 in both runs), `graph` and `direct` are within 2–3
+questions of each other, the graph costs a tenth as much per question, and its misses are
+vocabulary: the history is stored, and words in the question that do not appear in the message
+are what keep the agent from it.
+
 ### Then
 
-1. LongMemEval with more questions where the modes differ most: multi-session and temporal
-   (266 of the 500), at about $0.12 per question for both modes.
+1. Semantic search (docs/09-roadmap.md), then the same 50 questions again (`--reanswer`, graph
+   only, about $0.55) to measure it.
+2. Have the answering agent read a session's messages once it has found the session by date: a
+   skill hint, or a way to `get` an evidence's children.
