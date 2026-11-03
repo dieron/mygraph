@@ -109,11 +109,19 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] LongMemEval, 50 multi-session and temporal questions (`--types`; $5.30): graph 0.82 vs
       direct 0.86, citation F1 0.81 vs 0.91; the graph's misses are messages worded unlike the
       question ("kitchen appliance" vs "a smoker"), which word search cannot reach.
-- [ ] Semantic search (docs/09-roadmap.md), then rerun those 50 questions in graph mode
-      (`--reanswer --modes graph`, about $0.55).
 - [x] Skill hint: search matches words, not meaning; after a few misses, narrow down (dates,
       types, links) and read the evidence. LongMemEval 50 in graph mode: citation F1 0.81 → 0.88,
       correct 41 → 42 of 50; $0.59.
+- [x] Semantic search (crate `mygraph-semantic`: multilingual-e5-small, usearch, reciprocal rank
+      fusion with full text; `resolve` lists `similar` nodes). LongMemEval 50 in graph mode,
+      against the hint: correct 42 → 41, citation F1 0.88 → 0.83, 13 % more tokens; $0.78.
+      Words already showed 103 of 107 answer messages; meaning-only hits fill every search and
+      push some word matches out (docs/11-benchmarks.md, findings 44–47).
+- [ ] Rank word matches before meaning-only hits (or add meaning only when words find little),
+      then the same 50 questions again (about $0.75).
+- [ ] Docker image with the model: build and check it (not built yet: no Docker on the
+      development machine); the image grows by about 165 MB (model 135 MB, ONNX Runtime in the
+      binary about 28 MB).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 

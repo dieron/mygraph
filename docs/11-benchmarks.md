@@ -972,7 +972,51 @@ binary; $0.59.
     `direct` does. A run of 50 does not separate one question from noise; the citation scores do
     show the agent reaching more of the right messages.
 
+**Semantic search, on the same 50 questions** (2026-11-03). Search now also matches meaning
+(multilingual-e5-small, fused with full text by reciprocal rank fusion; [RANK-8], [RANK-9]); the
+skill's paragraph says so instead of "words, not meaning" and keeps the advice to narrow down and
+read after a few misses. The runner embeds each history while storing it (`MYGRAPH_MODEL_DIR`);
+the 50 questions answered again in graph mode only (`--reanswer`); $0.78 ($0.77 answers, $0.01
+judge).
+
+Choosing the model first, without an agent: the question as the query, the rank of the answer
+messages among the ~500 of its history, on the 48 questions that have them (107 messages).
+multilingual-e5-small: recall@10 0.70, recall@20 0.78, MRR 0.56; paraphrase-multilingual-MiniLM
+(same size): 0.49, 0.59, 0.35. On the three questions of finding 39 alone, MiniLM ranked the
+smoker message best (15–44, e5-small 73–136, English-only bge-small-en 32–67); multilingual-e5-base
+and snowflake-arctic-embed-m-v2.0, though larger, did worse.
+
+| `graph` | Before | With the hint | With semantic search | (`direct`) |
+|---|---|---|---|---|
+| Correct (judge) | 0.82 (41 of 50) | 0.84 (42 of 50) | 0.82 (41 of 50) | 0.86 (43 of 50) |
+| Multi-session / temporal | 17/22, 21/25 | 17/22, 22/25 | 16/22, 22/25 | 18/22, 22/25 |
+| Answer messages F1 | 0.81 | 0.88 | 0.83 | 0.91 |
+| Answer sessions recall | 0.84 | 0.88 | 0.85 | 0.90 |
+| Per question | 7.3 calls, 72 000 tokens, $0.011 | 7.4 calls, 76 000 tokens, $0.012 | 7.1 calls, 86 000 tokens, $0.015 | $0.095 |
+
+Storing now takes 66 s per question instead of 0.3 s (about 1 000 passages embedded on the CPU,
+four questions at a time).
+
+44. **Semantic search did not add right answers here; it is within noise of the hint, slightly
+    below.** Against the hint run: one gained (the bluegrass band, now described), two lost (an
+    art event, the City Art Museum again instead of the Metropolitan; and "How long have I been
+    working in my current role?", where every search put the answer message first and the agent
+    still said `unknown`). Citation F1 fell from 0.88 to 0.83: 7 questions lower, 3 higher.
+45. **Words already reached the answer messages; meaning mostly added noise.** With the hint,
+    103 of the 107 answer messages appeared in some search result as a word match; with semantic
+    search, 90 as word matches and 11 by meaning only, 101 in all. Hits found by meaning only are
+    81 % of all hits: every search now fills its limit (34 hits per search against 16), which
+    pushes some word matches below it and costs 13 % more input tokens.
+46. **The vocabulary misses of finding 39 are not what e5-small finds.** "kitchen appliance
+    bought" did not bring up "I just got a smoker" (rank 73–136 of 500 in the model test); the
+    agent found it as with the hint, by listing the sessions of those days and reading them. The
+    plants were found by words in fewer calls (6 against 8). "Kitchen items I replaced or fixed"
+    surfaced an answer message by meaning only and was still answered 4 for 5.
+47. **What would make meaning help**: ranking word matches first and adding meaning only below
+    them, or only when words find little, instead of interleaving the two lists; a stricter
+    similarity threshold, so a search is not always full; or a stronger model, which costs image
+    size and embedding time. Each is one more run of these 50 questions (about $0.75).
+
 ### Then
 
-1. Semantic search (docs/09-roadmap.md), then the same 50 questions again (`--reanswer`, graph
-   only, about $0.60) to measure it on top of the hint.
+1. Rank word matches before meaning-only hits (finding 47) and run the 50 questions again.
