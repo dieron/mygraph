@@ -72,8 +72,11 @@ so semantic hits may differ between implementations; the index is a cache ([STOR
 relevance order) and the semantic hits (most similar first), each at most 5 × `limit` (and at most
 2500), are merged by **reciprocal rank fusion**: an object scores Σ 1 / (60 + r) over the lists it
 is in, `r` being its 1-based rank there. Higher scores first; ties by the better (lower) best rank,
-then the full-text list before the semantic list. The result is the fused list of [RANK-4];
-`matched` is `text` for objects the full-text query matched, else `semantic`.
+then the full-text list before the semantic list. Then every object the full-text query matched
+comes before every object found by meaning only, each group keeping that order: meaning re-ranks
+word matches and adds hits after them, but never pushes a word match down. The result is the
+fused list of [RANK-4]; `matched` is `text` for objects the full-text query matched, else
+`semantic`.
 
 ## 4. Order
 

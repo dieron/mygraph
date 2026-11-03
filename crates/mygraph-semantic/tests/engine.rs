@@ -127,6 +127,31 @@ fn search_finds_by_meaning_and_fuses_with_words() {
 }
 
 #[test]
+fn word_matches_come_before_hits_by_meaning_only() {
+    let dir = tempfile::tempdir().unwrap();
+    GraphFile::create(dir.path(), "g", &Policies::default(), T).unwrap();
+    let mut g = open(dir.path(), fake());
+    // e_2 has the word among many others, too few to be close in meaning; e_3 is close in
+    // meaning without the word. Fusion alone would rank e_3 (first by meaning) above e_2
+    // (second by words).
+    let filler = (0..40)
+        .map(|i| format!("w{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let long = format!("the fryer {filler}");
+    say(&mut g, &["my new fryer", &long, "blender"]);
+    assert_eq!(ids(&hits(&g, "fryer", "text", "evidence")), ["e_1", "e_2"]);
+    assert_eq!(
+        ids(&hits(&g, "fryer", "semantic", "evidence")),
+        ["e_3", "e_1"]
+    );
+    let auto = hits(&g, "fryer", "auto", "evidence");
+    assert_eq!(ids(&auto), ["e_1", "e_2", "e_3"]);
+    let matched: Vec<&Json> = auto.iter().map(|h| &h["matched"]).collect();
+    assert_eq!(matched, ["text", "text", "semantic"]);
+}
+
+#[test]
 fn nodes_are_found_by_meaning_below_name_matches() {
     let dir = tempfile::tempdir().unwrap();
     GraphFile::create(dir.path(), "g", &Policies::default(), T).unwrap();

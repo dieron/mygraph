@@ -536,6 +536,8 @@ impl<S: Store> Graph<S> {
                 }
             }
         }
+        // Word matches before meaning-only hits; each keeps its fused order.
+        out.sort_by_key(|(_, matched, _)| *matched == "semantic");
         Ok(out)
     }
 

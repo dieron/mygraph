@@ -18,7 +18,8 @@ Every tool takes an optional `graph` and `format` (`compact` text, default, or `
   other words; an error when the server has no semantic index, where `auto` matches words only).
 - `types`: node or link types to keep. `include_retracted: true` also returns retracted objects.
 - Scores: exact name 1.0, alias 0.95, prefix ~0.8–0.9, fuzzy 0.4–0.7, full text and meaning
-  0.1–0.4 (one ranking of both; `matched` says `text` or `semantic`). Evidence hits carry a
+  0.1–0.4 (word matches first, then hits found by meaning only; `matched` says `text` or
+  `semantic`). Evidence hits carry a
   snippet: the matched words in «», or for `semantic` hits the start of the closest passage.
 
 ## 2. resolve
