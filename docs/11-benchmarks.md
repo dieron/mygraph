@@ -1017,6 +1017,40 @@ four questions at a time).
     similarity threshold, so a search is not always full; or a stronger model, which costs image
     size and embedding time. Each is one more run of these 50 questions (about $0.75).
 
+**Word matches first** (2026-11-03). Fusion still orders the word matches, but every word match
+now comes before every hit found by meaning only ([RANK-9]); the same 50 questions answered
+again in graph mode (`--reanswer`); $0.78 ($0.77 answers, $0.01 judge).
+
+| `graph` | With the hint | Fused (interleaved) | Word matches first | (`direct`) |
+|---|---|---|---|---|
+| Correct (judge) | 0.84 (42 of 50) | 0.82 (41 of 50) | 0.90 (45 of 50) | 0.86 (43 of 50) |
+| Multi-session / temporal | 17/22, 22/25 | 16/22, 22/25 | 18/22, 24/25 | 18/22, 22/25 |
+| Answer messages F1 | 0.88 | 0.83 | 0.87 | 0.91 |
+| Answer sessions recall | 0.88 | 0.85 | 0.86 | 0.90 |
+| Per question | 7.4 calls, 76 000 tokens, $0.012 | 7.1 calls, 86 000 tokens, $0.015 | 6.7 calls, 83 000 tokens, $0.015 | $0.095 |
+
+48. **The most correct answers of any run on these 50, 45, and none lost against the hint**, but
+    the three gained are not retrieval. In each (the grocery store that cost the most, the order
+    of six museums, the bluegrass band) every answer message had already appeared as a word
+    match in the hint run; the agent answered the same messages differently. Three questions in
+    50 is within the noise finding 43 describes; the gain over the interleaved run (45 against
+    41) includes the two questions that run lost on answering, not on finding.
+49. **Putting words first undoes the cost of interleaving**: citation F1 0.83 → 0.87 (the hint
+    0.88), session recall 0.85 → 0.86. Answer messages shown in search results: 91 as word
+    matches and 11 by meaning only, 102 of 107 (hint 103, interleaved 101).
+50. **Meaning makes the agent search less, not find more.** 6.7 tool calls per question against
+    7.4 with the hint (160 searches against 190): when the words of a search miss, the results
+    are still full, and the agent reads them instead of trying other words. The 11 answer
+    messages it saw only by meaning are ones the hint run found with more word searches. Hits
+    by meaning are still 81 % of all hits, so input grows 9 % over the hint.
+
+So on this benchmark semantic search is about even with words plus the hint: no answer here
+depended on it. It stays on (it costs no answers, and finding 39's paraphrases are the case it is
+for), with word matches first.
+
 ### Then
 
-1. Rank word matches before meaning-only hits (finding 47) and run the 50 questions again.
+1. A history where words fail more often than here (an extracting ingest, other languages, or
+   questions written without the history's words) would show whether meaning earns its cost.
+2. A stricter threshold for meaning-only hits, so searches whose words match well stay short
+   (finding 50); measure the tokens it saves.

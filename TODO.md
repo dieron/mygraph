@@ -117,8 +117,13 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       against the hint: correct 42 → 41, citation F1 0.88 → 0.83, 13 % more tokens; $0.78.
       Words already showed 103 of 107 answer messages; meaning-only hits fill every search and
       push some word matches out (docs/11-benchmarks.md, findings 44–47).
-- [ ] Rank word matches before meaning-only hits (or add meaning only when words find little),
-      then the same 50 questions again (about $0.75).
+- [x] Word matches before meaning-only hits ([RANK-9]). LongMemEval 50 in graph mode: correct
+      45 of 50 (hint 42, interleaved 41, direct 43), citation F1 0.87 (hint 0.88), 9 % more
+      tokens than the hint; $0.78. The gains are answering, not finding (findings 48–50).
+- [ ] A stricter threshold for meaning-only hits, so well-matched searches stay short; measure
+      the tokens saved.
+- [ ] A test where words fail more often (extracting ingest, other languages, questions written
+      without the history's words), to see whether meaning earns its cost.
 - [ ] Docker image with the model: build and check it (not built yet: no Docker on the
       development machine); the image grows by about 165 MB (model 135 MB, ONNX Runtime in the
       binary about 28 MB).
