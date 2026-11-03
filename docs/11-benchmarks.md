@@ -946,9 +946,33 @@ questions of each other, the graph costs a tenth as much per question, and its m
 vocabulary: the history is stored, and words in the question that do not appear in the message
 are what keep the agent from it.
 
+**A skill hint, on the same 50 questions** (2026-11-02). The skill (§3, answering questions) now
+says that search matches words, not meaning, and that after a few misses the agent should narrow
+down by what it knows (a date range, a type, a linked node), `get` those nodes' evidence and read
+it. The 50 questions answered again in graph mode only (`--reanswer`), with the same server
+binary; $0.59.
+
+| `graph` | Before | With the hint | (`direct`) |
+|---|---|---|---|
+| Correct (judge) | 0.82 (41 of 50) | 0.84 (42 of 50) | 0.86 (43 of 50) |
+| Multi-session / temporal | 17/22, 21/25 | 17/22, 22/25 | 18/22, 22/25 |
+| Answer messages F1 | 0.81 | 0.88 | 0.91 |
+| Answer sessions recall | 0.84 | 0.88 | 0.90 |
+| Per question | 7.3 calls, 72 000 tokens, $0.011 | 7.4 calls, 76 000 tokens, $0.012 | $0.095 |
+
+42. **The hint closes most of the citation gap.** Answer-message F1 rose from 0.81 to 0.88 and
+    session recall from 0.84 to 0.88, against `direct`'s 0.91 and 0.90, for 5 % more tokens. On
+    "What kitchen appliance did I buy 10 days ago?" the agent now lists the sessions of those
+    days, reads their messages, finds "a smoker" and answers it. The plants and art-event
+    questions of finding 38 are also answered correctly now.
+43. **Correct answers moved by one**: 3 of the 4 retrieval losses of finding 38 fixed, 2 others
+    lost. Neither loss is retrieval: on "Which grocery store did I spend the most at in the past
+    month?" the agent cited the same four messages as `direct` and then left out the largest
+    order as not clearly in the past month; on the bluegrass band it now says `unknown`, as
+    `direct` does. A run of 50 does not separate one question from noise; the citation scores do
+    show the agent reaching more of the right messages.
+
 ### Then
 
 1. Semantic search (docs/09-roadmap.md), then the same 50 questions again (`--reanswer`, graph
-   only, about $0.55) to measure it.
-2. Have the answering agent read a session's messages once it has found the session by date: a
-   skill hint, or a way to `get` an evidence's children.
+   only, about $0.60) to measure it on top of the hint.

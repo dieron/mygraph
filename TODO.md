@@ -111,8 +111,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       question ("kitchen appliance" vs "a smoker"), which word search cannot reach.
 - [ ] Semantic search (docs/09-roadmap.md), then rerun those 50 questions in graph mode
       (`--reanswer --modes graph`, about $0.55).
-- [ ] Skill or API: once the agent has found sessions by date, read their messages (it listed
-      the right session, then kept guessing search words).
+- [x] Skill hint: search matches words, not meaning; after a few misses, narrow down (dates,
+      types, links) and read the evidence. LongMemEval 50 in graph mode: citation F1 0.81 → 0.88,
+      correct 41 → 42 of 50; $0.59.
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 

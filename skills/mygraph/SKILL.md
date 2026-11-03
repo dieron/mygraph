@@ -127,6 +127,12 @@ of the answer, not every source of the nodes involved. Pick the tool by the ques
   "group_by": ["prop:country"], "aggregate": [{"fn": "count"}], "sort": [{"by": "count", "order": "desc"}] }
 ```
 
+**Search matches words, not meaning.** A source may say it differently from the question ("I got
+a smoker" for "a kitchen appliance I bought"). When a few searches miss, stop guessing words and
+narrow down by what you do know: a date range, a type, a linked node (`find`, `neighbors`). Then
+`get` those nodes with `include: {"evidence": {"limit": 50}}` for their sources, `get` the
+evidence IDs with `include: {"content": true}`, and read them.
+
 Query details (all search modes, `get` includes, `neighbors` steps, `paths` modes, every `find`
 field, operator and aggregate, date semantics, paging): **read `references/query.md`**.
 
