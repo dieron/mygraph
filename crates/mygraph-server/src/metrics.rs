@@ -56,6 +56,8 @@ pub struct LoadedMetrics {
     pub last_seq: i64,
     /// (pending updates, stale) when the graph has a full-text index.
     pub text: Option<(usize, bool)>,
+    /// Documents waiting to be embedded, when the graph has a semantic index.
+    pub semantic_pending: Option<usize>,
 }
 
 /// Process-wide values for `/metrics`.
@@ -370,6 +372,52 @@ impl Metrics {
                 out,
                 "mygraph_text_commit_seconds_total{{graph=\"{}\"}} {}",
                 g.name, g.run.text_commit_s
+            );
+        }
+        head(
+            &mut out,
+            "mygraph_semantic_index_pending",
+            "gauge",
+            "Documents waiting to be embedded into the semantic index.",
+        );
+        for (g, l) in loaded() {
+            if let Some(pending) = l.semantic_pending {
+                let _ = writeln!(
+                    out,
+                    "mygraph_semantic_index_pending{{graph=\"{g}\"}} {pending}"
+                );
+            }
+        }
+        head(
+            &mut out,
+            "mygraph_semantic_commits_total",
+            "counter",
+            "Background semantic index commits (embedding and saving).",
+        );
+        for g in graphs {
+            let r = &g.run;
+            let _ = writeln!(
+                out,
+                "mygraph_semantic_commits_total{{graph=\"{}\",outcome=\"ok\"}} {}",
+                g.name, r.semantic_commits
+            );
+            let _ = writeln!(
+                out,
+                "mygraph_semantic_commits_total{{graph=\"{}\",outcome=\"error\"}} {}",
+                g.name, r.semantic_commit_errors
+            );
+        }
+        head(
+            &mut out,
+            "mygraph_semantic_commit_seconds_total",
+            "counter",
+            "Time spent in semantic index commits.",
+        );
+        for g in graphs {
+            let _ = writeln!(
+                out,
+                "mygraph_semantic_commit_seconds_total{{graph=\"{}\"}} {}",
+                g.name, g.run.semantic_commit_s
             );
         }
         head(

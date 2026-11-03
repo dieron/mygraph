@@ -114,6 +114,22 @@ fn run(function: &str, case: &Json) -> Result<Json, Reason> {
                 i[1].as_str().unwrap()
             ))
         }
+        "fuse_rankings" => {
+            let lists: Vec<Vec<&str>> = case["input"]["lists"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| {
+                    l.as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|s| s.as_str().unwrap())
+                        .collect()
+                })
+                .collect();
+            let refs: Vec<&[&str]> = lists.iter().map(Vec::as_slice).collect();
+            json!(mygraph_core::search::fuse(&refs))
+        }
         "resolve_hint_agrees" => {
             let v = |j: &Json| match values::parse(j).unwrap() {
                 Parsed::Value(v) => v,

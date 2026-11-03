@@ -36,7 +36,9 @@ call: the evidence, the nodes, the links, and the citations that connect them.
 
 **Before writing**, call `resolve` with every entity you are about to create (up to 100 at once).
 For each one it answers `match` (use that node's ID), `ambiguous` (look at the candidates; pick one,
-or create a new node with `create_new: true` if it is really someone else), or `none` (create it).
+or create a new node with `create_new: true` if it is really someone else), or `none` (create it,
+after checking `similar`: nodes close in meaning but spelled differently, like "IBM" for
+"International Business Machines").
 Writes also match nodes by type + name/alias on their own, so `resolve` is mainly how you avoid
 near-duplicates like "C. Babbage" vs "Charles Babbage" and catch type mismatches.
 
@@ -110,7 +112,7 @@ of the answer, not every source of the nodes involved. Pick the tool by the ques
 |---|---|
 | "What do we know about X?" | `search` (or `resolve`) for the ID, then `get` with `include: {"links": {"limit": 20}, "evidence": {"limit": 5}}` |
 | "Is X in the graph?" / dedupe | `resolve` (many names at once) |
-| Find by words in names, summaries or source text | `search` with `in: ["nodes", "evidence"]`, `mode: "text"` for full text |
+| Find by words or meaning in names, summaries or source text | `search` with `in: ["nodes", "evidence"]` (the default mode matches both; `mode: "text"` words only, `"semantic"` meaning only) |
 | "Who/what is around X?" | `neighbors` (`depth` 1–2, filter `link_types`, `direction`) |
 | "How is X connected to Y?" | `paths` (`mode: "k_shortest"`, `k: 3` for alternatives) |
 | Lists, counts, statistics | `find` (filters, `group_by`, aggregates, `sort`) |
@@ -127,9 +129,12 @@ of the answer, not every source of the nodes involved. Pick the tool by the ques
   "group_by": ["prop:country"], "aggregate": [{"fn": "count"}], "sort": [{"by": "count", "order": "desc"}] }
 ```
 
-**Search matches words, not meaning.** A source may say it differently from the question ("I got
-a smoker" for "a kitchen appliance I bought"). When a few searches miss, stop guessing words and
-narrow down by what you do know: a date range, a type, a linked node (`find`, `neighbors`). Then
+**Search matches words and meaning, but it ranks; it does not reason.** By default it also finds
+sources that say it in other words ("I got a smoker" for "a kitchen appliance I bought"), marked
+`semantic`, when the server has a semantic index. Search with the question's own words before
+synonyms: a short phrase of what you look for ("kitchen appliance bought") works better than one
+word. A source can still be out of reach (a passing remark in a long message). When a few
+searches miss, stop guessing words and narrow down by what you do know: a date range, a type, a linked node (`find`, `neighbors`). Then
 `get` those nodes with `include: {"evidence": {"limit": 50}}` for their sources, `get` the
 evidence IDs with `include: {"content": true}`, and read them.
 

@@ -150,14 +150,14 @@ pub trait Store {
     fn actor_batches(&self) -> Result<Vec<(i64, i64, i64)>, StoreFailure>;
 }
 
-/// A full-text index kept outside the store (docs/05 §2, `TextIndex` seam): a rebuildable cache
-/// derived from the records ([STORE-TEXT-1]). It remembers the change-log sequence number up to
-/// which it durably holds every change, so it can catch up after a restart or a crash.
-pub trait TextIndex: Send + Sync {
+/// An index kept outside the store (docs/05 §2): a rebuildable cache derived from the records
+/// ([STORE-TEXT-1], [STORE-VEC-1]). It remembers the change-log sequence number up to which it
+/// durably holds every change, so it can catch up after a restart or a crash.
+pub trait DerivedIndex: Send + Sync {
     /// Sequence number of the last change the index durably holds; `None` for a new, empty index.
     fn applied_seq(&self) -> Option<i64>;
     /// Adds or replaces documents (one per object), covering changes up to `seq`. They are
-    /// searchable at once and durable after the next [`TextIndex::commit`].
+    /// searchable at once and durable after the next [`DerivedIndex::commit`].
     fn index(&self, docs: Vec<TextDoc>, seq: i64) -> Result<(), StoreFailure>;
     /// Makes everything indexed so far durable and records its `seq`. Committing is slow, so
     /// callers batch it (the server commits in the background).
@@ -166,6 +166,10 @@ pub trait TextIndex: Send + Sync {
     fn pending(&self) -> usize;
     /// Removes every document (durably).
     fn clear(&self) -> Result<(), StoreFailure>;
+}
+
+/// A full-text index kept outside the store (docs/05 §2, `TextIndex` seam).
+pub trait TextIndex: DerivedIndex {
     /// Same contract as [`Store::text_search`].
     fn search(
         &self,
@@ -175,12 +179,88 @@ pub trait TextIndex: Send + Sync {
     ) -> Result<Vec<TextHit>, StoreFailure>;
 }
 
+/// An index of meaning ([RANK-8]): texts of nodes and evidence as embedding vectors. Links are
+/// not in it; their documents are ignored.
+pub trait SemanticIndex: DerivedIndex {
+    /// Objects of `target` (nodes or evidence) closest in meaning to `query`, any status, most
+    /// similar first, at most `limit`, each at least as close as `closeness` asks. `None` while
+    /// the index cannot answer completely (it is still embedding many documents, as after a
+    /// rebuild).
+    fn nearest(
+        &self,
+        target: TextTarget,
+        query: &str,
+        limit: usize,
+        closeness: Closeness,
+    ) -> Result<Option<Vec<SemanticHit>>, StoreFailure>;
+    /// Whether [`SemanticIndex::nearest`] answers now (no rebuild in progress).
+    fn ready(&self) -> bool;
+}
+
+/// How close in meaning a semantic hit must be; the thresholds belong to the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Closeness {
+    /// Related: worth showing among search results.
+    Related,
+    /// Close enough to perhaps name the same thing ([OP-RESOLVE-3]).
+    Close,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticHit {
+    pub idx: i64,
+    /// Cosine similarity of the query and the closest passage.
+    pub similarity: f32,
+    /// Which passage of the object's text ([`passages`]) was closest.
+    pub passage: usize,
+}
+
+/// Words per passage: a long text is embedded as several passages ([RANK-8]), so a fact in the
+/// middle of a long message is not averaged away, and embedding models' token limits are not
+/// reached.
+pub const PASSAGE_WORDS: usize = 120;
+/// Passages per object: text after them is not embedded (full text still finds it).
+pub const MAX_PASSAGES: usize = 32;
+
+/// The passages of a text ([RANK-8]): runs of at most [`PASSAGE_WORDS`] words, ending after a
+/// sentence when one ends in the second half of the run; at most [`MAX_PASSAGES`].
+pub fn passages(text: &str) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < words.len() && out.len() < MAX_PASSAGES {
+        let mut end = (start + PASSAGE_WORDS).min(words.len());
+        if end < words.len()
+            && let Some(cut) = (start + PASSAGE_WORDS / 2..end)
+                .rev()
+                .find(|&i| words[i].ends_with(['.', '!', '?']))
+        {
+            end = cut + 1;
+        }
+        out.push(words[start..end].join(" "));
+        start = end;
+    }
+    out
+}
+
 /// The searchable text of one object, as in [STORE-FTSYNC-1].
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextDoc {
     pub target: TextTarget,
     pub idx: i64,
     pub text: String,
+    /// Bytes at the start of `text` taken by an evidence's title and its line break (0 for
+    /// nodes and links); the rest is the evidence's content.
+    pub head: usize,
+}
+
+impl TextDoc {
+    /// The text embedded for meaning ([RANK-8]): an evidence's content, or its title when it has
+    /// no content (a title such as a date and message number says little about the meaning).
+    pub fn meaning(&self) -> &str {
+        let body = self.text[self.head..].trim();
+        if body.is_empty() { &self.text } else { body }
+    }
 }
 
 /// Text of a node, link or evidence for a [`TextIndex`]; `content` is the evidence's inline text,
@@ -206,6 +286,7 @@ pub fn text_doc(row: &Row, content: Option<&str>) -> Option<TextDoc> {
         }
     }
     let mut text = String::new();
+    let mut head = 0;
     let (target, idx) = match row {
         Row::Node(n) => {
             text.push_str(&n.name);
@@ -232,6 +313,7 @@ pub fn text_doc(row: &Row, content: Option<&str>) -> Option<TextDoc> {
                 text.push_str(t);
                 text.push('\n');
             }
+            head = text.len();
             if let Some(c) = content {
                 text.push_str(c);
             }
@@ -239,7 +321,12 @@ pub fn text_doc(row: &Row, content: Option<&str>) -> Option<TextDoc> {
         }
         Row::Citation(_) => return None,
     };
-    Some(TextDoc { target, idx, text })
+    Some(TextDoc {
+        target,
+        idx,
+        text,
+        head,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -233,7 +233,11 @@ async fn mcp_stdio(
     }
     if let Some(app) = local {
         let reg = app.registry.clone();
-        let _ = tokio::task::spawn_blocking(move || reg.maintain()).await;
+        let _ = tokio::task::spawn_blocking(move || {
+            reg.maintain();
+            reg.flush_semantic();
+        })
+        .await;
     }
     Ok(())
 }

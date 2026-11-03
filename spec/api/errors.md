@@ -43,7 +43,7 @@ with the request itself and answers `400 Bad Request`.
 | `409` | Conflicts with the stored state — the same request could succeed against another state: `write.version_conflict`, `write.property_conflict`, `write.ambiguous_match`, `write.type_mismatch`, `write.link_mismatch`, `key.taken`, `lifecycle.identity_taken`, `lifecycle.retracted`, `lifecycle.invalid_transition`, `link.endpoint_not_active`, `citation.evidence_not_active`, `citation.target_not_active`, `evidence.blob_conflict`, `graph.exists` |
 | `413` | `api.body_too_large` |
 | `500` | `graph.load_failed`, `internal`, and every `storage.*` code |
-| `503` | `graph.warming_up` |
+| `503` | `graph.warming_up`, `search.semantic_unavailable` |
 
 ## 3. Hints
 
@@ -60,6 +60,7 @@ with the request itself and answers `400 Bad Request`.
 | `vocab.not_styled` | This graph wants names in its style; resend with `details.expected` (`overview` lists the names in use). |
 | `graph.not_found` | List the available graphs with `GET /v1/graphs`. |
 | `graph.warming_up` | The graph is loading; retry after the number of seconds in `Retry-After`. |
+| `search.semantic_unavailable` | Search with mode `auto` (words, and meaning when available) or `text` instead. |
 | `auth.missing_key` | Send `Authorization: Bearer <key>`. |
 | `api.not_found` | See `GET /openapi.yaml` for the available routes. |
 | `json.malformed` | The body must be one JSON object. |

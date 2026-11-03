@@ -268,6 +268,10 @@ pub fn render(op: &str, req: &Json, r: &Json) -> String {
                         let _ = writeln!(out, "  or {}", scored(c));
                     }
                 }
+                for c in items(res, "similar") {
+                    let sim = c.get("similarity").and_then(Json::as_f64).unwrap_or(0.0);
+                    let _ = writeln!(out, "  similar {} (meaning {sim:.2})", brief(c));
+                }
             }
             &["results"]
         }

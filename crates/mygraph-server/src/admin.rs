@@ -54,6 +54,7 @@ async fn graph_info(app: &Arc<App>, caller: &Caller, name: &str) -> Result<Json,
             Ok(json!({
                 "counts": counts, "policies": g.policies().to_json(), "last_seq": g.last_seq(),
                 "text_index": g.text_index_status(),
+                "semantic_index": g.semantic_index_status(),
             }))
         })
         .await?;
@@ -342,7 +343,10 @@ pub async fn graph_get(
             let g = access.graph();
             let mut v = g.compute_stats(&req, now)?;
             if storage {
-                v["storage"] = json!({ "text_index": g.text_index_status() });
+                v["storage"] = json!({
+                    "text_index": g.text_index_status(),
+                    "semantic_index": g.semantic_index_status(),
+                });
             }
             Ok(v)
         })
@@ -351,10 +355,12 @@ pub async fn graph_get(
             let dir = app.registry.data_dir();
             let (file_bytes, wal_bytes) = GraphFile::file_sizes(dir, &graph);
             let text_bytes = dir_size(&mygraph_text_tantivy::index_dir(dir, &graph));
+            let semantic_bytes = dir_size(&mygraph_semantic::index_dir(dir, &graph));
             let s = &mut body["storage"];
             s["file_bytes"] = file_bytes.into();
             s["wal_bytes"] = wal_bytes.into();
             s["text_index_bytes"] = text_bytes.into();
+            s["semantic_index_bytes"] = semantic_bytes.into();
         }
         Ok(json_body(&body).into_response())
     }

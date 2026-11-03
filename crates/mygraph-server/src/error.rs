@@ -74,7 +74,7 @@ pub fn status_of(code: &str) -> StatusCode {
         | "evidence.blob_conflict"
         | "graph.exists" => StatusCode::CONFLICT,
         "api.body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
-        "graph.warming_up" => StatusCode::SERVICE_UNAVAILABLE,
+        "graph.warming_up" | "search.semantic_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
         "graph.load_failed" | "internal" => StatusCode::INTERNAL_SERVER_ERROR,
         c if c.starts_with("storage.") => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::BAD_REQUEST,
@@ -106,6 +106,9 @@ pub fn hint_of(code: &str) -> Option<&'static str> {
         "graph.not_found" => "List the available graphs with GET /v1/graphs.",
         "graph.warming_up" => {
             "The graph is loading; retry after the number of seconds in Retry-After."
+        }
+        "search.semantic_unavailable" => {
+            "Search with mode auto (words, and meaning when available) or text instead."
         }
         "auth.missing_key" => "Send Authorization: Bearer <key>.",
         "api.not_found" => "See GET /openapi.yaml for the available routes.",

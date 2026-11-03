@@ -29,6 +29,11 @@ pub struct Config {
     pub preload: bool,
     /// Keep a tantivy full-text index per graph (else search uses SQLite FTS5).
     pub text_index: bool,
+    /// Keep a semantic index per graph ([RANK-8]), when the embedding model is found.
+    pub semantic: bool,
+    /// Folder of the embedding model (`model.onnx` and its tokenizer files); default
+    /// `<data_dir>/models/<model name>/`.
+    pub model_dir: Option<PathBuf>,
     /// How often background maintenance runs: full-text index commits (writes do not wait for
     /// them; after a crash the index catches up from the change log) and passive WAL checkpoints.
     pub maintenance_ms: u64,
@@ -72,6 +77,8 @@ impl Default for Config {
             warmup_wait_ms: 2000,
             preload: true,
             text_index: true,
+            semantic: true,
+            model_dir: None,
             maintenance_ms: 1000,
             slow_ms: 500,
             keys: Vec::new(),
@@ -104,6 +111,8 @@ impl Config {
     /// | `MYGRAPH_DATA_DIR` | `data_dir` |
     /// | `MYGRAPH_DEFAULT_GRAPH` | `default_graph` |
     /// | `MYGRAPH_LOG` | `log` |
+    /// | `MYGRAPH_SEMANTIC` | `semantic` (`true` or `false`) |
+    /// | `MYGRAPH_MODEL_DIR` | `model_dir` |
     /// | `MYGRAPH_ADMIN_KEY` | adds a key for actor `admin`, role `admin` |
     /// | `MYGRAPH_AGENT_KEY` | adds a key for actor `agent`, role `agent-write` |
     /// | `MYGRAPH_READ_KEY` | adds a key for actor `reader`, role `agent-read` |
@@ -136,6 +145,14 @@ impl Config {
         }
         if let Some(v) = get("MYGRAPH_LOG")? {
             self.log = v;
+        }
+        if let Some(v) = get("MYGRAPH_SEMANTIC")? {
+            self.semantic = v
+                .parse()
+                .map_err(|_| format!("MYGRAPH_SEMANTIC {v:?}: expected true or false"))?;
+        }
+        if let Some(v) = get("MYGRAPH_MODEL_DIR")? {
+            self.model_dir = Some(PathBuf::from(v));
         }
         for (name, actor, role) in [
             ("MYGRAPH_ADMIN_KEY", "admin", Role::Admin),
@@ -198,6 +215,8 @@ impl Config {
             "warmup_wait_ms": self.warmup_wait_ms,
             "preload": self.preload,
             "text_index": self.text_index,
+            "semantic": self.semantic,
+            "model_dir": self.model_dir.as_ref().map(|p| p.display().to_string()),
             "maintenance_ms": self.maintenance_ms,
             "slow_ms": self.slow_ms,
             "keys": self.keys.len(),

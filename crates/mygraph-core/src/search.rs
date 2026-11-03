@@ -4,12 +4,13 @@ use crate::engine::{Graph, OpError, storage_error};
 use crate::ids::ObjectKind;
 use crate::model::{Status, id_string};
 use crate::name_key::name_key;
-use crate::store::{Store, TextTarget};
+use crate::store::{Closeness, Store, TextTarget, passages};
 use crate::text::nfc;
 use crate::ucd::{is_letter, is_mark, is_number};
 use crate::vocab::VocabKind;
 use serde_json::{Map, Value as Json, json};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 const PREFIX_SCAN: usize = 1000;
 const FUZZY_THRESHOLD: f64 = 0.3;
@@ -21,6 +22,7 @@ enum Mode {
     Prefix,
     Fuzzy,
     Text,
+    Semantic,
 }
 
 fn bad(field: &str, expected: &str) -> OpError {
@@ -43,6 +45,51 @@ pub fn text_tokens(s: &str) -> Vec<String> {
     }
     if !cur.is_empty() {
         out.push(cur);
+    }
+    out
+}
+
+/// [RANK-9] reciprocal rank fusion: each item scores the sum of 1 / (60 + rank) over the lists
+/// it is in (ranks from 1); higher first, ties by the best rank, then by the earliest list with
+/// that rank, then by position there. Items repeated within a list count once, at their first
+/// place.
+pub fn fuse<K: Copy + Eq + Hash>(lists: &[&[K]]) -> Vec<K> {
+    // item -> (score, best rank, list of the best rank)
+    let mut acc: HashMap<K, (f64, usize, usize)> = HashMap::new();
+    for (l, list) in lists.iter().enumerate() {
+        let mut seen = HashSet::new();
+        for &k in list.iter() {
+            if !seen.insert(k) {
+                continue;
+            }
+            let rank = seen.len();
+            let e = acc.entry(k).or_insert((0.0, usize::MAX, l));
+            e.0 += 1.0 / (60.0 + rank as f64);
+            if rank < e.1 {
+                e.1 = rank;
+                e.2 = l;
+            }
+        }
+    }
+    let mut out: Vec<(K, (f64, usize, usize))> = acc.into_iter().collect();
+    out.sort_by(|(_, a), (_, b)| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    out.into_iter().map(|(k, _)| k).collect()
+}
+
+/// [OP-SEARCH-4] for a hit found by meaning only: the start of its closest passage.
+fn passage_snippet(text: &str, passage: usize) -> String {
+    let all = passages(text);
+    let Some(p) = all.get(passage).or(all.first()) else {
+        return String::new();
+    };
+    let words: Vec<&str> = p.split_whitespace().collect();
+    let mut out = String::new();
+    if passage > 0 {
+        out.push('…');
+    }
+    out.push_str(&words[..words.len().min(12)].join(" "));
+    if words.len() > 12 || passage + 1 < all.len() {
+        out.push('…');
     }
     out
 }
@@ -97,7 +144,24 @@ impl<S: Store> Graph<S> {
             Some(Some("prefix")) => Mode::Prefix,
             Some(Some("fuzzy")) => Mode::Fuzzy,
             Some(Some("text")) => Mode::Text,
-            _ => return Err(bad("mode", "auto, exact, prefix, fuzzy or text")),
+            Some(Some("semantic")) => Mode::Semantic,
+            _ => return Err(bad("mode", "auto, exact, prefix, fuzzy, text or semantic")),
+        };
+        // [OP-SEARCH-5]
+        let semantic = match (mode, self.semantic_index()) {
+            (Mode::Auto | Mode::Semantic, Some(s)) if s.ready() => Some(s),
+            (Mode::Semantic, index) => {
+                let why = if index.is_some() {
+                    "the graph's semantic index is still being built"
+                } else {
+                    "this server has no semantic index for the graph"
+                };
+                return Err(OpError::new(
+                    "search.semantic_unavailable",
+                    format!("mode semantic: {why}"),
+                ));
+            }
+            _ => None,
         };
         let limit = match req.get("limit") {
             None => 20,
@@ -162,6 +226,7 @@ impl<S: Store> Graph<S> {
         let q = name_key(&query);
         let qlen = q.chars().count();
         let text = matches!(mode, Mode::Auto | Mode::Fuzzy | Mode::Text);
+        let meaning = semantic.is_some();
         let tokens = if text {
             text_tokens(&query)
         } else {
@@ -252,27 +317,26 @@ impl<S: Store> Graph<S> {
                 }
             }
             // Text scores (at most 0.4) never outrank name matches (at least 0.49): with more
-            // name hits than the limit, full text cannot change the answer.
-            let text = text && !(mode == Mode::Auto && hits.len() > limit);
-            if text {
-                let found = self.full_text(TextTarget::Nodes, &tokens, fetch)?;
+            // name hits than the limit, full text and meaning cannot change the answer.
+            if (text || meaning) && !(mode == Mode::Auto && hits.len() > limit) {
+                let found = self.text_tier(
+                    TextTarget::Nodes,
+                    &query,
+                    if text { Some(&tokens) } else { None },
+                    semantic,
+                    fetch,
+                )?;
                 let n = found.len() as f64;
-                for (i, h) in found.into_iter().enumerate() {
-                    if node_ok(&h.idx) {
-                        offer(
-                            &mut hits,
-                            ObjectKind::Node,
-                            h.idx,
-                            0.1 + 0.3 * (n - i as f64) / n,
-                            "text",
-                            None,
-                        );
+                for (i, (idx, matched, _)) in found.into_iter().enumerate() {
+                    if node_ok(&idx) {
+                        let score = 0.1 + 0.3 * (n - i as f64) / n;
+                        offer(&mut hits, ObjectKind::Node, idx, score, matched, None);
                     }
                 }
             }
         }
-        // [OP-SEARCH-2] links and evidence: full text only.
-        if text && !(mode == Mode::Auto && hits.len() > limit) {
+        // [OP-SEARCH-2] links: full text only; evidence: full text and meaning.
+        if (text || meaning) && !(mode == Mode::Auto && hits.len() > limit) {
             for (section, target, kind) in [
                 ("links", TextTarget::Links, ObjectKind::Link),
                 ("evidence", TextTarget::Evidence, ObjectKind::Evidence),
@@ -280,30 +344,31 @@ impl<S: Store> Graph<S> {
                 if !sections.contains(section) {
                     continue;
                 }
-                let found = self.full_text(target, &tokens, fetch)?;
+                let semantic = semantic.filter(|_| kind == ObjectKind::Evidence);
+                let found = self.text_tier(
+                    target,
+                    &query,
+                    if text { Some(&tokens) } else { None },
+                    semantic,
+                    fetch,
+                )?;
                 let n = found.len() as f64;
-                for (i, h) in found.into_iter().enumerate() {
+                for (i, (idx, matched, snippet)) in found.into_iter().enumerate() {
                     let ok = match kind {
                         ObjectKind::Link => self
                             .state
                             .links
-                            .get(&h.idx)
+                            .get(&idx)
                             .is_some_and(|l| status_ok(l.status) && type_ok(&l.type_)),
                         _ => self
                             .state
                             .evidence
-                            .get(&h.idx)
+                            .get(&idx)
                             .is_some_and(|e| status_ok(e.status)),
                     };
                     if ok {
-                        offer(
-                            &mut hits,
-                            kind,
-                            h.idx,
-                            0.1 + 0.3 * (n - i as f64) / n,
-                            "text",
-                            h.snippet,
-                        );
+                        let score = 0.1 + 0.3 * (n - i as f64) / n;
+                        offer(&mut hits, kind, idx, score, matched, snippet);
                     }
                 }
             }
@@ -419,7 +484,71 @@ pub(crate) fn snippet(text: &str, tokens: &[String]) -> String {
     out
 }
 
+/// One hit of the text tier: internal number, `matched`, snippet (evidence only).
+type TierHit = (i64, &'static str, Option<String>);
+
 impl<S: Store> Graph<S> {
+    /// [RANK-9] the text tier of one section: full-text hits (when `tokens` are given) and hits
+    /// by meaning (when `semantic` is given), fused, best first.
+    fn text_tier(
+        &self,
+        target: TextTarget,
+        query: &str,
+        tokens: Option<&[String]>,
+        semantic: Option<&dyn crate::store::SemanticIndex>,
+        fetch: usize,
+    ) -> Result<Vec<TierHit>, OpError> {
+        let words = match tokens {
+            Some(t) => self.full_text(target, t, fetch)?,
+            None => Vec::new(),
+        };
+        let close = match semantic {
+            Some(s) => s
+                .nearest(target, query, fetch, Closeness::Related)
+                .map_err(storage_error)?
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+        if close.is_empty() {
+            return Ok(words
+                .into_iter()
+                .map(|h| (h.idx, "text", h.snippet))
+                .collect());
+        }
+        let word_ids: Vec<i64> = words.iter().map(|h| h.idx).collect();
+        let close_ids: Vec<i64> = close.iter().map(|h| h.idx).collect();
+        let mut snippets: HashMap<i64, Option<String>> =
+            words.into_iter().map(|h| (h.idx, h.snippet)).collect();
+        let passage: HashMap<i64, usize> = close.iter().map(|h| (h.idx, h.passage)).collect();
+        let mut out = Vec::new();
+        for idx in fuse(&[&word_ids, &close_ids]) {
+            match snippets.remove(&idx) {
+                Some(snippet) => out.push((idx, "text", snippet)),
+                None => {
+                    let snippet = match target {
+                        TextTarget::Evidence => {
+                            let text = self.evidence_meaning(idx)?;
+                            Some(passage_snippet(&text, passage[&idx]))
+                        }
+                        _ => None,
+                    };
+                    out.push((idx, "semantic", snippet));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// An evidence's text as embedded ([`crate::store::TextDoc::meaning`]).
+    fn evidence_meaning(&self, idx: i64) -> Result<String, OpError> {
+        let content = self.store.evidence_content(idx).map_err(storage_error)?;
+        let doc = self
+            .state
+            .get(ObjectKind::Evidence, idx)
+            .and_then(|row| crate::store::text_doc(&row, content.as_deref()));
+        Ok(doc.map(|d| d.meaning().to_owned()).unwrap_or_default())
+    }
+
     /// Full text from the attached index, or from the store's own tables.
     fn full_text(
         &self,

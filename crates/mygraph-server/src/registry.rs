@@ -4,12 +4,13 @@
 use crate::error::ApiError;
 use mygraph_core::engine::Graph;
 use mygraph_core::model::Policies;
+use mygraph_semantic::{Embed, UsearchIndex};
 use mygraph_store_sqlite::{Checkpointer, GraphFile, graph_path};
 use mygraph_text_tantivy::{TantivyText, index_dir};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 pub type G = Graph<GraphFile>;
@@ -47,11 +48,23 @@ pub struct GraphRun {
     pub checkpoints: u64,
     pub checkpoint_errors: u64,
     pub checkpoint_s: f64,
+    pub semantic_commits: u64,
+    pub semantic_commit_errors: u64,
+    pub semantic_commit_s: f64,
+    /// When the semantic index was last committed.
+    pub semantic_saved: Option<Instant>,
 }
+
+/// How often the semantic index is saved while it is ready: saving writes the whole index, and
+/// it is only a cache (after a crash it catches up from the change log). While it is building,
+/// every maintenance run commits, to embed the waiting documents.
+const SEMANTIC_SAVE_EVERY: Duration = Duration::from_secs(30);
 
 pub struct Registry {
     data_dir: PathBuf,
     text_index: bool,
+    /// The embedding model shared by every graph's semantic index.
+    model: Option<Arc<dyn Embed>>,
     warmup_wait: Duration,
     slots: Mutex<BTreeMap<String, Arc<watch::Sender<SlotState>>>>,
     /// Background WAL checkpoints of the loaded graphs.
@@ -71,7 +84,12 @@ pub fn now_ms() -> i64 {
 
 impl Registry {
     /// Finds the graphs in `<data_dir>/graphs/`; none is loaded yet.
-    pub fn new(data_dir: &Path, text_index: bool, warmup_wait: Duration) -> Self {
+    pub fn new(
+        data_dir: &Path,
+        text_index: bool,
+        model: Option<Arc<dyn Embed>>,
+        warmup_wait: Duration,
+    ) -> Self {
         let mut slots = BTreeMap::new();
         if let Ok(dir) = std::fs::read_dir(data_dir.join("graphs")) {
             for e in dir.flatten() {
@@ -90,6 +108,7 @@ impl Registry {
         Self {
             data_dir: data_dir.to_owned(),
             text_index,
+            model,
             warmup_wait,
             slots: Mutex::new(slots),
             checkpointers: Mutex::new(BTreeMap::new()),
@@ -182,7 +201,19 @@ impl Registry {
                 Err(e) => tracing::warn!(graph = %name, "full-text index unavailable: {e}"),
             }
         }
+        self.attach_semantic(name, &mut g);
         Ok(g)
+    }
+
+    /// Attaches the graph's semantic index when there is a model; without it, search matches
+    /// words only.
+    fn attach_semantic(&self, name: &str, g: &mut G) {
+        if let Some(model) = &self.model
+            && let Err(e) = UsearchIndex::open(&self.data_dir, name, model.clone())
+                .and_then(|t| g.attach_semantic_index(Box::new(t)))
+        {
+            tracing::warn!(graph = %name, "semantic index unavailable: {e}");
+        }
     }
 
     /// The graph, loading it if needed and waiting up to the warm-up time ([API-GRAPH-2]).
@@ -251,6 +282,8 @@ impl Registry {
                 tracing::warn!(graph = %name, "full-text index unavailable: {e}");
             }
         }
+        let _ = std::fs::remove_dir_all(mygraph_semantic::index_dir(&self.data_dir, name));
+        self.attach_semantic(name, &mut g);
         slots.insert(
             name.to_owned(),
             Arc::new(watch::Sender::new(SlotState::Ready(Arc::new(RwLock::new(
@@ -295,6 +328,7 @@ impl Registry {
             }
         }
         let _ = std::fs::remove_dir_all(index_dir(&self.data_dir, name));
+        let _ = std::fs::remove_dir_all(mygraph_semantic::index_dir(&self.data_dir, name));
         Ok(target)
     }
 }
@@ -322,13 +356,12 @@ impl Registry {
             let SlotState::Ready(h) = state else { continue };
             // The handle is taken under the lock, the commit runs without it. A graph busy with a
             // long write (an import) is skipped rather than waited for, so checkpoints still run.
-            let text = match h.try_read() {
-                Ok(g) => g.as_ref().and_then(|g| g.text_handle()),
-                Err(std::sync::TryLockError::Poisoned(p)) => {
-                    p.into_inner().as_ref().and_then(|g| g.text_handle())
-                }
+            let (text, semantic) = match h.try_read() {
+                Ok(g) => handles(g.as_ref()),
+                Err(std::sync::TryLockError::Poisoned(p)) => handles(p.into_inner().as_ref()),
                 Err(std::sync::TryLockError::WouldBlock) => continue,
             };
+            self.commit_semantic(&name, &h, semantic);
             let Some(t) = text.filter(|t| t.pending() > 0) else {
                 continue;
             };
@@ -352,7 +385,72 @@ impl Registry {
     }
 }
 
+/// The graph's full-text and semantic index handles.
+type Handles = (
+    Option<Arc<dyn mygraph_core::store::TextIndex>>,
+    Option<Arc<dyn mygraph_core::store::SemanticIndex>>,
+);
+
+fn handles(g: Option<&G>) -> Handles {
+    (
+        g.and_then(|g| g.text_handle()),
+        g.and_then(|g| g.semantic_handle()),
+    )
+}
+
 impl Registry {
+    /// Embeds waiting documents and saves the semantic index: every run while it is building,
+    /// else at most every [`SEMANTIC_SAVE_EVERY`].
+    fn commit_semantic(
+        &self,
+        name: &str,
+        h: &Handle,
+        index: Option<Arc<dyn mygraph_core::store::SemanticIndex>>,
+    ) {
+        let Some(t) = index.filter(|t| t.pending() > 0) else {
+            return;
+        };
+        let due = !t.ready()
+            || self
+                .run(name)
+                .semantic_saved
+                .is_none_or(|at| at.elapsed() >= SEMANTIC_SAVE_EVERY);
+        if !due {
+            return;
+        }
+        let start = Instant::now();
+        let result = t.commit();
+        let took = start.elapsed().as_secs_f64();
+        self.update_run(name, |r| {
+            r.semantic_commit_s += took;
+            r.semantic_saved = Some(Instant::now());
+            match &result {
+                Ok(()) => r.semantic_commits += 1,
+                Err(_) => r.semantic_commit_errors += 1,
+            }
+        });
+        if let Err(e) = result {
+            tracing::warn!(graph = %name, "semantic index commit failed, search matches words only: {e}");
+            if let Some(g) = h.read().unwrap_or_else(PoisonError::into_inner).as_ref() {
+                g.mark_semantic_stale();
+            }
+        }
+    }
+
+    /// Saves every semantic index with waiting changes now (at shutdown).
+    pub fn flush_semantic(&self) {
+        for (name, state) in self.list() {
+            let SlotState::Ready(h) = state else { continue };
+            let index = h
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+                .and_then(|g| g.semantic_handle());
+            self.update_run(&name, |r| r.semantic_saved = None);
+            self.commit_semantic(&name, &h, index);
+        }
+    }
+
     fn manage_checkpoints(&self, name: &str, g: &G) {
         match g.store().background_checkpoints() {
             Ok(c) => {

@@ -27,7 +27,9 @@ of the design; the rest is planned.
 **[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes"}`, plus, when the
 graph is loaded (`status` `ready`): `counts` (as in [OP-OVER-2]), `policies`, `last_seq`, and
 `text_index`: `"current"`, `"stale"` (an update failed; search uses the store's own full text) or
-`"none"`.
+`"none"`, and `semantic_index` ([RANK-8]): `"current"`, `"building"` (embedding many documents, as
+after a rebuild; search matches spelling only meanwhile), `"stale"` (an update failed; spelling
+only until the graph is reopened) or `"none"` (no embedding model).
 
 **[ADMIN-GRAPH-2]** Creating: `name` follows [GRAPH-NAME-1]; `policies` is optional, each missing
 member taking its default ([OBJ-POLICY-*]); invalid input fails with `admin.invalid_field`,
@@ -70,9 +72,10 @@ parameters fail with `stats.invalid_field`.
   the time of its newest one (`null` when none), the objects it created whatever their status
   now (by `created_by`), and the objects whose status is retracted and that it last updated (by
   `updated_by`); by `batches` descending, then actor name.
-- `storage`: `{"file_bytes", "wal_bytes", "text_index_bytes", "text_index"}`: database and WAL
-  sizes as in [ADMIN-GRAPH-1], the total size of the files of the graph's full-text cache (0 when
-  there is none), and `text_index` as in [ADMIN-GRAPH-1].
+- `storage`: `{"file_bytes", "wal_bytes", "text_index_bytes", "text_index",
+  "semantic_index_bytes", "semantic_index"}`: database and WAL sizes as in [ADMIN-GRAPH-1], the
+  total size of the files of the graph's full-text and semantic caches (0 when there is none),
+  and `text_index` and `semantic_index` as in [ADMIN-GRAPH-1].
 
 ## 2. Server
 
@@ -119,6 +122,9 @@ left out for a graph busy with a long write at that moment).
 | `mygraph_text_index_stale` | gauge | `graph` | 1 when search fell back to the store's own full text (*loaded*, with an index) |
 | `mygraph_text_commits_total` | counter | `graph`, `outcome` (`ok`, `error`) | Background full-text commits |
 | `mygraph_text_commit_seconds_total` | counter | `graph` | Time spent in them |
+| `mygraph_semantic_index_pending` | gauge | `graph` | Documents waiting to be embedded into the semantic index (*loaded*, with an index) |
+| `mygraph_semantic_commits_total` | counter | `graph`, `outcome` | Background semantic index commits (embedding, then saving) |
+| `mygraph_semantic_commit_seconds_total` | counter | `graph` | Time spent in them |
 | `mygraph_checkpoints_total` | counter | `graph`, `outcome` | Background WAL checkpoints |
 | `mygraph_checkpoint_seconds_total` | counter | `graph` | Time spent in them |
 

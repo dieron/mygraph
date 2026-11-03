@@ -8,7 +8,7 @@ Order within a phase is a suggestion; the PoC report and real usage will re-rank
 
 | Area | Items |
 |---|---|
-| **Semantic search** | Local embeddings (ONNX via `ort`/`fastembed`, small multilingual model), HNSW index (`usearch`), hybrid ranking with BM25 (reciprocal rank fusion); `resolve` and `search` use meaning, not just spelling |
+| **Semantic search** | Local embeddings (ONNX via `ort`/`fastembed`, small multilingual model), HNSW index (`usearch`), hybrid ranking with BM25 (reciprocal rank fusion); `resolve` and `search` use meaning, not just spelling. **Done 2026-11-02** (`mygraph-semantic`, multilingual-e5-small; `resolve` lists nodes close in meaning as `similar` without changing its verdict) |
 | **Search engine upgrades** | tantivy and/or fst if the M4 benchmark gate asks for them |
 | **Schema registry** | Optional strict types (required props, property kinds, allowed link endpoints), type inheritance, inverse link names (`PARENT_OF` ↔ `CHILD_OF`) |
 | **Truth handling** | Weighted support score (confidence × source reliability × recency); multi-valued properties with per-value citations and ranks (Wikidata-style preferred / normal / deprecated); "disputed" status and a review list |

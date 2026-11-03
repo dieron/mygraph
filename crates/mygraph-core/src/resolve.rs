@@ -2,9 +2,10 @@
 
 use crate::engine::{Graph, OpError};
 use crate::ids::ObjectKind;
+use crate::model::Status;
 use crate::model::id_string;
 use crate::name_key::{check_name, name_key};
-use crate::store::Store;
+use crate::store::{Closeness, Store, TextTarget};
 use crate::text::nfc;
 use crate::values::{self, Parsed, Value};
 use crate::vocab::VocabKind;
@@ -110,9 +111,49 @@ impl<S: Store> Graph<S> {
                 }
                 Some(_) => return Err(bad(i, "hints", "an object")),
             }
-            results.push(self.resolve_one(&name, type_.as_deref(), &hints));
+            let mut result = self.resolve_one(&name, type_.as_deref(), &hints);
+            self.add_similar(&name, &mut result)?;
+            results.push(result);
         }
         Ok(json!({ "results": results }))
+    }
+
+    /// [OP-RESOLVE-3] for `none` and `ambiguous`: up to 3 other active nodes close in meaning.
+    fn add_similar(&self, name: &str, result: &mut Json) -> Result<(), OpError> {
+        let Some(index) = self.semantic_index().filter(|s| s.ready()) else {
+            return Ok(());
+        };
+        if result["verdict"] == "match" {
+            return Ok(());
+        }
+        let shown: Vec<&str> = result["candidates"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["id"].as_str())
+            .collect();
+        let hits = index
+            .nearest(TextTarget::Nodes, name, 20, Closeness::Close)
+            .map_err(crate::engine::storage_error)?
+            .unwrap_or_default();
+        let similar: Vec<Json> = hits
+            .into_iter()
+            .filter_map(|h| {
+                let node = self.state.nodes.get(&h.idx)?;
+                let id = id_string(ObjectKind::Node, h.idx);
+                (node.status == Status::Active && !shown.contains(&id.as_str())).then(|| {
+                    json!({
+                        "id": id, "type": &*node.type_, "name": node.name,
+                        "similarity": (f64::from(h.similarity) * 1000.0).round() / 1000.0,
+                    })
+                })
+            })
+            .take(3)
+            .collect();
+        if !similar.is_empty() {
+            result["similar"] = similar.into();
+        }
+        Ok(())
     }
 
     fn resolve_one(

@@ -1,6 +1,6 @@
 This is MyGraph, a knowledge graph where every fact cites evidence. A server holds several graphs: `graphs` lists them (and creates one for a new topic); every other tool works on one graph, given by `graph` or the default `graphs` shows. Start with `overview` to learn the graph's node types, link types and conventions, and reuse them.
 
-Before creating entities, check whether they exist: `resolve` takes many described names at once and says match, ambiguous or none for each; `search` finds by name, alias or text.
+Before creating entities, check whether they exist: `resolve` takes many described names at once and says match, ambiguous or none for each; `search` finds by name, alias, text or meaning.
 
 Record what you learn with one `write` per source: put the source in `evidence` (a URL and/or the exact text fragment, with a `ref` like "@src"), then the `nodes` and `links` it supports, each with `cite: ["@src"]`. Use `ref`s ("@ada") to link items created in the same write. Property values are JSON; dates are `{"$date": "1815-12-10"}` (or "1815-12", "1815"), times `{"$datetime": "2024-03-02T10:00:00Z"}`. Writes are idempotent: repeating one changes nothing. For your own conclusions, add an evidence of kind `observation` that explains them and cite it.
 

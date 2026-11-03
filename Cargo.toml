@@ -4,6 +4,7 @@ members = [
   "crates/mygraph-core",
   "crates/mygraph-store-sqlite",
   "crates/mygraph-text-tantivy",
+  "crates/mygraph-semantic",
   "crates/mygraph-server",
   "crates/mygraph-bench",
   "crates/mygraph-ldbc",
@@ -20,6 +21,7 @@ publish = false
 mygraph-core = { path = "crates/mygraph-core" }
 mygraph-store-sqlite = { path = "crates/mygraph-store-sqlite" }
 mygraph-text-tantivy = { path = "crates/mygraph-text-tantivy" }
+mygraph-semantic = { path = "crates/mygraph-semantic" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = "3"
 sha2 = "0.10"

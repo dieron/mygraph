@@ -254,6 +254,7 @@ struct Stored {
 fn store(q: &Question, data: &Path) -> Result<Stored> {
     let started = std::time::Instant::now();
     let mut g = graph::create_with(data, &policies())?;
+    let semantic = graph::attach_semantic(&mut g, data)?;
     let mut evidence = BTreeMap::new();
     let mut messages = 0;
     for (s, session) in q.sessions.iter().enumerate() {
@@ -296,12 +297,16 @@ fn store(q: &Question, data: &Path) -> Result<Stored> {
         }
         messages += session.turns.len();
     }
+    let written = started.elapsed().as_secs_f64();
+    // Embedded now, so the agent's server finds the semantic index complete.
+    g.commit_semantic()?;
     drop(g);
     Ok(Stored {
         evidence,
         size: json!({
             "sessions": q.sessions.len(), "messages": messages,
-            "seconds": started.elapsed().as_secs_f64(),
+            "seconds": started.elapsed().as_secs_f64(), "write_seconds": written,
+            "semantic": semantic,
         }),
     })
 }

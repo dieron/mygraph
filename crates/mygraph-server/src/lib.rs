@@ -39,6 +39,7 @@ impl App {
         let registry = Arc::new(Registry::new(
             &config.data_dir,
             config.text_index,
+            load_model(&config),
             Duration::from_millis(config.warmup_wait_ms),
         ));
         Arc::new(Self {
@@ -53,6 +54,32 @@ impl App {
     /// Starts loading every graph in the background (needs a tokio runtime).
     pub fn preload(&self) {
         self.registry.preload();
+    }
+}
+
+/// The embedding model for semantic search, when enabled and found; without it search matches
+/// words only.
+fn load_model(config: &Config) -> Option<Arc<dyn mygraph_semantic::Embed>> {
+    if !config.semantic {
+        return None;
+    }
+    let dir = config
+        .model_dir
+        .clone()
+        .unwrap_or_else(|| mygraph_semantic::default_model_dir(&config.data_dir));
+    if !dir.join("model.onnx").is_file() {
+        tracing::info!(
+            "no embedding model in {}: search matches words only",
+            dir.display()
+        );
+        return None;
+    }
+    match mygraph_semantic::Model::load(&dir) {
+        Ok(m) => Some(Arc::new(m)),
+        Err(e) => {
+            tracing::warn!("embedding model unavailable, search matches words only: {e}");
+            None
+        }
     }
 }
 
@@ -165,6 +192,7 @@ async fn metrics(State(app): State<Arc<App>>) -> Response {
                                 status == "stale",
                             )),
                         },
+                        semantic_pending: g.semantic_handle().map(|t| t.pending()),
                     })
                 })
                 .await
@@ -282,9 +310,12 @@ pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await;
-    tokio::task::spawn_blocking(move || registry.maintain())
-        .await
-        .ok();
+    tokio::task::spawn_blocking(move || {
+        registry.maintain();
+        registry.flush_semantic();
+    })
+    .await
+    .ok();
     result
 }
 

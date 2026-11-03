@@ -78,7 +78,7 @@ paths:
         - { name: q, in: query, required: true, schema: { type: string } }
         - { name: in, in: query, description: "Comma-separated: nodes, links, evidence", schema: { type: string } }
         - { name: types, in: query, description: Comma-separated types, schema: { type: string } }
-        - { name: mode, in: query, schema: { type: string, enum: [auto, exact, prefix, fuzzy, text] } }
+        - { name: mode, in: query, schema: { type: string, enum: [auto, exact, prefix, fuzzy, text, semantic] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
         - { name: include_retracted, in: query, schema: { type: boolean } }
       responses:
@@ -825,7 +825,7 @@ components:
               query: { type: string }
               in: { type: array, items: { type: string, enum: [nodes, links, evidence] } }
               types: { type: array, items: { type: string } }
-              mode: { type: string, enum: [auto, exact, prefix, fuzzy, text] }
+              mode: { type: string, enum: [auto, exact, prefix, fuzzy, text, semantic] }
               limit: { type: integer, minimum: 1, maximum: 500 }
               include_retracted: { type: boolean }
     Resolve:

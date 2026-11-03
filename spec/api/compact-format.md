@@ -51,9 +51,12 @@ n_1 Person "Ada Lovelace" aka "Augusta Ada King" · born=1815-12-10 · support 2
 # search
 0.85 n_3kr Person "Charles Babbage" (name:prefix)
 0.40 e_2 text "Ada Lovelace" (text) …notes on Babbage's «Analytical Engine»…
+0.35 e_5 text "Letter, 1843" (semantic) I have been working very hard for you…
 # resolve — one line per candidate entity, alternatives indented
 1 match n_3kr Person "Charles Babbage" 0.80 (name fuzzy 0.50; born matches)
 2 none
+3 none
+  similar n_12 Organization "International Business Machines" (meaning 0.86)
 # write
 batch b_8k3 · created node 1 · refs @men=n_51a
 warning NEW_VOCABULARY: …

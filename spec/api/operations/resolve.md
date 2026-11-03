@@ -43,3 +43,16 @@ candidate index and field.
 **[OP-RESOLVE-2]** `results` has one entry per candidate, in request order. `best` is the first
 plausible node ([RES-7]), absent for `none`. For `ambiguous`, `candidates` lists up to 5 plausible
 nodes in order, `best` first. Scores are rounded to 3 decimals.
+
+**[OP-RESOLVE-3]** Names can differ in spelling and still name the same thing ("IBM", "International
+Business Machines"). When the graph has a semantic index ([RANK-8]) and the verdict is `none` or
+`ambiguous`, `similar` lists up to 3 other active nodes whose text is close in meaning to the name
+(above the model's threshold for close texts, higher than for search), most similar first, each
+with `id`, `type`, `name` and `similarity` (cosine, 3 decimals). They do not change the verdict,
+which depends on spelling only ([RES-7]); an agent checks them before creating a node.
+
+```json
+{ "verdict": "none",
+  "similar": [ { "id": "n_12", "type": "Organization", "name": "International Business Machines",
+                 "similarity": 0.861 } ] }
+```

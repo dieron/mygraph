@@ -9,7 +9,7 @@
 //! diacritics folded, English words stemmed (Snowball English here, Porter in FTS5; they agree on
 //! common words).
 
-use mygraph_core::store::{StoreFailure, TextDoc, TextHit, TextIndex, TextTarget};
+use mygraph_core::store::{DerivedIndex, StoreFailure, TextDoc, TextHit, TextIndex, TextTarget};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -189,7 +189,7 @@ impl TantivyText {
     }
 }
 
-impl TextIndex for TantivyText {
+impl DerivedIndex for TantivyText {
     fn applied_seq(&self) -> Option<i64> {
         lock(&self.state).applied
     }
@@ -279,7 +279,9 @@ impl TextIndex for TantivyText {
         }
         self.commit()
     }
+}
 
+impl TextIndex for TantivyText {
     fn search(
         &self,
         target: TextTarget,
@@ -407,6 +409,7 @@ mod tests {
             target: t,
             idx,
             text: text.into(),
+            head: 0,
         }
     }
 

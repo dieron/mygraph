@@ -9,8 +9,8 @@ use crate::model::{
 };
 use crate::state::State;
 use crate::store::{
-    BatchRow, ChangeSet, Counters, LogEntry, RowOp, Store, StoreFailure, TextDoc, TextIndex,
-    text_doc,
+    BatchRow, ChangeSet, Counters, DerivedIndex, LogEntry, RowOp, SemanticIndex, Store,
+    StoreFailure, TextDoc, TextIndex, text_doc,
 };
 use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
@@ -150,6 +150,10 @@ pub struct Graph<S: Store> {
     /// absent or stale (an update failed after a commit; reopening catches it up).
     text: Option<Arc<dyn TextIndex>>,
     text_stale: AtomicBool,
+    /// Semantic index ([RANK-8]); without it (or while it is stale or building), search matches
+    /// words only.
+    semantic: Option<Arc<dyn SemanticIndex>>,
+    semantic_stale: AtomicBool,
     pub(crate) stats_cache: crate::stats::StatsCache,
 }
 
@@ -165,6 +169,8 @@ impl<S: Store> Graph<S> {
             name: name.to_owned(),
             text: None,
             text_stale: AtomicBool::new(false),
+            semantic: None,
+            semantic_stale: AtomicBool::new(false),
             stats_cache: Default::default(),
         })
     }
@@ -173,6 +179,29 @@ impl<S: Store> Graph<S> {
     /// change log, or rebuilding it when it is new or ahead of the store.
     pub fn attach_text_index(&mut self, index: Box<dyn TextIndex>) -> Result<(), StoreFailure> {
         let index: Arc<dyn TextIndex> = Arc::from(index);
+        self.sync_index(index.as_ref())?;
+        self.text = Some(index);
+        self.text_stale.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Attaches a semantic index, bringing it up to date like [`Graph::attach_text_index`]. Its
+    /// documents are embedded by its own commits, so after a rebuild it may stay unready
+    /// ([`SemanticIndex::ready`]) until background commits have embedded them.
+    pub fn attach_semantic_index(
+        &mut self,
+        index: Box<dyn SemanticIndex>,
+    ) -> Result<(), StoreFailure> {
+        let index: Arc<dyn SemanticIndex> = Arc::from(index);
+        self.sync_index(index.as_ref())?;
+        self.semantic = Some(index);
+        self.semantic_stale.store(false, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Brings a derived index up to date: catching up from the change log, or rebuilding it when
+    /// it is new or ahead of the store.
+    fn sync_index(&self, index: &dyn DerivedIndex) -> Result<(), StoreFailure> {
         let seq = self.counters.seq;
         match index.applied_seq() {
             Some(s) if s == seq => {}
@@ -221,8 +250,6 @@ impl<S: Store> Graph<S> {
                 }
             }
         }
-        self.text = Some(index);
-        self.text_stale.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -248,6 +275,53 @@ impl<S: Store> Graph<S> {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Embeds and saves recent semantic index updates until none are left (each commit embeds
+    /// for a few seconds). A failure marks the index stale (search matches words only until the
+    /// graph is reopened).
+    pub fn commit_semantic(&self) -> Result<(), StoreFailure> {
+        if let Some(t) = self.semantic_handle() {
+            while t.pending() > 0 {
+                if let Err(e) = t.commit() {
+                    self.semantic_stale.store(true, Ordering::Relaxed);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A handle on the semantic index (when attached and not stale), to commit it without
+    /// holding the graph.
+    pub fn semantic_handle(&self) -> Option<Arc<dyn SemanticIndex>> {
+        self.semantic
+            .clone()
+            .filter(|_| !self.semantic_stale.load(Ordering::Relaxed))
+    }
+
+    /// After a failed commit through [`Graph::semantic_handle`]: search matches words only until
+    /// the graph is reopened.
+    pub fn mark_semantic_stale(&self) {
+        self.semantic_stale.store(true, Ordering::Relaxed);
+    }
+
+    /// The semantic index, when attached and not stale.
+    pub(crate) fn semantic_index(&self) -> Option<&dyn SemanticIndex> {
+        self.semantic
+            .as_deref()
+            .filter(|_| !self.semantic_stale.load(Ordering::Relaxed))
+    }
+
+    /// State of the semantic index: `current`, `building` (embedding many documents, as after a
+    /// rebuild; search matches words only meanwhile), `stale` (an update failed) or `none`.
+    pub fn semantic_index_status(&self) -> &'static str {
+        match (&self.semantic, self.semantic_stale.load(Ordering::Relaxed)) {
+            (None, _) => "none",
+            (Some(_), true) => "stale",
+            (Some(s), false) if !s.ready() => "building",
+            (Some(_), false) => "current",
+        }
     }
 
     /// A handle on the full-text index (when attached and up to date), so it can be committed
@@ -628,7 +702,9 @@ impl<S: Store> Graph<S> {
 impl<S: Store> Graph<S> {
     /// After a commit: re-index every node, link and evidence the batch wrote.
     pub(crate) fn update_text(&mut self, changes: &ChangeSet) {
-        if self.text.is_none() || self.text_stale.load(Ordering::Relaxed) {
+        let text = self.text.is_some() && !self.text_stale.load(Ordering::Relaxed);
+        let semantic = self.semantic.is_some() && !self.semantic_stale.load(Ordering::Relaxed);
+        if !text && !semantic {
             return;
         }
         let seq = changes.log.last().map_or(self.counters.seq, |e| e.seq);
@@ -642,12 +718,23 @@ impl<S: Store> Graph<S> {
             };
             docs.extend(text_doc(row, content.as_deref()));
         }
-        let ok = self
-            .text
-            .as_ref()
-            .is_some_and(|t| t.index(docs, seq).is_ok());
-        if !ok {
-            self.text_stale.store(true, Ordering::Relaxed);
+        if semantic {
+            let ok = self
+                .semantic
+                .as_ref()
+                .is_some_and(|t| t.index(docs.clone(), seq).is_ok());
+            if !ok {
+                self.semantic_stale.store(true, Ordering::Relaxed);
+            }
+        }
+        if text {
+            let ok = self
+                .text
+                .as_ref()
+                .is_some_and(|t| t.index(docs, seq).is_ok());
+            if !ok {
+                self.text_stale.store(true, Ordering::Relaxed);
+            }
         }
     }
 }

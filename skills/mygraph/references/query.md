@@ -12,12 +12,14 @@ Every tool takes an optional `graph` and `format` (`compact` text, default, or `
 ```
 
 - `in`: any of `nodes` (default), `links`, `evidence`.
-- `mode`: `auto` (exact name → alias → prefix → fuzzy → full text, merged), `exact`, `prefix`,
-  `fuzzy` (typos), `text` (full text over names, summaries, string properties, evidence title and
-  content).
+- `mode`: `auto` (exact name → alias → prefix → fuzzy → full text and meaning, merged), `exact`,
+  `prefix`, `fuzzy` (typos), `text` (full text over names, summaries, string properties, evidence
+  title and content), `semantic` (meaning only: texts of nodes and evidence that say the same in
+  other words; an error when the server has no semantic index, where `auto` matches words only).
 - `types`: node or link types to keep. `include_retracted: true` also returns retracted objects.
-- Scores: exact name 1.0, alias 0.95, prefix ~0.8–0.9, fuzzy 0.4–0.7, full text 0.1–0.4. Evidence
-  hits carry a snippet with the matched words in «».
+- Scores: exact name 1.0, alias 0.95, prefix ~0.8–0.9, fuzzy 0.4–0.7, full text and meaning
+  0.1–0.4 (one ranking of both; `matched` says `text` or `semantic`). Evidence hits carry a
+  snippet: the matched words in «», or for `semantic` hits the start of the closest passage.
 
 ## 2. resolve
 
@@ -29,7 +31,10 @@ Every tool takes an optional `graph` and `format` (`compact` text, default, or `
 Up to 100 candidates. Each result: `match` (one clear existing node), `ambiguous` (several plausible —
 see the alternatives), or `none`, with scores and reasons (`name exact`, `alias exact`,
 `name fuzzy 0.62`, `born matches`, `type differs`). `hints` are property values that should agree;
-they raise or lower scores. Use it before every write that creates nodes.
+they raise or lower scores. For `none` and `ambiguous`, `similar` lists up to 3 nodes close in
+meaning but spelled differently ("IBM" for "International Business Machines"), with their
+similarity; they never change the verdict, so check them before creating. Use it before every
+write that creates nodes.
 
 ## 3. get
 

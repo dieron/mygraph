@@ -45,6 +45,19 @@ cargo run --release -p mygraph-bench -- generate --data ../mygraph-data --graph 
 cargo run --release -p mygraph-bench -- load --data ../mygraph-data --graph g100k --breakdown
 ```
 
+**Semantic search** (search and resolve by meaning, not only spelling) needs the embedding model,
+135 MB, downloaded once; the server never downloads it by itself and matches words only without
+it:
+
+```bash
+deploy/fetch-model.sh <data_dir>/models/multilingual-e5-small
+```
+
+Or put it anywhere and set `MYGRAPH_MODEL_DIR` (or `model_dir` in `server.toml`); `semantic =
+false` turns it off. The Docker image includes it. Each graph's vectors live in
+`<data_dir>/vectors/<graph>/`, a cache rebuilt in the background when missing (embedding runs at
+roughly 30–60 passages a second on one CPU; search matches words only until it is done).
+
 Windows note: if linking fails with `cannot open file 'msvcrt.lib'`, the newest Visual Studio
 lacks the x64 desktop libraries; build from a developer prompt of an installation that has them
 (e.g. run `vcvars64.bat` from VS 2022 Build Tools first).

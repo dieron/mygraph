@@ -23,19 +23,19 @@
     },
     {
       "name": "search",
-      "description": "Ranked search over node names and aliases (exact, prefix, fuzzy) and full text of nodes, links and evidence.",
+      "description": "Ranked search over node names and aliases (exact, prefix, fuzzy), full text of nodes, links and evidence, and meaning (semantic: nodes and evidence that say the same in other words).",
       "inputSchema": { "type": "object", "required": ["query"], "properties": {
         "query": { "type": "string" },
         "in": { "type": "array", "items": { "enum": ["nodes", "links", "evidence"] }, "description": "Default [\"nodes\"]." },
         "types": { "type": "array", "items": { "type": "string" }, "description": "Only these node or link types." },
-        "mode": { "enum": ["auto", "exact", "prefix", "fuzzy", "text"], "description": "Default auto." },
+        "mode": { "enum": ["auto", "exact", "prefix", "fuzzy", "text", "semantic"], "description": "Default auto (all of them). text: words only; semantic: meaning only." },
         "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
         "include_retracted": { "type": "boolean" }
       } }
     },
     {
       "name": "resolve",
-      "description": "Does this already exist? For up to 100 described entities, existing matching nodes with scores and a verdict (match, ambiguous, none). Use before writing new nodes.",
+      "description": "Does this already exist? For up to 100 described entities, existing matching nodes with scores and a verdict (match, ambiguous, none); nodes close in meaning but spelled differently are listed as similar. Use before writing new nodes.",
       "inputSchema": { "type": "object", "required": ["candidates"], "properties": {
         "candidates": { "type": "array", "items": { "type": "object", "required": ["name"], "properties": {
           "name": { "type": "string" }, "type": { "type": "string" },

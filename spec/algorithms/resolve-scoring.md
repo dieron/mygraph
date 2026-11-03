@@ -54,5 +54,8 @@ exact`, `alias exact`, or `name fuzzy <s>` / `alias fuzzy <s>` with `s` to 2 dec
 `type differs (<node type>)` when the factor is 0.7, then `<key> matches` / `<key> differs` for
 each hint in key order.
 
+Nodes close in meaning but not in spelling are listed apart, as `similar` ([OP-RESOLVE-3]); they
+are not candidates and do not change the verdict.
+
 Comparisons of scores use exact arithmetic on the values above (implementations using binary
 floating point must compare with a tolerance of 1e-9).

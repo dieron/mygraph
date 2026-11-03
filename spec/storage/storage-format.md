@@ -122,3 +122,11 @@ from the records (for example under `<data_dir>/text/<graph>/`). Such an index i
 part of the format: the FTS tables of [STORE-FTS-1] are still maintained, the derived index can be
 deleted and rebuilt at any time, and after a crash it is brought up to date from the change log
 before it answers queries.
+
+**[STORE-VEC-1]** A semantic index ([RANK-8]) is a derived index of the same kind (the reference
+server keeps it under `<data_dir>/vectors/<graph>/`: the vectors in `index.usearch` and, in
+`meta.json`, the model they come from, the vector size and the sequence number they are complete
+up to). It is not part of the format: it can be deleted and is rebuilt from the records; one built
+by another model is rebuilt; after a crash it is brought up to date from the change log. Embedding
+is slow, so an implementation may answer searches without it (by spelling only) while it is being
+built. The embedding model is read from local files, never fetched while serving.

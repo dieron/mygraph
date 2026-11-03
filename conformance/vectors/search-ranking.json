@@ -27,6 +27,19 @@
         { "note": "4 shared of 13: just above the fuzzy threshold 0.3.", "input": ["ada lovelace", "ada"], "output": 0.3076923076923077 },
         { "input": ["", ""], "output": 0.0 }
       ]
+    },
+    {
+      "function": "fuse_rankings",
+      "rules": ["RANK-9"],
+      "description": "Ranked lists (full text, then meaning) -> one list by reciprocal rank fusion, k = 60.",
+      "cases": [
+        { "note": "c is in both lists; b and d tie at 1/62, b's best rank is in the earlier list.", "input": { "lists": [["a", "b", "c"], ["c", "d"]] }, "output": ["c", "a", "b", "d"] },
+        { "input": { "lists": [["x", "y"]] }, "output": ["x", "y"] },
+        { "input": { "lists": [[], ["p", "q"]] }, "output": ["p", "q"] },
+        { "note": "A repeated item counts once, at its first place.", "input": { "lists": [["a", "a", "b"], ["b"]] }, "output": ["b", "a"] },
+        { "note": "Equal ranks in different lists: the earlier list first.", "input": { "lists": [["a", "b"], ["c", "d"]] }, "output": ["a", "c", "b", "d"] },
+        { "note": "Equal sums and best ranks: a has its best rank in the earlier list.", "input": { "lists": [["a", "b"], ["b", "a"]] }, "output": ["a", "b"] }
+      ]
     }
   ]
 }

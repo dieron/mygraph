@@ -34,11 +34,12 @@ swappable, and lets us pick the easiest correct option for the PoC.
 | Property filters | Scan of the type-filtered set (RAM, parallel with rayon) | Per-property sorted indexes, created on demand or automatically for hot properties |
 | Aggregations (count, sum, avg, min, max, group-by, histogram) | Same scan, aggregated in one pass | Columnar property storage (Arrow) / DataFusion for heavy analytics |
 | Evidence ↔ fact lookups | In-RAM maps: target → citations, evidence → citations | — |
-| Semantic (meaning) search | — (phase 2) | Server-side embeddings (ONNX via `ort`/`fastembed`, small multilingual model) + HNSW index (`usearch`), hybrid ranking with BM25 via reciprocal rank fusion |
+| Semantic (meaning) search | Server-side embeddings (multilingual-e5-small, int8 ONNX via `fastembed`/`ort`) + HNSW index (`usearch`, f16 vectors), fused with BM25 by reciprocal rank fusion; crate `mygraph-semantic` (since 2026-11-02) | A larger or better model when benchmarks show what it gains |
 
-Why semantic search is phase 2 and not PoC: the agent cannot produce embeddings itself, so the
-server must embed text with a local model. That adds a model download, CPU cost on every write and
-a second index — worth it, but not needed to prove the core model and API.
+Semantic search came after the PoC: the agent cannot produce embeddings itself, so the server
+embeds text with a local model. That costs a model download (135 MB, once, never at run time), CPU
+(tens of passages a second; writes only queue texts, background commits embed them) and a second
+index, a cache like the tantivy one ([STORE-VEC-1]).
 
 ## 3. Evidence content storage
 

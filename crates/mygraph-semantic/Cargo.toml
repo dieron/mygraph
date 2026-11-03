@@ -1,0 +1,20 @@
+[package]
+name = "mygraph-semantic"
+description = "MyGraph semantic index: local text embeddings (ONNX) in an HNSW index (usearch), a rebuildable cache of the records"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+mygraph-core.workspace = true
+serde_json.workspace = true
+fastembed = { version = "7.5", default-features = false, features = ["ort-download-binaries-rustls-tls"] }
+usearch = "2.26"
+
+[dev-dependencies]
+tempfile.workspace = true
+mygraph-store-sqlite.workspace = true
+
+[lints]
+workspace = true

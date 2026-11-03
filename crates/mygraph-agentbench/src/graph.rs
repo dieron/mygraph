@@ -10,6 +10,7 @@ use serde_json::{Value as Json, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
 const SKILL: &str = include_str!("../../../skills/mygraph/SKILL.md");
 const SKILL_WRITE: &str = include_str!("../../../skills/mygraph/references/write.md");
@@ -47,6 +48,32 @@ pub fn create_with(data: &Path, policies: &Policies) -> Result<Graph<GraphFile>>
     fs::create_dir_all(data)?;
     let file = GraphFile::create(data, GRAPH, policies, now_ms()?)?;
     Graph::open(file, GRAPH, policies.clone())
+}
+
+/// The embedding model in `MYGRAPH_MODEL_DIR`, loaded once, for graphs with semantic search
+/// (the MCP server started for an agent reads the same variable). `None` when it is not set.
+pub fn semantic_model() -> Result<Option<Arc<dyn mygraph_semantic::Embed>>> {
+    static MODEL: OnceLock<Option<Arc<dyn mygraph_semantic::Embed>>> = OnceLock::new();
+    if let Some(m) = MODEL.get() {
+        return Ok(m.clone());
+    }
+    let model: Option<Arc<dyn mygraph_semantic::Embed>> =
+        match std::env::var_os("MYGRAPH_MODEL_DIR") {
+            Some(dir) => Some(Arc::new(mygraph_semantic::Model::load(Path::new(&dir))?)),
+            None => None,
+        };
+    Ok(MODEL.get_or_init(|| model).clone())
+}
+
+/// Attaches a semantic index to a graph of `data` when there is a model ([`semantic_model`]).
+pub fn attach_semantic(g: &mut Graph<GraphFile>, data: &Path) -> Result<bool> {
+    let Some(model) = semantic_model()? else {
+        return Ok(false);
+    };
+    g.attach_semantic_index(Box::new(mygraph_semantic::UsearchIndex::open(
+        data, GRAPH, model,
+    )?))?;
+    Ok(true)
 }
 
 /// The `mcpServers` map for an agent working on the graph in `data`.

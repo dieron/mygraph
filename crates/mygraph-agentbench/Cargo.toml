@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 mygraph-core.workspace = true
 mygraph-store-sqlite.workspace = true
+mygraph-semantic.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 ureq = { version = "2", features = ["json"] }
