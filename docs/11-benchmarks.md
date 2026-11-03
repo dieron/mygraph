@@ -868,10 +868,45 @@ target/release/mygraph-agentbench longmemeval --data <dir>/longmemeval_s_cleaned
 folder per question with its transcripts, `result.json` and `graph.json` (which evidence is which
 message); the graph itself is removed after the answer and rebuilt when needed.
 
-**Sample, priced** (seed 1): 20 questions, 3–4 per type, 3 of them abstention; their histories
-total 10.0 million characters. `direct` reads about 2.5 million input tokens, about $2.50 on
-Terra; `graph` answers about $0.02–0.05 each; with the judge, about $3–3.50.
+**20 questions on GPT-6.1 Terra** (judge: Terra at low effort, seed 1; 2026-11-02): 3–4 per
+type, 3 of them abstention; their histories total 10.0 million characters. Priced beforehand at
+$3–3.50; it cost $2.35.
+
+| | `graph` | `direct` |
+|---|---|---|
+| Correct (judge) | 0.85 (17 of 20) | 0.90 (18 of 20) |
+| Single-session user / assistant / preference | 3/3, 4/4, 3/3 | 3/3, 4/4, 3/3 |
+| Multi-session / temporal / knowledge update | 1/2, 2/3, 2/2 | 1/2, 3/3, 2/2 |
+| Abstention | 2/3 | 2/3 |
+| Answer messages precision / recall / F1 | 0.83 / 0.88 / 0.82 | 0.81 / 0.88 / 0.81 |
+| Answer sessions recall | 0.90 | 0.90 |
+| Per question | 6.8 tool calls, 65 000 input tokens, 11 s, $0.010 | 106 000 input tokens, 3 s, $0.107 |
+
+Storing: 20 graphs of 38–62 sessions, 0.25 s each, no model. Answers $0.20 from the graph,
+$2.14 `direct`; judge $0.01.
+
+34. **On a history of 120 000 tokens, the graph finds what reading the whole history finds, for a
+    tenth of the price.** Both modes cited exactly the same messages on 15 of 20 questions,
+    every miss included, and the others differ by a message or two (F1 0.82 against 0.81, the
+    same session recall). The graph agent read about 65 000 tokens
+    over 6.8 calls, mostly search results, against 106 000 for one pass over the history; at
+    Terra's prices that is $0.010 against $0.107 per question.
+35. **The one question between the modes is a reading of the question, not retrieval.** "How many
+    days ago did I attend a baking class … when I made my friend's birthday cake?" Both found
+    the class (20 March) and the cake (10 April). `direct` answered the gap, 21 days, as the key
+    does; the graph agent answered the days from the class to the question's date, 26.
+36. **The two shared misses are questions that mislead.** "How many engineers do I lead … as
+    Software Engineer Manager?" was an abstention question (the user said Senior Software
+    Engineer); both answered 4. "What time did I go to bed on the day before my doctor's
+    appointment?" has dates in the history that do not line up ("last Thursday" from one session
+    and "last Wednesday" from another fall in different weeks); both said `unknown`, the key says
+    2 AM.
+37. **Scripted storage is enough to find things.** Messages stored verbatim, titled with their
+    date, and the agent's own searches (with stemming) reached the answer sessions as often as a
+    model reading everything. What an extracting agent would add (entities, links, resolved
+    dates) is not tested here; LoCoMo shows it costs about $0.25 per 100 messages.
 
 ### Then
 
-1. LongMemEval: run the 20-question sample priced above.
+1. LongMemEval with more questions where the modes differ most: multi-session and temporal
+   (266 of the 500), at about $0.12 per question for both modes.

@@ -103,7 +103,10 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] LongMemEval runner (`mygraph-agentbench longmemeval`): the history stored by a script,
       not an agent (an agent ingest would cost $5–10 per question); a judge rule per question
       type.
-- [ ] LongMemEval, 20 questions on Terra (about $3–3.50).
+- [x] LongMemEval, 20 questions on Terra ($2.35): graph 0.85 vs direct 0.90 correct, the one
+      difference a reading of the question; the same answer messages cited; $0.010 vs $0.107 per
+      question.
+- [ ] LongMemEval on more multi-session and temporal questions (about $0.12 per question).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 
