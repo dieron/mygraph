@@ -13,14 +13,14 @@ ARG SEMANTIC_MODEL=multilingual-e5-small
 
 # ---- embedding model ------------------------------------------------------------------------
 # Its own stage, so source changes do not download it again.
-FROM rust:1.99-bookworm AS model
+FROM rust:1.99-trixie AS model
 ARG SEMANTIC_MODEL
 COPY deploy/fetch-model.sh /fetch-model.sh
 RUN mkdir -p /models \
  && if [ "$SEMANTIC_MODEL" != none ]; then sh /fetch-model.sh "/models/$SEMANTIC_MODEL"; fi
 
 # ---- build ----------------------------------------------------------------------------------
-FROM rust:1.99-bookworm AS build
+FROM rust:1.99-trixie AS build
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -30,8 +30,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && install -d -o 65532 -g 65532 /out/data
 
 # ---- run ------------------------------------------------------------------------------------
-# Debian 12 with glibc and the C runtime, user "nonroot" (65532), no shell or package manager.
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Debian 13 with glibc and the C runtime, user "nonroot" (65532), no shell or package manager.
+# Debian 13 rather than 12: ONNX Runtime's prebuilt library needs glibc 2.38+ and GCC 13+.
+FROM gcr.io/distroless/cc-debian13:nonroot
 LABEL org.opencontainers.image.title="MyGraph" \
       org.opencontainers.image.description="Graph database with evidence, for AI agents (MCP and REST)" \
       org.opencontainers.image.licenses="MIT OR Apache-2.0"
