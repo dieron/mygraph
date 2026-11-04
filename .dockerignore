@@ -12,3 +12,4 @@ data/
 docs/
 skills/
 deploy/
+!deploy/fetch-model.sh
