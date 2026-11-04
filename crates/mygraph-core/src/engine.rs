@@ -324,6 +324,22 @@ impl<S: Store> Graph<S> {
         }
     }
 
+    /// [OP-OVER-6] How `search` and `resolve` match in this graph: whether by meaning (a
+    /// semantic index is attached and not stale), the least similarity of a hit found by meaning,
+    /// and the index's state.
+    pub fn search_settings(&self) -> serde_json::Value {
+        match self.semantic_index() {
+            Some(s) => serde_json::json!({
+                "semantic": true,
+                "semantic_threshold": (f64::from(s.threshold()) * 1000.0).round() / 1000.0,
+                "semantic_index": self.semantic_index_status(),
+            }),
+            None => serde_json::json!({
+                "semantic": false, "semantic_index": self.semantic_index_status(),
+            }),
+        }
+    }
+
     /// A handle on the full-text index (when attached and up to date), so it can be committed
     /// without holding the graph: writes then never wait for a commit.
     pub fn text_handle(&self) -> Option<Arc<dyn TextIndex>> {

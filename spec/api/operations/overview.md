@@ -2,7 +2,7 @@
 
 Status: **Draft** · spec 0.1.0-draft · design: [docs/06-agent-api.md §4.1](../../../docs/06-agent-api.md)
 
-What a graph holds: counts, vocabulary in use, policies and recent activity. An agent calls it
+What a graph holds: counts, vocabulary in use, policies, how search matches and recent activity. An agent calls it
 first in a session to learn the existing types before it writes, so the vocabulary does not
 drift. With `type`, it describes one node type or link type in depth.
 
@@ -34,6 +34,7 @@ node type nor a link type of an active object fails with `ref.not_found`.
   "types_truncated": false,
   "evidence_kinds": { "text": 4600, "url": 4100 },
   "policies": { "require_evidence": "enforce", "inline_text_limit": 65536, "naming": "styled" },
+  "search": { "semantic": true, "semantic_threshold": 0.8, "semantic_index": "current" },
   "last_seq": 412230,
   "recent": [ { "batch": "b_8k2", "at": "2026-10-24T09:12:00.000Z", "actor": "claude-research",
                 "op": "write", "note": null, "changes": 34 } ],
@@ -50,6 +51,13 @@ evidence by kind; kinds with zero are omitted.
 **[OP-OVER-3]** `policies` are the graph's policies ([OBJ-POLICY-*]); `last_seq` is the latest
 change-log sequence number (0 for an empty graph); `conventions` is a fixed informative text
 about naming and the write workflow (its wording is not normative).
+
+**[OP-OVER-6]** `search` says how `search` and `resolve` match in this graph, as the server is
+configured: `semantic` is `true` when they also match by meaning ([RANK-8], [OP-RESOLVE-3]), with
+`semantic_threshold`, the least similarity of a hit found by meaning (3 decimals);
+`semantic_index` is the index's state as in [ADMIN-GRAPH-1] (`none` when semantic search is off
+or the server has no embedding model; while it is `building`, search matches words only).
+`semantic: false` means words only. More members may be added.
 
 **[OP-OVER-4]** `recent` lists the newest batches, newest first: ID, time, actor, operation,
 note, and `changes` — the number of change-log entries the batch wrote.

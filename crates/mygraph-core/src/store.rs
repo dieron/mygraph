@@ -195,6 +195,8 @@ pub trait SemanticIndex: DerivedIndex {
     ) -> Result<Option<Vec<SemanticHit>>, StoreFailure>;
     /// Whether [`SemanticIndex::nearest`] answers now (no rebuild in progress).
     fn ready(&self) -> bool;
+    /// The least similarity of a search hit ([`Closeness::Related`]), as `overview` reports it.
+    fn threshold(&self) -> f32;
 }
 
 /// How close in meaning a semantic hit must be; the thresholds belong to the model.

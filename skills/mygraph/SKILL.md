@@ -130,10 +130,10 @@ of the answer, not every source of the nodes involved. Pick the tool by the ques
 ```
 
 **Search matches words and meaning, but it ranks; it does not reason.** By default it also finds
-sources that say it in other words ("I got a smoker" for "a kitchen appliance I bought"), marked
-`semantic`, when the server has a semantic index. Search with the question's own words before
-synonyms: a short phrase of what you look for ("kitchen appliance bought") works better than one
-word. A source can still be out of reach (a passing remark in a long message). When a few
+sources that say it in other words ("I got a smoker" for "what kitchen appliance did I buy"),
+marked `semantic`, when the server has semantic search (`overview` says so in its `search` line).
+Meaning works best with a whole question or sentence; two or three keywords match words, rarely
+meaning. So search with the question itself first, then with its key words. A source can still be out of reach (a passing remark in a long message). When a few
 searches miss, stop guessing words and narrow down by what you do know: a date range, a type, a linked node (`find`, `neighbors`). Then
 `get` those nodes with `include: {"evidence": {"limit": 50}}` for their sources, `get` the
 evidence IDs with `include: {"content": true}`, and read them.

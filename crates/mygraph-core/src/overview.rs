@@ -131,6 +131,7 @@ impl<S: Store> Graph<S> {
             .collect();
         out.insert("evidence_kinds".into(), json!(kinds));
         out.insert("policies".into(), self.policies.to_json());
+        out.insert("search".into(), self.search_settings());
         out.insert("last_seq".into(), self.counters.seq.into());
         let batches = if recent == 0 {
             Vec::new()

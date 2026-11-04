@@ -256,6 +256,23 @@ fn mode_semantic_needs_an_index() {
     // Auto matches words only.
     assert_eq!(ids(&hits(&g, "smoker", "auto", "evidence")), ["e_1"]);
     assert!(hits(&g, "appliance", "auto", "evidence").is_empty());
+    // [OP-OVER-6]
+    assert_eq!(
+        g.overview(&json!({})).unwrap()["search"],
+        json!({ "semantic": false, "semantic_index": "none" })
+    );
+}
+
+#[test]
+fn overview_says_how_search_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    GraphFile::create(dir.path(), "g", &Policies::default(), T).unwrap();
+    let mut g = open(dir.path(), fake());
+    say(&mut g, &["I just got a smoker today"]);
+    assert_eq!(
+        g.overview(&json!({})).unwrap()["search"],
+        json!({ "semantic": true, "semantic_threshold": 0.2, "semantic_index": "current" })
+    );
 }
 
 #[test]
@@ -270,6 +287,10 @@ fn many_waiting_documents_make_the_index_build_in_the_background() {
     say(&mut g, &refs);
     // Too many to embed in a query: words only, until commits have embedded them.
     assert_eq!(g.semantic_index_status(), "building");
+    assert_eq!(
+        g.overview(&json!({})).unwrap()["search"]["semantic_index"],
+        "building"
+    );
     assert_eq!(hits(&g, "appliance", "auto", "evidence").len(), 0);
     g.commit_semantic().unwrap();
     assert_eq!(g.semantic_index_status(), "current");
@@ -278,9 +299,16 @@ fn many_waiting_documents_make_the_index_build_in_the_background() {
 
 // ---- with the real model -------------------------------------------------------------------
 
-fn model() -> Option<Arc<dyn Embed>> {
+/// The model with its default threshold, or `threshold`.
+fn model_with(threshold: Option<f32>) -> Option<Arc<dyn Embed>> {
     match std::env::var_os("MYGRAPH_MODEL_DIR") {
-        Some(dir) => Some(Arc::new(Model::load(Path::new(&dir)).unwrap())),
+        Some(dir) => {
+            let m = Model::load(Path::new(&dir)).unwrap();
+            Some(Arc::new(match threshold {
+                Some(t) => m.with_threshold(t),
+                None => m,
+            }))
+        }
         None => {
             eprintln!("skipped: set MYGRAPH_MODEL_DIR to the embedding model's folder");
             None
@@ -303,17 +331,52 @@ const MESSAGES: &[&str] = &[
     "I've been trying to run three times a week, but my knees hurt after long runs.",
 ];
 
+fn model() -> Option<Arc<dyn Embed>> {
+    model_with(None)
+}
+
+/// e5 compresses the similarities of short queries: for "kitchen appliance" every message here
+/// scores 0.74–0.79 (the smoker 0.786, third), for the question "what kitchen appliance did I buy"
+/// the smoker scores 0.815, first. So at the default threshold (0.80) questions find these
+/// messages; two-word queries need a lower one.
 #[test]
 fn model_finds_messages_phrased_differently() {
+    for (threshold, queries) in [
+        (
+            None,
+            [
+                ("what kitchen appliance did I buy", "e_1"),
+                ("how many plants did I acquire", "e_2"),
+            ],
+        ),
+        (
+            Some(0.77),
+            [("kitchen appliance", "e_1"), ("acquire plants", "e_2")],
+        ),
+    ] {
+        let Some(m) = model_with(threshold) else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        GraphFile::create(dir.path(), "g", &Policies::default(), T).unwrap();
+        let mut g = open(dir.path(), Some(m));
+        say(&mut g, MESSAGES);
+        finds(&g, &queries);
+    }
+    // At the default threshold a two-word query finds nothing by meaning here.
     let Some(m) = model() else { return };
     let dir = tempfile::tempdir().unwrap();
     GraphFile::create(dir.path(), "g", &Policies::default(), T).unwrap();
     let mut g = open(dir.path(), Some(m));
     say(&mut g, MESSAGES);
-    for (query, want) in [("kitchen appliance", "e_1"), ("acquire plants", "e_2")] {
+    assert!(hits(&g, "kitchen appliance", "auto", "evidence").is_empty());
+}
+
+fn finds(g: &Graph<GraphFile>, queries: &[(&str, &str)]) {
+    for &(query, want) in queries {
         // No message has the words; by meaning the right one is among the first.
-        assert!(hits(&g, query, "text", "evidence").is_empty(), "{query}");
-        let found = hits(&g, query, "auto", "evidence");
+        assert!(hits(g, query, "text", "evidence").is_empty(), "{query}");
+        let found = hits(g, query, "auto", "evidence");
         eprintln!(
             "{query}: {:?}",
             found

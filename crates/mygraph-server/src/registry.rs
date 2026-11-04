@@ -205,6 +205,14 @@ impl Registry {
         Ok(g)
     }
 
+    /// The least similarity of a hit found by meaning, when there is an embedding model (else
+    /// search matches words only).
+    pub fn semantic_threshold(&self) -> Option<f32> {
+        self.model
+            .as_ref()
+            .map(|m| m.floor(mygraph_core::store::Closeness::Related))
+    }
+
     /// Attaches the graph's semantic index when there is a model; without it, search matches
     /// words only.
     fn attach_semantic(&self, name: &str, g: &mut G) {

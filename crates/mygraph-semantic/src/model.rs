@@ -19,6 +19,12 @@ pub const MODEL_FILES: [&str; 5] = [
     "special_tokens_map.json",
     "tokenizer_config.json",
 ];
+/// The least similarity of a search hit unless the server sets another
+/// (`search.semantic_threshold`). e5 similarities are compressed: unrelated texts score about
+/// 0.74–0.78, answers to a question about 0.80–0.87. At 0.80, half the hits found by meaning only
+/// in 160 LongMemEval searches go away, and the messages holding answers that go with them were
+/// found by words too (docs/11-benchmarks.md §4).
+pub const DEFAULT_THRESHOLD: f32 = 0.80;
 /// Tokens the model reads of one passage (its limit is 512); passages are cut shorter than this
 /// ([`mygraph_core::store::passages`]), so this only guards against very long words.
 const MAX_TOKENS: usize = 512;
@@ -51,6 +57,8 @@ pub trait Embed: Send + Sync {
 /// never waits long behind indexing.
 pub struct Model {
     session: Mutex<TextEmbedding>,
+    /// [`Closeness::Related`]: the least similarity of a search hit.
+    related: f32,
 }
 
 impl Model {
@@ -74,7 +82,15 @@ impl Model {
         let session = TextEmbedding::try_new_from_user_defined(model, options)?;
         Ok(Self {
             session: Mutex::new(session),
+            related: DEFAULT_THRESHOLD,
         })
+    }
+
+    /// The least similarity of a search hit ([`Closeness::Related`]), instead of
+    /// [`DEFAULT_THRESHOLD`].
+    pub fn with_threshold(mut self, threshold: f32) -> Self {
+        self.related = threshold;
+        self
     }
 }
 
@@ -87,12 +103,12 @@ impl Embed for Model {
         384
     }
 
-    /// e5 similarities are compressed: unrelated texts score about 0.74–0.78, answers to a
-    /// question about 0.80–0.87, a name and its spelled-out form ("IBM", "International Business
-    /// Machines") about 0.86 (measured on LongMemEval histories, docs/11-benchmarks.md §4).
+    /// Search hits: [`DEFAULT_THRESHOLD`] or the server's setting. Close: a name and its
+    /// spelled-out form ("IBM", "International Business Machines") score about 0.86 (measured on
+    /// LongMemEval histories, docs/11-benchmarks.md §4).
     fn floor(&self, closeness: Closeness) -> f32 {
         match closeness {
-            Closeness::Related => 0.77,
+            Closeness::Related => self.related,
             Closeness::Close => 0.85,
         }
     }

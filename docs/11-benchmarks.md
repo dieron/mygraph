@@ -1048,9 +1048,51 @@ So on this benchmark semantic search is about even with words plus the hint: no 
 depended on it. It stays on (it costs no answers, and finding 39's paraphrases are the case it is
 for), with word matches first.
 
+**Costs, other languages and the threshold** (2026-11-03, no model calls). Measured on the release
+build on the development machine (not idle), then the 160 searches of the words-first run
+replayed on the 50 rebuilt graphs.
+
+51. **What it costs to run.** With 2 000 short chat messages stored in 40 writes: a search takes
+    2.0 ms by words only and 6.1 ms in `auto` (embedding the query); the 40 writes took 2.8 s
+    against 2.5 s with semantic search off. Writes never wait for embedding: it runs outside the
+    graph lock, about 6 s of CPU for the 2 000 messages, and the index was current about 6 s
+    after the last write. The server holds about 470 MB with the model loaded (536 MB after the
+    2 000 messages); the vectors took 1.8 MB beside a 2.6 MB graph file. One LongMemEval history
+    (about 500 sessions' messages, ~115k tokens) took 88 s to store and embed, four at a time.
+    Agents pay nothing for it in calls or tokens when storing.
+52. **Other languages are where words cannot help at all.** 37 short messages (English, three in
+    Ukrainian, filler), 24 queries; no query in another language matched a word. By meaning the
+    target was found for Ukrainian → English 4 of 7 (2 in the top 3), Russian → English 2 of 3
+    (2), German → English 2 of 3 (2), English → Ukrainian 4 of 5 (4). Searching «коптильня»
+    found «купив коптильню» by meaning only: the stemmer is English, so word search misses
+    Ukrainian and Russian word endings. Misses were mostly abstract queries (Ukrainian «кухонна
+    техніка»); short Ukrainian messages show up as noise in most results.
+53. **A threshold of 0.80 halves the meaning-only hits.** Replaying the 160 searches (the token
+    savings assume the agent would have searched the same way):
+
+    | Threshold | Meaning-only hits shown | Input tokens saved | Answer messages lost |
+    |---|---|---|---|
+    | 0.77 (before) | 5 389 | — | — |
+    | 0.80 | 2 577 | ~6 % | 3 |
+    | 0.82 | 596 | ~10 % | 6 |
+    | 0.85 | 78 | ~11 % | 9 |
+
+    "Lost" counts answer messages that reached the agent only as meaning hits below the
+    threshold; 11 did in all (8 cited), and the hint run, words only, answered those questions
+    the same with more searches. Hit lines by words or names: 1 279.
+54. **Short queries barely reach meaning at 0.80.** e5 compresses the similarities of two-word
+    queries: for "kitchen appliance" ten unrelated messages score 0.74–0.79 and the smoker message
+    0.786 (third); asked as "what kitchen appliance did I buy", the smoker scores 0.815, first
+    ("how many plants did I acquire" finds the snake plant at 0.828). So the skill now says to
+    search with the whole question first.
+
+Semantic search became settings: `search.semantic` (default on) and `search.semantic_threshold`
+(default 0.80) in `server.toml` or `MYGRAPH_SEMANTIC` / `MYGRAPH_SEMANTIC_THRESHOLD`; `overview`
+and `GET /v1/graphs` report them, and without it the MCP tools drop mode `semantic`.
+
 ### Then
 
 1. A history where words fail more often than here (an extracting ingest, other languages, or
    questions written without the history's words) would show whether meaning earns its cost.
-2. A stricter threshold for meaning-only hits, so searches whose words match well stay short
-   (finding 50); measure the tokens it saves.
+2. The 50 questions again at 0.80 with the skill's new advice (about $0.78), to see the tokens
+   saved for real and whether whole-question searches reach meaning.

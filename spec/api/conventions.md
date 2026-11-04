@@ -54,6 +54,11 @@ otherwise.
 **[API-GRAPH-1]** Every `/v1` route except `GET /v1/graphs` names its graph in the path. An
 unknown graph fails with `graph.not_found`.
 
+**[API-GRAPH-3]** `GET /v1/graphs` also says how search matches on this server: `{"semantic":
+true, "semantic_threshold": 0.8}` when it matches by meaning too (semantic search on and the
+embedding model loaded; [RANK-8]), else `{"semantic": false}`. More members may be added. Each
+graph's own state is in its `overview` ([OP-OVER-6]).
+
 **[API-GRAPH-2]** A graph loads its in-memory indexes when the server starts or on first use.
 While it loads, a request waits up to a configured time (default 2 s); if the graph is still not
 ready it fails with `graph.warming_up` (`503`, with `Retry-After` in seconds). A graph that failed
@@ -80,7 +85,7 @@ values are comma-separated; integers and booleans (`true`/`false`) are parsed fr
 
 | Route | Operation request | Answer |
 |---|---|---|
-| `GET /v1/graphs` | — | `{"graphs": [{"name", "status"}]}`: graphs the key may use, by name; `status` is `ready`, `loading`, `unloaded` or `failed` |
+| `GET /v1/graphs` | — | `{"graphs": [{"name", "status"}], "search": {…}}`: graphs the key may use, by name; `status` is `ready`, `loading`, `unloaded` or `failed`; `search` as in [API-GRAPH-3] |
 | `GET /v1/graphs/{graph}` | `overview` with `type`, `recent`, `types_limit` from the query | the response |
 | `GET /v1/graphs/{graph}/search?q=…` | `search` with `query` = `q`, and `in`, `types` (lists), `mode`, `limit`, `include_retracted` | the response |
 | `GET /v1/graphs/{graph}/{collection}/{id}` | `get` with `refs: [id]`, and `detail`; `include` = list of `links`, `support`, `evidence`, `content` (others off; default: the operation's defaults); `links_limit`, `link_types`, `evidence_limit`, `include_retracted` | the single item (not wrapped in `items`) |

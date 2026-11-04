@@ -222,6 +222,7 @@ pub fn render(op: &str, req: &Json, r: &Json) -> String {
                 "link_types",
                 "evidence_kinds",
                 "policies",
+                "search",
                 "recent",
                 "conventions",
                 "type_detail",
@@ -766,6 +767,20 @@ fn overview(out: &mut String, r: &Json) {
     );
     if let Some(p) = r.get("policies").and_then(Json::as_object) {
         let _ = writeln!(out, "policies: {}", props(p));
+    }
+    if let Some(m) = r.get("search") {
+        let line = match (m["semantic"].as_bool(), s(m, "semantic_index")) {
+            (Some(true), Some("building")) => format!(
+                "words; by meaning (similarity >= {}) once the semantic index is built",
+                m["semantic_threshold"]
+            ),
+            (Some(true), _) => format!(
+                "words and meaning (similarity >= {})",
+                m["semantic_threshold"]
+            ),
+            _ => "words only (no semantic index)".to_owned(),
+        };
+        let _ = writeln!(out, "search: {line}");
     }
     let recent: Vec<&Json> = items(r, "recent").collect();
     if !recent.is_empty() {

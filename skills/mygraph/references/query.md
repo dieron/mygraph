@@ -16,6 +16,8 @@ Every tool takes an optional `graph` and `format` (`compact` text, default, or `
   `prefix`, `fuzzy` (typos), `text` (full text over names, summaries, string properties, evidence
   title and content), `semantic` (meaning only: texts of nodes and evidence that say the same in
   other words; an error when the server has no semantic index, where `auto` matches words only).
+  `overview`'s `search` says whether the graph matches by meaning and the least similarity of
+  such a hit; a whole question or sentence reaches it far more often than two or three keywords.
 - `types`: node or link types to keep. `include_retracted: true` also returns retracted objects.
 - Scores: exact name 1.0, alias 0.95, prefix ~0.8–0.9, fuzzy 0.4–0.7, full text and meaning
   0.1–0.4 (word matches first, then hits found by meaning only; `matched` says `text` or

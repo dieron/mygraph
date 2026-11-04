@@ -49,6 +49,14 @@ some models send every optional parameter, filled with empty values (`"type": ""
 argument sent empty therefore fails as missing. Values inside arguments (a `write`'s items, an
 `include` object's members) are passed on as sent.
 
+**[MCP-TOOL-6]** The tools follow the server's search settings ([API-GRAPH-3]). Without semantic
+search, a tool with a `without_semantic` member in mcp-tools.json is listed with that variant
+instead: its `description`, and its `properties` replacing those of the input schema (`search`
+loses mode `semantic`; `resolve` no longer mentions `similar`), and the instructions say words,
+not meaning. The `without_semantic` member itself is never listed. Over stdio with `--url`, the
+settings are read from the server's `GET /v1/graphs` (when it cannot be read, the full tools are
+listed). `graphs` with `list` includes the server's `search` as `GET /v1/graphs` does.
+
 ## 3. Transports
 
 **[MCP-HTTP-1]** Streamable HTTP at `POST /mcp`: one JSON-RPC message per request, authenticated

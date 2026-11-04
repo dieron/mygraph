@@ -120,8 +120,15 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] Word matches before meaning-only hits ([RANK-9]). LongMemEval 50 in graph mode: correct
       45 of 50 (hint 42, interleaved 41, direct 43), citation F1 0.87 (hint 0.88), 9 % more
       tokens than the hint; $0.78. The gains are answering, not finding (findings 48–50).
-- [ ] A stricter threshold for meaning-only hits, so well-matched searches stay short; measure
-      the tokens saved.
+- [x] Settings: `search.semantic` (default on) and `search.semantic_threshold` (default 0.80,
+      from 0.77); `overview` and `GET /v1/graphs` report them; without semantic search the MCP
+      tools drop mode `semantic`. Replayed on the 160 searches: 0.80 halves the meaning-only hits,
+      ~6 % fewer input tokens; Ukrainian, Russian and German queries find English messages only
+      by meaning (findings 51–54).
+- [ ] LongMemEval 50 again at 0.80 with the skill's "search with the whole question" advice
+      (about $0.78): the tokens saved for real.
+- [ ] A stemmer or meaning for Ukrainian and Russian word endings (word search misses
+      «коптильню» for «коптильня»).
 - [ ] A test where words fail more often (extracting ingest, other languages, questions written
       without the history's words), to see whether meaning earns its cost.
 - [ ] Docker image with the model: build and check it (not built yet: no Docker on the

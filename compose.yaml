@@ -21,6 +21,8 @@ services:
       MYGRAPH_READ_KEY: ${MYGRAPH_READ_KEY:-}
       MYGRAPH_DEFAULT_GRAPH: ${MYGRAPH_DEFAULT_GRAPH:-default}
       MYGRAPH_LOG: ${MYGRAPH_LOG:-info}
+      MYGRAPH_SEMANTIC: ${MYGRAPH_SEMANTIC:-true}
+      MYGRAPH_SEMANTIC_THRESHOLD: ${MYGRAPH_SEMANTIC_THRESHOLD:-0.80}
     volumes:
       - mygraph-data:/data
     stop_grace_period: 30s

@@ -751,6 +751,14 @@ components:
             properties:
               name: { type: string }
               status: { type: string, enum: [ready, loading, unloaded, failed] }
+        search: { $ref: "#/components/schemas/SearchSettings" }
+    SearchSettings:
+      description: How search matches ([API-GRAPH-3], [OP-OVER-6]).
+      type: object
+      properties:
+        semantic: { type: boolean, description: "Matches by meaning too." }
+        semantic_threshold: { type: number, description: "Least similarity of a hit found by meaning." }
+        semantic_index: { type: string, enum: [current, building, stale, none], description: "In overview only." }
     GraphInfo:
       type: object
       required: [name, status, file_bytes, wal_bytes]
@@ -960,6 +968,7 @@ components:
               types_truncated: { type: boolean }
               evidence_kinds: { type: object }
               policies: { $ref: "#/components/schemas/Policies" }
+              search: { $ref: "#/components/schemas/SearchSettings" }
               last_seq: { type: integer }
               recent: { type: array, items: { type: object } }
               conventions: { type: string }

@@ -212,6 +212,8 @@ async fn keys_and_roles_are_enforced() {
         r.json()["graphs"],
         json!([{ "name": "other", "status": "ready" }])
     );
+    // [API-GRAPH-3] No embedding model in the test server.
+    assert_eq!(r.json()["search"], json!({ "semantic": false }));
     let r = s.get("/v1/graphs/research", OTHER).await;
     assert_eq!(
         (r.status, r.code().as_str()),

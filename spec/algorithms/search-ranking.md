@@ -63,10 +63,14 @@ or its title when it has no content) from a local embedding model, and answers w
 to a query by cosine similarity. Links are not in it. Long texts are embedded as **passages**: runs
 of at most 120 words (split on white space), each ending after the last word in its second half
 that ends with `.`, `!` or `?` when there is one; at most 32 passages per object. An object's
-similarity is that of its closest passage. Hits are those at least as similar as the model's
-threshold for related texts. The model, its thresholds and the vector index are
+similarity is that of its closest passage. Hits are those at least as similar as the
+**semantic threshold**, a server setting (the reference server's `search.semantic_threshold`,
+default 0.80) that `overview` reports ([OP-OVER-6]); a hit below it neither re-ranks a word match
+nor is added after them ([RANK-9]). The model, the threshold's default and the vector index are
 implementation-defined (the reference server uses multilingual-e5-small, int8, through ONNX Runtime and a usearch HNSW index),
-so semantic hits may differ between implementations; the index is a cache ([STORE-VEC-1]).
+so semantic hits may differ between implementations; the index is a cache ([STORE-VEC-1]). A
+server may turn semantic search off; then there is no semantic index and search matches words
+only.
 
 **[RANK-9]** **Fusion.** In each of `nodes` and `evidence`, the full-text hits (in the engine's
 relevance order) and the semantic hits (most similar first), each at most 5 × `limit` (and at most

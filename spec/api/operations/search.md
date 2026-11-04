@@ -32,8 +32,10 @@ naming the field; an empty or too long `query` fails with `search.query_invalid`
 are found by full text only.
 
 **[OP-SEARCH-5]** Matching by meaning needs the graph's semantic index ([RANK-8]), which a server
-may lack (no embedding model) or may still be building. Then `auto` matches by spelling only, and
-`semantic` fails with `search.semantic_unavailable` (HTTP 503).
+may lack (semantic search turned off, or no embedding model) or may still be building. Then `auto`
+matches by spelling only, and `semantic` fails with `search.semantic_unavailable` (HTTP 503).
+Whether a graph matches by meaning, and its semantic threshold, are in `overview` ([OP-OVER-6]);
+for the server as a whole, in `GET /v1/graphs` ([API-GRAPH-3]).
 
 ## 2. Response
 

@@ -341,4 +341,8 @@ impl SemanticIndex for UsearchIndex {
     fn ready(&self) -> bool {
         lock(&self.state).pending.len() <= INLINE
     }
+
+    fn threshold(&self) -> f32 {
+        self.model.floor(Closeness::Related)
+    }
 }

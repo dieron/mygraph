@@ -99,6 +99,25 @@ async fn mcp_over_http() {
     .await;
     let tools = list["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 13);
+    // [MCP-TOOL-6] No embedding model here: the tools say words only.
+    let search = tools.iter().find(|t| t["name"] == "search").unwrap();
+    let modes = &search["inputSchema"]["properties"]["mode"]["enum"];
+    assert_eq!(modes, &json!(["auto", "exact", "prefix", "fuzzy", "text"]));
+    assert!(
+        !search["description"]
+            .as_str()
+            .unwrap()
+            .contains("meaning (")
+    );
+    let resolve = tools.iter().find(|t| t["name"] == "resolve").unwrap();
+    assert!(!resolve["description"].as_str().unwrap().contains("similar"));
+    assert!(tools.iter().all(|t| t.get("without_semantic").is_none()));
+    assert!(
+        !init["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("text or meaning")
+    );
     assert!(
         tools
             .iter()
@@ -119,6 +138,7 @@ async fn mcp_over_http() {
     let list: Json = serde_json::from_str(&text).unwrap();
     assert_eq!(list["graphs"][0]["name"], "lab");
     assert_eq!(list["default"], "research");
+    assert_eq!(list["search"], json!({ "semantic": false }));
 
     // [MCP-TOOL-2] the default graph; [MCP-TOOL-3] compact text.
     let batch: Json = serde_json::from_str(BATCH).unwrap();

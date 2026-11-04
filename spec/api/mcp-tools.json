@@ -15,7 +15,7 @@
     },
     {
       "name": "overview",
-      "description": "What the graph holds: counts, node and link types in use, evidence kinds, policies, recent batches, naming conventions. Call first. With `type`, details of one node or link type (property keys and fill rates, link patterns, examples).",
+      "description": "What the graph holds: counts, node and link types in use, evidence kinds, policies, how search matches (words, meaning), recent batches, naming conventions. Call first. With `type`, details of one node or link type (property keys and fill rates, link patterns, examples).",
       "inputSchema": { "type": "object", "properties": {
         "type": { "type": "string", "description": "A node type or link type to describe." },
         "recent": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Recent batches to list (default 5)." }
@@ -31,11 +31,18 @@
         "mode": { "enum": ["auto", "exact", "prefix", "fuzzy", "text", "semantic"], "description": "Default auto (all of them). text: words only; semantic: meaning only." },
         "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
         "include_retracted": { "type": "boolean" }
-      } }
+      } },
+      "without_semantic": {
+        "description": "Ranked search over node names and aliases (exact, prefix, fuzzy) and full text of nodes, links and evidence. Words only: this server does not match by meaning, so try other words, dates, types or links when a search misses.",
+        "properties": { "mode": { "enum": ["auto", "exact", "prefix", "fuzzy", "text"], "description": "Default auto (all of them). text: full text only." } }
+      }
     },
     {
       "name": "resolve",
       "description": "Does this already exist? For up to 100 described entities, existing matching nodes with scores and a verdict (match, ambiguous, none); nodes close in meaning but spelled differently are listed as similar. Use before writing new nodes.",
+      "without_semantic": {
+        "description": "Does this already exist? For up to 100 described entities, existing matching nodes with scores and a verdict (match, ambiguous, none). Use before writing new nodes."
+      },
       "inputSchema": { "type": "object", "required": ["candidates"], "properties": {
         "candidates": { "type": "array", "items": { "type": "object", "required": ["name"], "properties": {
           "name": { "type": "string" }, "type": { "type": "string" },

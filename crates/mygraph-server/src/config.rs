@@ -29,11 +29,8 @@ pub struct Config {
     pub preload: bool,
     /// Keep a tantivy full-text index per graph (else search uses SQLite FTS5).
     pub text_index: bool,
-    /// Keep a semantic index per graph ([RANK-8]), when the embedding model is found.
-    pub semantic: bool,
-    /// Folder of the embedding model (`model.onnx` and its tokenizer files); default
-    /// `<data_dir>/models/<model name>/`.
-    pub model_dir: Option<PathBuf>,
+    /// How search matches (`[search]`).
+    pub search: SearchConfig,
     /// How often background maintenance runs: full-text index commits (writes do not wait for
     /// them; after a crash the index catches up from the change log) and passive WAL checkpoints.
     pub maintenance_ms: u64,
@@ -41,6 +38,41 @@ pub struct Config {
     pub slow_ms: u64,
     /// API keys ([API-AUTH-1]). None: every request is the local admin ([API-AUTH-4]).
     pub keys: Vec<KeyConfig>,
+}
+
+/// `[search]`: how `search` and `resolve` match. More settings may join these.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SearchConfig {
+    /// Keep a semantic index per graph and match by meaning too ([RANK-8]), when the embedding
+    /// model is found.
+    pub semantic: bool,
+    /// The least similarity (0–1) of a hit found by meaning ([RANK-8]).
+    pub semantic_threshold: f32,
+    /// Folder of the embedding model (`model.onnx` and its tokenizer files); default
+    /// `<data_dir>/models/<model name>/`.
+    pub model_dir: Option<PathBuf>,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic: true,
+            semantic_threshold: mygraph_semantic::model::DEFAULT_THRESHOLD,
+            model_dir: None,
+        }
+    }
+}
+
+impl SearchConfig {
+    /// What `GET /v1/graphs` and `GET /admin/config` show.
+    pub fn to_json(&self) -> Json {
+        json!({
+            "semantic": self.semantic,
+            "semantic_threshold": (f64::from(self.semantic_threshold) * 1000.0).round() / 1000.0,
+            "model_dir": self.model_dir.as_ref().map(|p| p.display().to_string()),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,8 +109,7 @@ impl Default for Config {
             warmup_wait_ms: 2000,
             preload: true,
             text_index: true,
-            semantic: true,
-            model_dir: None,
+            search: SearchConfig::default(),
             maintenance_ms: 1000,
             slow_ms: 500,
             keys: Vec::new(),
@@ -111,8 +142,9 @@ impl Config {
     /// | `MYGRAPH_DATA_DIR` | `data_dir` |
     /// | `MYGRAPH_DEFAULT_GRAPH` | `default_graph` |
     /// | `MYGRAPH_LOG` | `log` |
-    /// | `MYGRAPH_SEMANTIC` | `semantic` (`true` or `false`) |
-    /// | `MYGRAPH_MODEL_DIR` | `model_dir` |
+    /// | `MYGRAPH_SEMANTIC` | `search.semantic` (`true` or `false`) |
+    /// | `MYGRAPH_SEMANTIC_THRESHOLD` | `search.semantic_threshold`, e.g. `0.8` |
+    /// | `MYGRAPH_MODEL_DIR` | `search.model_dir` |
     /// | `MYGRAPH_ADMIN_KEY` | adds a key for actor `admin`, role `admin` |
     /// | `MYGRAPH_AGENT_KEY` | adds a key for actor `agent`, role `agent-write` |
     /// | `MYGRAPH_READ_KEY` | adds a key for actor `reader`, role `agent-read` |
@@ -147,12 +179,17 @@ impl Config {
             self.log = v;
         }
         if let Some(v) = get("MYGRAPH_SEMANTIC")? {
-            self.semantic = v
+            self.search.semantic = v
                 .parse()
                 .map_err(|_| format!("MYGRAPH_SEMANTIC {v:?}: expected true or false"))?;
         }
+        if let Some(v) = get("MYGRAPH_SEMANTIC_THRESHOLD")? {
+            self.search.semantic_threshold = v
+                .parse()
+                .map_err(|_| format!("MYGRAPH_SEMANTIC_THRESHOLD {v:?}: expected a number"))?;
+        }
         if let Some(v) = get("MYGRAPH_MODEL_DIR")? {
-            self.model_dir = Some(PathBuf::from(v));
+            self.search.model_dir = Some(PathBuf::from(v));
         }
         for (name, actor, role) in [
             ("MYGRAPH_ADMIN_KEY", "admin", Role::Admin),
@@ -176,6 +213,12 @@ impl Config {
         use mygraph_core::ids::{validate_actor_name, validate_graph_name};
         validate_graph_name(&self.default_graph)
             .map_err(|r| format!("default_graph {:?}: {r}", self.default_graph))?;
+        let t = self.search.semantic_threshold;
+        if !(0.0..=1.0).contains(&t) {
+            return Err(format!(
+                "search.semantic_threshold {t}: expected a number from 0 to 1"
+            ));
+        }
         for (i, k) in self.keys.iter().enumerate() {
             match (&k.key, &k.key_sha256) {
                 (Some(key), None) if !key.is_empty() => {}
@@ -215,8 +258,7 @@ impl Config {
             "warmup_wait_ms": self.warmup_wait_ms,
             "preload": self.preload,
             "text_index": self.text_index,
-            "semantic": self.semantic,
-            "model_dir": self.model_dir.as_ref().map(|p| p.display().to_string()),
+            "search": self.search.to_json(),
             "maintenance_ms": self.maintenance_ms,
             "slow_ms": self.slow_ms,
             "keys": self.keys.len(),
@@ -270,5 +312,53 @@ mod tests {
         let missing = Config::default()
             .apply_env(&|n| (n == "MYGRAPH_ADMIN_KEY_FILE").then(|| "/no/such/file".to_owned()));
         assert!(missing.unwrap_err().starts_with("MYGRAPH_ADMIN_KEY_FILE"));
+    }
+
+    #[test]
+    fn search_settings_from_the_file_and_the_environment() {
+        let c = Config::default();
+        assert!(c.search.semantic);
+        assert!((c.search.semantic_threshold - 0.80).abs() < 1e-6);
+
+        let mut c: Config = toml::from_str(
+            "[search]
+semantic = false
+semantic_threshold = 0.83
+",
+        )
+        .unwrap();
+        assert!(!c.search.semantic);
+        assert_eq!(c.redacted()["search"]["semantic_threshold"], 0.83);
+        let env: HashMap<&str, String> = HashMap::from([
+            ("MYGRAPH_SEMANTIC", "true".to_owned()),
+            ("MYGRAPH_SEMANTIC_THRESHOLD", "0.78".to_owned()),
+            ("MYGRAPH_MODEL_DIR", "/models/e5".to_owned()),
+        ]);
+        c.apply_env(&|n| env.get(n).cloned()).unwrap();
+        assert!(c.search.semantic);
+        assert_eq!(c.redacted()["search"]["semantic_threshold"], 0.78);
+        assert_eq!(c.redacted()["search"]["model_dir"], "/models/e5");
+        c.validate().unwrap();
+
+        for bad in ["1.5", "-0.1", "NaN"] {
+            let mut c = Config::default();
+            c.apply_env(&|n| (n == "MYGRAPH_SEMANTIC_THRESHOLD").then(|| bad.to_owned()))
+                .unwrap();
+            assert!(
+                c.validate().unwrap_err().contains("semantic_threshold"),
+                "{bad}"
+            );
+        }
+        let words = Config::default()
+            .apply_env(&|n| (n == "MYGRAPH_SEMANTIC_THRESHOLD").then(|| "high".to_owned()));
+        assert!(words.unwrap_err().starts_with("MYGRAPH_SEMANTIC_THRESHOLD"));
+        // The old top-level key is refused, not silently ignored.
+        assert!(
+            toml::from_str::<Config>(
+                "semantic = false
+"
+            )
+            .is_err()
+        );
     }
 }

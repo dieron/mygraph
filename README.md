@@ -53,8 +53,21 @@ it:
 deploy/fetch-model.sh <data_dir>/models/multilingual-e5-small
 ```
 
-Or put it anywhere and set `MYGRAPH_MODEL_DIR` (or `model_dir` in `server.toml`); `semantic =
-false` turns it off. The Docker image includes it. Each graph's vectors live in
+Or put it anywhere and set `MYGRAPH_MODEL_DIR`. The settings, in `server.toml` or the
+environment:
+
+```toml
+[search]
+semantic = true            # MYGRAPH_SEMANTIC: also match by meaning (false: words only)
+semantic_threshold = 0.80  # MYGRAPH_SEMANTIC_THRESHOLD: least similarity of a hit found by meaning
+model_dir = "..."          # MYGRAPH_MODEL_DIR: default <data_dir>/models/multilingual-e5-small
+```
+
+The API follows them: `GET /v1/graphs` and each graph's `overview` say whether search matches by
+meaning and at what threshold, and without semantic search the MCP tools drop mode `semantic`
+and the mention of meaning. A lower threshold lets two-word queries match by meaning too, at the
+cost of longer results (0.77 shows about twice as many meaning-only hits on LongMemEval as 0.80).
+The Docker image includes the model. Each graph's vectors live in
 `<data_dir>/vectors/<graph>/`, a cache rebuilt in the background when missing (embedding runs at
 roughly 30–60 passages a second on one CPU; search matches words only until it is done).
 

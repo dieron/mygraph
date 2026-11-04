@@ -24,10 +24,12 @@ pub enum Backend {
     },
 }
 
-/// [MCP-TOOL-1] Tool definitions with the common arguments added.
-fn tools() -> &'static Json {
-    static T: OnceLock<Json> = OnceLock::new();
-    T.get_or_init(|| {
+/// [MCP-TOOL-1] Tool definitions with the common arguments added; [MCP-TOOL-6] without
+/// semantic search, each tool's `without_semantic` variant.
+fn tools(semantic: bool) -> &'static Json {
+    static WITH: OnceLock<Json> = OnceLock::new();
+    static WITHOUT: OnceLock<Json> = OnceLock::new();
+    (if semantic { &WITH } else { &WITHOUT }).get_or_init(|| {
         let spec: Json = serde_json::from_str(TOOLS).expect("mcp-tools.json is valid");
         let common = spec["common"].as_object().cloned().unwrap_or_default();
         let tools: Vec<Json> = spec["tools"]
@@ -36,6 +38,15 @@ fn tools() -> &'static Json {
             .iter()
             .map(|t| {
                 let mut t = t.clone();
+                let variant = t.as_object_mut().and_then(|o| o.remove("without_semantic"));
+                if let (false, Some(v)) = (semantic, variant) {
+                    if let Some(d) = v.get("description") {
+                        t["description"] = d.clone();
+                    }
+                    for (k, p) in v["properties"].as_object().into_iter().flatten() {
+                        t["inputSchema"]["properties"][k] = p.clone();
+                    }
+                }
                 let graphs_tool = t["name"] == "graphs";
                 let props = t["inputSchema"]["properties"]
                     .as_object_mut()
@@ -52,6 +63,48 @@ fn tools() -> &'static Json {
             .collect();
         Json::Array(tools)
     })
+}
+
+/// [MCP-TOOL-6] The server instructions, without the mention of meaning when there is no
+/// semantic search.
+fn instructions(semantic: bool) -> String {
+    if semantic {
+        INSTRUCTIONS.to_owned()
+    } else {
+        INSTRUCTIONS.replace(
+            "alias, text or meaning",
+            "alias or text (words, not meaning)",
+        )
+    }
+}
+
+/// Whether the server behind `backend` searches by meaning: in this process, whether the
+/// embedding model is loaded; for a remote server, what `GET /v1/graphs` says (asked once; when
+/// it cannot be asked, the full tool set is listed).
+async fn semantic(backend: &Backend) -> bool {
+    static REMOTE: OnceLock<bool> = OnceLock::new();
+    match backend {
+        Backend::Local { app, .. } => app.registry.semantic_threshold().is_some(),
+        Backend::Remote { url, key, .. } => {
+            if let Some(s) = REMOTE.get() {
+                return *s;
+            }
+            let (url, key) = (url.clone(), key.clone());
+            let asked = tokio::task::spawn_blocking(move || {
+                let u = format!("{}/v1/graphs", url.trim_end_matches('/'));
+                answer(request(&u, key.as_deref(), "GET").call())
+                    .ok()
+                    .and_then(|r| r["search"]["semantic"].as_bool())
+            })
+            .await
+            .ok()
+            .flatten();
+            match asked {
+                Some(s) => *REMOTE.get_or_init(|| s),
+                None => true,
+            }
+        }
+    }
 }
 
 fn rpc_error(id: &Json, code: i64, message: &str) -> Json {
@@ -91,12 +144,12 @@ pub async fn handle(backend: &Backend, msg: Json) -> Option<Json> {
                     "protocolVersion": version,
                     "capabilities": { "tools": {} },
                     "serverInfo": { "name": "mygraph", "version": env!("CARGO_PKG_VERSION") },
-                    "instructions": INSTRUCTIONS,
+                    "instructions": instructions(semantic(backend).await),
                 }),
             )
         }
         "ping" => rpc_result(&id, json!({})),
-        "tools/list" => rpc_result(&id, json!({ "tools": tools() })),
+        "tools/list" => rpc_result(&id, json!({ "tools": tools(semantic(backend).await) })),
         "tools/call" => match call(backend, &params).await {
             Ok(result) => rpc_result(&id, result),
             Err((code, message)) => rpc_error(&id, code, &message),
@@ -321,7 +374,9 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
                 Some(gs) if gs.len() == 1 => gs[0].clone(),
                 _ => app.config.default_graph.clone(),
             };
-            Ok(with_default(graphs, Some(default)))
+            let mut r = with_default(graphs, Some(default));
+            r["search"] = app.search_info();
+            Ok(r)
         })(),
         ("create", Backend::Local { app, caller }) => {
             crate::admin::create(app, caller, &Json::Object(args))
@@ -347,7 +402,11 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
                         [one] => one["name"].as_str().map(str::to_owned),
                         _ => None,
                     });
-                    Ok(with_default(graphs, default))
+                    let mut r = with_default(graphs, default);
+                    if let Some(s) = list.get("search") {
+                        r["search"] = s.clone();
+                    }
+                    Ok(r)
                 }
             })
             .await
@@ -409,4 +468,47 @@ fn graphs_text(r: &Json) -> String {
         out.push_str("no default graph: pass `graph` to the other tools\n");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{INSTRUCTIONS, instructions, tools};
+    use serde_json::json;
+
+    fn tool<'a>(semantic: bool, name: &str) -> &'a serde_json::Value {
+        tools(semantic)
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap()
+    }
+
+    /// [MCP-TOOL-6]
+    #[test]
+    fn tools_and_instructions_follow_semantic_search() {
+        let modes = |s| tool(s, "search")["inputSchema"]["properties"]["mode"]["enum"].clone();
+        assert_eq!(
+            modes(true),
+            json!(["auto", "exact", "prefix", "fuzzy", "text", "semantic"])
+        );
+        assert_eq!(
+            modes(false),
+            json!(["auto", "exact", "prefix", "fuzzy", "text"])
+        );
+        for s in [true, false] {
+            assert!(tool(s, "search").get("without_semantic").is_none());
+            assert!(tool(s, "search")["inputSchema"]["properties"]["graph"].is_object());
+        }
+        let similar = |s| {
+            tool(s, "resolve")["description"]
+                .as_str()
+                .unwrap()
+                .contains("similar")
+        };
+        assert!(similar(true) && !similar(false));
+        assert_eq!(instructions(true), INSTRUCTIONS);
+        assert!(INSTRUCTIONS.contains("alias, text or meaning"));
+        assert!(instructions(false).contains("alias or text (words, not meaning)"));
+    }
 }

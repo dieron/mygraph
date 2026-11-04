@@ -390,7 +390,7 @@ pub async fn list_graphs(State(app): State<Arc<App>>, caller: Caller) -> Respons
             .filter(|(n, _)| caller.may_use(n))
             .map(|(n, s)| json!({"name": n, "status": s.name()}))
             .collect();
-        ok(&json!({ "graphs": graphs }))
+        ok(&json!({ "graphs": graphs, "search": app.search_info() }))
     });
     finish(&app, "list_graphs", None, start, r)
 }

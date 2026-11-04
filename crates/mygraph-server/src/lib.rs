@@ -34,6 +34,17 @@ pub struct App {
 }
 
 impl App {
+    /// [API-GRAPH-3] How search matches on this server (`GET /v1/graphs`, the `graphs` tool).
+    pub fn search_info(&self) -> Value {
+        match self.registry.semantic_threshold() {
+            Some(t) => json!({
+                "semantic": true,
+                "semantic_threshold": (f64::from(t) * 1000.0).round() / 1000.0,
+            }),
+            None => json!({ "semantic": false }),
+        }
+    }
+
     /// Finds the graphs in the data folder; call [`App::preload`] to start loading them.
     pub fn new(config: Config) -> Arc<Self> {
         let registry = Arc::new(Registry::new(
@@ -60,10 +71,11 @@ impl App {
 /// The embedding model for semantic search, when enabled and found; without it search matches
 /// words only.
 fn load_model(config: &Config) -> Option<Arc<dyn mygraph_semantic::Embed>> {
-    if !config.semantic {
+    let search = &config.search;
+    if !search.semantic {
         return None;
     }
-    let dir = config
+    let dir = search
         .model_dir
         .clone()
         .unwrap_or_else(|| mygraph_semantic::default_model_dir(&config.data_dir));
@@ -75,7 +87,7 @@ fn load_model(config: &Config) -> Option<Arc<dyn mygraph_semantic::Embed>> {
         return None;
     }
     match mygraph_semantic::Model::load(&dir) {
-        Ok(m) => Some(Arc::new(m)),
+        Ok(m) => Some(Arc::new(m.with_threshold(search.semantic_threshold))),
         Err(e) => {
             tracing::warn!("embedding model unavailable, search matches words only: {e}");
             None
