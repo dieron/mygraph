@@ -21,9 +21,12 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 
 ## Publishing on GitHub
 
-- [ ] README for a public audience: current status, quickstart, limits, bundled Cytoscape.js.
-- [ ] `SECURITY.md`: without API keys every request is admin, so bind to loopback; how to report.
-- [ ] Final name; `repository` and `description` in `Cargo.toml`.
+- [x] README for a public audience, agents first ("Built by AI, for AI"): status, limits,
+      quickstart, using it over MCP, benchmark results, bundled Cytoscape.js and the model.
+- [x] `SECURITY.md`: without API keys every request is admin, so bind to loopback; how to report.
+- [x] Name: MyGraph (no other graph database or agent memory project uses it).
+- [ ] `repository` and `description` in `Cargo.toml` once the repository exists; enable private
+      vulnerability reporting there (SECURITY.md points to it).
 - [ ] Create the empty repository and push `main` with its history.
 
 ## Next milestone (M4)
