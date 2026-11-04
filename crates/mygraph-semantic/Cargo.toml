@@ -4,6 +4,7 @@ description = "MyGraph semantic index: local text embeddings (ONNX) in an HNSW i
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [dependencies]

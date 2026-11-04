@@ -4,6 +4,7 @@ description = "Runs agent benchmarks (HotpotQA) with MyGraph as the agent's memo
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [[bin]]

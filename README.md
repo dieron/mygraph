@@ -215,7 +215,9 @@ For a home server or NAS that other machines and agents use, run it with Docker
   sends the committed `HEAD`, snapshots every graph, rebuilds, restarts and waits until the server
   is healthy. `.env` and the data are left alone.
 - [.github/workflows/docker.yml](.github/workflows/docker.yml) publishes a multi-arch image (amd64,
-  arm64) to `ghcr.io/<owner>/mygraph`. Set `MYGRAPH_IMAGE` in `.env` to use it instead of building.
+  arm64) to `ghcr.io/dieron/mygraph`. `:main` follows the main branch, and version tags will add
+  `:latest`. To use it instead of building, set `MYGRAPH_IMAGE=ghcr.io/dieron/mygraph:main` in
+  `.env`, then run `docker compose pull && docker compose up -d`.
 
 **API keys.** Without a configuration file, keys come from the environment. In a `server.toml`
 (`mygraph serve --config server.toml`), each key gets an actor name, a role and optionally its

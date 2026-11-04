@@ -25,9 +25,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       quickstart, using it over MCP, benchmark results, bundled Cytoscape.js and the model.
 - [x] `SECURITY.md`: without API keys every request is admin, so bind to loopback; how to report.
 - [x] Name: MyGraph (no other graph database or agent memory project uses it).
-- [ ] `repository` and `description` in `Cargo.toml` once the repository exists; enable private
-      vulnerability reporting there (SECURITY.md points to it).
-- [ ] Create the empty repository and push `main` with its history.
+- [x] `repository` in `Cargo.toml`; private vulnerability reporting enabled (SECURITY.md points
+      to it).
+- [x] Public repository github.com/dieron/mygraph, `main` pushed with its history (2026-11-04).
 
 ## Next milestone (M4)
 
