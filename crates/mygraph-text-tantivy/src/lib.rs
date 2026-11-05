@@ -39,14 +39,20 @@ pub fn index_dir(data_dir: &Path, graph: &str) -> PathBuf {
 }
 
 pub struct TantivyText {
+    index: Index,
     reader: IndexReader,
-    writer: Mutex<IndexWriter<TantivyDocument>>,
+    /// `None` after a failed commit: the next commit opens a new writer (see
+    /// [`DerivedIndex::commit`]).
+    writer: Mutex<Option<IndexWriter<TantivyDocument>>>,
     /// `kind << 56 | number`: unique per object, used to replace documents.
     key: Field,
     /// One text field per object kind, so a one-word query is a single term query, which
     /// tantivy answers with block-max skipping instead of scoring every match.
     texts: [Field; 3],
     state: Mutex<Commits>,
+    /// Commits still to fail, to test recovery.
+    #[cfg(test)]
+    fail_commits: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Documents indexed but not committed, by key, and the sequence number they cover. Indexing only
@@ -144,15 +150,56 @@ impl TantivyText {
             .try_into()?;
         let writer = index.writer(WRITER_BUFFER)?;
         Ok(Self {
+            index,
             reader,
-            writer: Mutex::new(writer),
+            writer: Mutex::new(Some(writer)),
             key,
             texts,
             state: Mutex::new(Commits {
                 applied,
                 ..Commits::default()
             }),
+            #[cfg(test)]
+            fail_commits: Default::default(),
         })
+    }
+
+    /// Writes a batch to tantivy and commits it, opening a writer when there is none.
+    fn write_batch(
+        &self,
+        slot: &mut Option<IndexWriter<TantivyDocument>>,
+        seq: i64,
+        clear: bool,
+        batch: &[(u64, String, u64)],
+    ) -> Result<(), StoreFailure> {
+        let writer = match slot {
+            Some(w) => w,
+            None => slot.insert(self.index.writer(WRITER_BUFFER)?),
+        };
+        if clear {
+            writer.delete_all_documents()?;
+        }
+        for (key, text, _) in batch {
+            writer.delete_term(Term::from_field_u64(self.key, *key));
+            let mut doc = TantivyDocument::default();
+            doc.add_u64(self.key, *key);
+            doc.add_text(self.texts[(key >> 56) as usize], text);
+            writer.add_document(doc)?;
+        }
+        #[cfg(test)]
+        if let n @ 1.. = self.fail_commits.load(std::sync::atomic::Ordering::Relaxed) {
+            self.fail_commits
+                .store(n - 1, std::sync::atomic::Ordering::Relaxed);
+            return Err(StoreFailure::from(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Access is denied.",
+            )));
+        }
+        let mut prepared = writer.prepare_commit()?;
+        prepared.set_payload(&seq.to_string());
+        prepared.commit()?;
+        self.reader.reload()?;
+        Ok(())
     }
 
     /// Appends the top `limit` documents of `query` not seen yet and not pending (a pending
@@ -209,13 +256,18 @@ impl DerivedIndex for TantivyText {
             st.pending_seq = Some(seq);
             st.pending.len()
         };
-        // Bulk indexing (a rebuild) commits as it goes, so memory stays bounded.
+        // Bulk indexing (a rebuild) commits as it goes, so memory stays bounded. The documents
+        // are queued either way: when this commit fails, the caller's next commit retries it.
         if pending >= AUTO_COMMIT {
-            self.commit()?;
+            let _ = self.commit();
         }
         Ok(())
     }
 
+    /// A failed commit loses nothing: its documents stay queued (and searchable from memory),
+    /// so the next commit retries them. The writer is dropped, since tantivy can leave it unable
+    /// to commit again (an indexing thread that failed to write a segment file is not
+    /// restarted), and the next commit opens a new one.
     fn commit(&self) -> Result<(), StoreFailure> {
         // One commit at a time; indexing goes on meanwhile.
         let mut writer = lock(&self.writer);
@@ -231,20 +283,14 @@ impl DerivedIndex for TantivyText {
                 .collect();
             (seq, std::mem::take(&mut st.clear), batch)
         };
-        if clear {
-            writer.delete_all_documents()?;
+        if let Err(e) = self.write_batch(&mut writer, seq, clear, &batch) {
+            // Dropping the writer releases the index's lock, so a new one can be opened.
+            *writer = None;
+            if clear {
+                lock(&self.state).clear = true;
+            }
+            return Err(e);
         }
-        for (key, text, _) in &batch {
-            writer.delete_term(Term::from_field_u64(self.key, *key));
-            let mut doc = TantivyDocument::default();
-            doc.add_u64(self.key, *key);
-            doc.add_text(self.texts[(key >> 56) as usize], text);
-            writer.add_document(doc)?;
-        }
-        let mut prepared = writer.prepare_commit()?;
-        prepared.set_payload(&seq.to_string());
-        prepared.commit()?;
-        self.reader.reload()?;
         // Only now do searches see the documents in tantivy, so only now do they leave memory;
         // versions queued during the commit stay.
         let mut st = lock(&self.state);
@@ -540,5 +586,107 @@ mod tests {
         let t = TantivyText::open(dir.path(), "g").unwrap();
         assert_eq!(t.applied_seq(), Some(1));
         assert_eq!(ids(&t, TextTarget::Nodes, &["second"]), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn a_failed_commit_is_retried_with_a_new_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        t.index(vec![doc(TextTarget::Nodes, 1, "first")], 1)
+            .unwrap();
+        t.commit().unwrap();
+        t.index(vec![doc(TextTarget::Nodes, 2, "second")], 2)
+            .unwrap();
+        t.fail_commits
+            .store(2, std::sync::atomic::Ordering::Relaxed);
+        assert!(t.commit().is_err());
+        assert!(t.commit().is_err());
+        // Nothing is lost: the documents stay queued and searchable.
+        assert_eq!(t.applied_seq(), Some(1));
+        assert_eq!(t.pending(), 1);
+        assert_eq!(ids(&t, TextTarget::Nodes, &["second"]), vec![2]);
+        t.commit().unwrap();
+        assert_eq!((t.applied_seq(), t.pending()), (Some(2), 0));
+        drop(t);
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        assert_eq!(t.applied_seq(), Some(2));
+        assert_eq!(ids(&t, TextTarget::Nodes, &["second"]), vec![2]);
+        assert_eq!(ids(&t, TextTarget::Nodes, &["first"]), vec![1]);
+    }
+
+    #[test]
+    fn a_clear_whose_commit_failed_still_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        t.index(vec![doc(TextTarget::Nodes, 1, "first")], 1)
+            .unwrap();
+        t.commit().unwrap();
+        t.fail_commits
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        assert!(t.clear().is_err());
+        t.index(vec![doc(TextTarget::Nodes, 2, "second")], 2)
+            .unwrap();
+        t.commit().unwrap();
+        assert_eq!(ids(&t, TextTarget::Nodes, &["first"]), Vec::<i64>::new());
+        assert_eq!(ids(&t, TextTarget::Nodes, &["second"]), vec![2]);
+    }
+
+    /// [ADMIN-GRAPH-1] A failed commit makes the index stale until one succeeds, without a
+    /// reopen; updates written meanwhile are not lost.
+    #[test]
+    fn the_engine_retries_after_a_failed_commit() {
+        use mygraph_core::engine::Graph;
+        use mygraph_store_sqlite::{GraphFile, Policies};
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        GraphFile::create(dir.path(), "g", &Policies::default(), 0).unwrap();
+        let mut g = Graph::open(
+            GraphFile::open(dir.path(), "g").unwrap(),
+            "g",
+            Policies::default(),
+        )
+        .unwrap();
+        let t = TantivyText::open(dir.path(), "g").unwrap();
+        let fail = t.fail_commits.clone();
+        g.attach_text_index(Box::new(t)).unwrap();
+        let write = |g: &mut Graph<GraphFile>, name: &str| {
+            g.write(
+                "agent",
+                &json!({
+                    "evidence": [{ "ref": "@e", "kind": "text", "content": name }],
+                    "nodes": [{ "type": "Person", "name": name, "cite": ["@e"] }]
+                }),
+                1,
+            )
+            .unwrap();
+        };
+        let hits = |g: &Graph<GraphFile>, q: &str| {
+            g.search(&json!({ "query": q, "mode": "text", "in": ["nodes"] }))
+                .unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        write(&mut g, "Ada");
+        fail.store(1, std::sync::atomic::Ordering::Relaxed);
+        assert!(g.commit_text().is_err());
+        assert_eq!(g.text_index_status(), "stale");
+        assert_eq!(g.text_commit_failures(), 1);
+        // Search falls back to the store's full text, and the index still takes updates.
+        assert_eq!(hits(&g, "Ada"), 1);
+        write(&mut g, "Grace");
+        g.commit_text().unwrap();
+        assert_eq!(g.text_index_status(), "current");
+        assert_eq!((hits(&g, "Ada"), hits(&g, "Grace")), (1, 1));
+
+        // A rebuild that fails leaves it stale; one that succeeds brings it back.
+        fail.store(1, std::sync::atomic::Ordering::Relaxed);
+        assert!(g.repair_text_index(true).is_err());
+        assert!(g.text_index_lost_updates());
+        assert_eq!(g.text_index_status(), "stale");
+        g.repair_text_index(true).unwrap();
+        assert!(!g.text_index_lost_updates());
+        assert_eq!(g.text_index_status(), "current");
+        assert_eq!((hits(&g, "Ada"), hits(&g, "Grace")), (1, 1));
     }
 }

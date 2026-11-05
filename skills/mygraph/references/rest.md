@@ -53,6 +53,7 @@ Shorthands:
 | `POST /admin/graphs/{g}/export` | JSONL export into `exports/` |
 | `POST /admin/graphs/{new}/import` `{"file": "<file>"}` | import an export into a new graph, IDs kept |
 | `POST /admin/graphs/{g}/check` | integrity check |
+| `POST /admin/graphs/{g}/reindex` | rebuild the full-text index from the records (when `text_index` stays `stale`) |
 | `GET /admin/stats`, `/admin/keys`, `/admin/config` | server information |
 
 Service routes without a key: `GET /health`, `GET /ready`, `GET /metrics`.

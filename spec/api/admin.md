@@ -23,13 +23,21 @@ of the design; the rest is planned.
 | `POST /admin/graphs/{graph}/export` | — | `{"path": …, "bytes": n, "counts": {…}}` |
 | `POST /admin/graphs/{graph}/import` | `{"file": name}` | `GraphInfo` plus `imported` (counts) |
 | `GET /admin/graphs/{graph}/stats?sections=…&days=…&top=…` | — | `GraphStats` ([ADMIN-GRAPH-9]) |
+| `POST /admin/graphs/{graph}/reindex` | — | `GraphInfo` ([ADMIN-GRAPH-10]) |
 
 **[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes"}`, plus, when the
 graph is loaded (`status` `ready`): `counts` (as in [OP-OVER-2]), `policies`, `last_seq`, and
-`text_index`: `"current"`, `"stale"` (an update failed; search uses the store's own full text) or
-`"none"`, and `semantic_index` ([RANK-8]): `"current"`, `"building"` (embedding many documents, as
-after a rebuild; search matches spelling only meanwhile), `"stale"` (an update failed; spelling
-only until the graph is reopened) or `"none"` (no embedding model).
+`text_index`: `"current"`, `"stale"` (an update or a commit failed; search uses the store's own
+full text until the index is current again) or `"none"`, and `semantic_index` ([RANK-8]):
+`"current"`, `"building"` (embedding many documents, as after a rebuild; search matches spelling
+only meanwhile), `"stale"` (an update failed; spelling only until the graph is reopened) or
+`"none"` (no embedding model).
+
+The full-text index recovers by itself while the graph stays loaded: background maintenance
+retries a failed commit on its next run (updates written meanwhile are kept for it), and the
+index is `current` again once a commit succeeds. After 5 failed commits in a row it is rebuilt
+from the records; while rebuilding fails too, the next rebuild waits twice as many maintenance
+runs as the last, with no commits in between. Rebuilding by hand is [ADMIN-GRAPH-10].
 
 **[ADMIN-GRAPH-2]** Creating: `name` follows [GRAPH-NAME-1]; `policies` is optional, each missing
 member taking its default ([OBJ-POLICY-*]); invalid input fails with `admin.invalid_field`,
@@ -76,6 +84,13 @@ parameters fail with `stats.invalid_field`.
   "semantic_index_bytes", "semantic_index"}`: database and WAL sizes as in [ADMIN-GRAPH-1], the
   total size of the files of the graph's full-text and semantic caches (0 when there is none),
   and `text_index` and `semantic_index` as in [ADMIN-GRAPH-1].
+
+**[ADMIN-GRAPH-10]** Reindexing rebuilds the graph's full-text index from its records while the
+graph stays loaded, and answers its `GraphInfo`. Reads go on meanwhile (using the store's own full
+text) and writes wait. When the graph has no index because opening it failed, a new one is
+created. It fails with `admin.text_index_off` when the server runs without full-text indexes, and
+with `storage.failure` when the rebuild fails (the index then stays `stale` and recovers as in
+[ADMIN-GRAPH-1]).
 
 ## 2. Server
 

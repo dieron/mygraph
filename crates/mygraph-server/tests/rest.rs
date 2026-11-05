@@ -638,6 +638,31 @@ async fn admin_manages_graphs() {
     let r = s.post("/admin/graphs/lab/check", ADMIN, json!(null)).await;
     assert_eq!(r.json(), json!({ "ok": true, "problems": [] }));
 
+    // [ADMIN-GRAPH-10]
+    let r = s
+        .post("/admin/graphs/lab/reindex", ADMIN, json!(null))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["text_index"], "current");
+    assert_eq!(r.json()["counts"]["nodes"], 1);
+    let r = s
+        .post(
+            "/v1/graphs/lab/search",
+            WRITER,
+            json!({ "query": "Widget", "mode": "text" }),
+        )
+        .await;
+    assert_eq!(
+        r.json()["hits"].as_array().map(Vec::len),
+        Some(1),
+        "{}",
+        r.text()
+    );
+    let r = s
+        .post("/admin/graphs/lab/reindex", WRITER, json!(null))
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
     let stats = s.get("/admin/stats", ADMIN).await.json();
     assert_eq!(stats["graphs"]["lab"], "ready");
     assert_eq!(stats["requests"]["write"]["count"], 1);
@@ -1139,4 +1164,18 @@ async fn slow_requests_and_the_stats_page() {
             .starts_with("text/javascript")
     );
     assert!(r.text().contains("Cytoscape Consortium"));
+}
+
+/// [ADMIN-GRAPH-10] Without a full-text index there is nothing to rebuild.
+#[tokio::test]
+async fn reindex_needs_a_text_index() {
+    let s = server_with(|c| c.text_index = false);
+    s.create_graph("lab").await;
+    let r = s
+        .post("/admin/graphs/lab/reindex", ADMIN, json!(null))
+        .await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::BAD_REQUEST, "admin.text_index_off")
+    );
 }

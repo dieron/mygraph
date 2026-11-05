@@ -356,24 +356,93 @@ fn store_err(e: mygraph_store_sqlite::StoreError) -> ApiError {
     }
 }
 
+/// Failed full-text commits in a row after which the index is rebuilt from the records
+/// ([ADMIN-GRAPH-1]). While rebuilding fails too, it is tried again after twice as many
+/// maintenance runs each time, with no commits in between.
+pub const TEXT_REBUILD_AFTER: u32 = 5;
+
+/// What a maintenance run does with a graph's full-text index.
+enum TextStep {
+    Nothing,
+    /// Commit pending updates (retrying after a failure), without holding the graph.
+    Commit(Arc<dyn mygraph_core::store::TextIndex>),
+    /// Catch up from the change log (or rebuild from the records), holding the graph shared.
+    Repair {
+        rebuild: bool,
+    },
+    /// Leave it, to space out rebuilds that keep failing.
+    Wait,
+}
+
+/// Whether the `run`th maintenance run since the full-text index last committed rebuilds it:
+/// runs [`TEXT_REBUILD_AFTER`], twice that, four times, and so on.
+fn rebuilds_at(run: u32) -> bool {
+    run.is_multiple_of(TEXT_REBUILD_AFTER) && (run / TEXT_REBUILD_AFTER).is_power_of_two()
+}
+
+fn text_step(g: &G) -> TextStep {
+    let failures = g.text_commit_failures();
+    let lost = g.text_index_lost_updates();
+    let handle = g.text_handle();
+    if failures == 0 && !lost {
+        return match handle {
+            Some(t) if t.pending() > 0 => TextStep::Commit(t),
+            _ => TextStep::Nothing,
+        };
+    }
+    let run = failures.saturating_add(1);
+    if run >= TEXT_REBUILD_AFTER {
+        if rebuilds_at(run) {
+            TextStep::Repair { rebuild: true }
+        } else {
+            TextStep::Wait
+        }
+    } else {
+        match handle {
+            Some(t) if !lost => TextStep::Commit(t),
+            _ => TextStep::Repair { rebuild: false },
+        }
+    }
+}
+
 impl Registry {
+    /// Whether graphs get a full-text index (else search uses the store's own full text).
+    pub fn text_index_enabled(&self) -> bool {
+        self.text_index
+    }
+
     /// Commits the full-text index of every loaded graph that has pending updates, holding no
-    /// graph lock: reads and writes go on meanwhile.
+    /// graph lock: reads and writes go on meanwhile. After a failed commit, the next run retries
+    /// it; after [`TEXT_REBUILD_AFTER`] failures in a row, the index is rebuilt from the records.
     pub fn commit_text_all(&self) {
         for (name, state) in self.list() {
             let SlotState::Ready(h) = state else { continue };
             // The handle is taken under the lock, the commit runs without it. A graph busy with a
             // long write (an import) is skipped rather than waited for, so checkpoints still run.
-            let (text, semantic) = match h.try_read() {
-                Ok(g) => handles(g.as_ref()),
-                Err(std::sync::TryLockError::Poisoned(p)) => handles(p.into_inner().as_ref()),
+            let guard = match h.try_read() {
+                Ok(g) => g,
+                Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
                 Err(std::sync::TryLockError::WouldBlock) => continue,
             };
-            self.commit_semantic(&name, &h, semantic);
-            let Some(t) = text.filter(|t| t.pending() > 0) else {
-                continue;
+            let Some(g) = guard.as_ref() else { continue };
+            let semantic = g.semantic_handle();
+            let commit = match text_step(g) {
+                TextStep::Nothing => None,
+                TextStep::Commit(t) => Some((t, g.text_commit_failures())),
+                TextStep::Repair { rebuild } => {
+                    // Under the shared lock: reads go on, writes wait.
+                    let _ = self.repair_text(&name, g, rebuild);
+                    None
+                }
+                TextStep::Wait => {
+                    g.record_text_commit(false);
+                    None
+                }
             };
-            let start = std::time::Instant::now();
+            drop(guard);
+            self.commit_semantic(&name, &h, semantic);
+            let Some((t, before)) = commit else { continue };
+            let start = Instant::now();
             let result = t.commit();
             let took = start.elapsed().as_secs_f64();
             self.update_run(&name, |r| {
@@ -383,27 +452,74 @@ impl Registry {
                     Err(_) => r.text_commit_errors += 1,
                 }
             });
-            if let Err(e) = result {
-                tracing::warn!(graph = %name, "full-text index commit failed, search falls back to FTS5: {e}");
-                if let Some(g) = h.read().unwrap_or_else(PoisonError::into_inner).as_ref() {
-                    g.mark_text_stale();
-                }
+            if result.is_ok() && before == 0 {
+                continue;
+            }
+            let Some(failures) = h
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+                .map(|g| g.record_text_commit(result.is_ok()))
+            else {
+                continue;
+            };
+            match result {
+                Ok(()) => tracing::info!(
+                    graph = %name,
+                    "full-text index committed after {before} failed commits; search uses it again"
+                ),
+                Err(e) => tracing::warn!(
+                    graph = %name,
+                    "full-text index commit failed ({failures} in a row), search falls back to FTS5 until one succeeds: {e}"
+                ),
             }
         }
     }
-}
 
-/// The graph's full-text and semantic index handles.
-type Handles = (
-    Option<Arc<dyn mygraph_core::store::TextIndex>>,
-    Option<Arc<dyn mygraph_core::store::SemanticIndex>>,
-);
+    /// Catches the graph's full-text index up from the change log, or with `rebuild` rebuilds
+    /// it from the records ([ADMIN-GRAPH-10]). The caller holds the graph shared.
+    pub fn repair_text(&self, name: &str, g: &G, rebuild: bool) -> Result<(), ApiError> {
+        let failures = g.text_commit_failures();
+        if rebuild {
+            tracing::warn!(graph = %name, "rebuilding the full-text index from the records ({failures} failed commits in a row)");
+        }
+        let start = Instant::now();
+        let result = g.repair_text_index(rebuild);
+        let took = start.elapsed().as_secs_f64();
+        self.update_run(name, |r| {
+            r.text_commit_s += took;
+            match &result {
+                Ok(()) => r.text_commits += 1,
+                Err(_) => r.text_commit_errors += 1,
+            }
+        });
+        match result {
+            Ok(()) => {
+                tracing::info!(graph = %name, "full-text index repaired in {took:.1} s; search uses it again");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!(
+                    graph = %name,
+                    "full-text index repair failed ({} in a row), search falls back to FTS5: {e}",
+                    g.text_commit_failures()
+                );
+                Err(ApiError::new("storage.failure", e.to_string()))
+            }
+        }
+    }
 
-fn handles(g: Option<&G>) -> Handles {
-    (
-        g.and_then(|g| g.text_handle()),
-        g.and_then(|g| g.semantic_handle()),
-    )
+    /// Attaches a new full-text index to a graph that has none (opening it failed), rebuilding
+    /// it from the records ([ADMIN-GRAPH-10]).
+    pub fn attach_text(&self, name: &str, g: &mut G) -> Result<(), ApiError> {
+        let _ = std::fs::remove_dir_all(index_dir(&self.data_dir, name));
+        TantivyText::open(&self.data_dir, name)
+            .and_then(|t| g.attach_text_index(Box::new(t)))
+            .map_err(|e| {
+                tracing::warn!(graph = %name, "full-text index unavailable: {e}");
+                ApiError::new("storage.failure", e.to_string())
+            })
+    }
 }
 
 impl Registry {
@@ -535,5 +651,16 @@ impl Registry {
             Arc::new(watch::Sender::new(SlotState::Unloaded)),
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_rebuilds_are_spaced_out() {
+        let runs: Vec<u32> = (1..=100).filter(|&r| rebuilds_at(r)).collect();
+        assert_eq!(runs, [5, 10, 20, 40, 80]);
     }
 }

@@ -180,7 +180,7 @@ pub async fn delete_graph(
     finish(&app, "admin.delete_graph", Some(&graph), start, r)
 }
 
-/// `POST /admin/graphs/{graph}/{snapshot|check|export|import|restore}`
+/// `POST /admin/graphs/{graph}/{snapshot|check|export|import|restore|reindex}`
 pub async fn graph_action(
     State(app): State<Arc<App>>,
     Path((graph, action)): Path<(String, String)>,
@@ -194,6 +194,7 @@ pub async fn graph_action(
         "export" => "admin.export",
         "import" => "admin.import",
         "restore" => "admin.restore",
+        "reindex" => "admin.reindex",
         _ => "unknown",
     };
     let r = async {
@@ -300,6 +301,37 @@ pub async fn graph_action(
                     .await
                     .map_err(|e| ApiError::new("internal", e.to_string()))??;
                 app.registry.get(&graph).await?;
+                graph_info(&app, &caller, &graph).await?
+            }
+            // [ADMIN-GRAPH-10]
+            "reindex" => {
+                if !app.registry.text_index_enabled() {
+                    return Err(ApiError::new(
+                        "admin.text_index_off",
+                        "the server runs without a full-text index",
+                    ));
+                }
+                let attached = with_graph(&app, &caller, &graph, Role::Admin, false, |access| {
+                    Ok(access.graph().text_index_status() != "none")
+                })
+                .await?;
+                let reg = app.registry.clone();
+                let name = graph.clone();
+                if attached {
+                    // Under the shared lock: reads go on (on the store's full text), writes wait.
+                    with_graph(&app, &caller, &graph, Role::Admin, false, move |access| {
+                        reg.repair_text(&name, access.graph(), true)
+                    })
+                    .await?;
+                } else {
+                    with_graph(&app, &caller, &graph, Role::Admin, true, move |access| {
+                        let crate::api::GraphAccess::Write(g) = access else {
+                            unreachable!("write access")
+                        };
+                        reg.attach_text(&name, g)
+                    })
+                    .await?;
+                }
                 graph_info(&app, &caller, &graph).await?
             }
             _ => return Err(api_not_found()),

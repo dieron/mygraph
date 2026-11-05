@@ -16,7 +16,7 @@ use serde_json::{Map, Value as Json, json};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// An operation error: reason code, message, failing item, details ([OP-WRITE-6]).
 #[derive(Debug, Clone, PartialEq)]
@@ -147,9 +147,14 @@ pub struct Graph<S: Store> {
     pub(crate) counters: Counters,
     name: String,
     /// External full-text index; `search` falls back to the store's own full text when it is
-    /// absent or stale (an update failed after a commit; reopening catches it up).
+    /// absent, stale or failing to commit.
     text: Option<Arc<dyn TextIndex>>,
+    /// The index missed updates (or a repair failed): it no longer takes updates, and only
+    /// [`Graph::repair_text_index`] (or reopening) brings it back.
     text_stale: AtomicBool,
+    /// Commits (and repairs) that failed since the last one that succeeded. While there are
+    /// any, the index still takes updates and later commits retry them.
+    text_failures: AtomicU32,
     /// Semantic index ([RANK-8]); without it (or while it is stale or building), search matches
     /// words only.
     semantic: Option<Arc<dyn SemanticIndex>>,
@@ -169,6 +174,7 @@ impl<S: Store> Graph<S> {
             name: name.to_owned(),
             text: None,
             text_stale: AtomicBool::new(false),
+            text_failures: AtomicU32::new(0),
             semantic: None,
             semantic_stale: AtomicBool::new(false),
             stats_cache: Default::default(),
@@ -179,9 +185,10 @@ impl<S: Store> Graph<S> {
     /// change log, or rebuilding it when it is new or ahead of the store.
     pub fn attach_text_index(&mut self, index: Box<dyn TextIndex>) -> Result<(), StoreFailure> {
         let index: Arc<dyn TextIndex> = Arc::from(index);
-        self.sync_index(index.as_ref())?;
+        self.sync_index(index.as_ref(), false)?;
         self.text = Some(index);
         self.text_stale.store(false, Ordering::Relaxed);
+        self.text_failures.store(0, Ordering::Relaxed);
         Ok(())
     }
 
@@ -193,17 +200,17 @@ impl<S: Store> Graph<S> {
         index: Box<dyn SemanticIndex>,
     ) -> Result<(), StoreFailure> {
         let index: Arc<dyn SemanticIndex> = Arc::from(index);
-        self.sync_index(index.as_ref())?;
+        self.sync_index(index.as_ref(), false)?;
         self.semantic = Some(index);
         self.semantic_stale.store(false, Ordering::Relaxed);
         Ok(())
     }
 
     /// Brings a derived index up to date: catching up from the change log, or rebuilding it when
-    /// it is new or ahead of the store.
-    fn sync_index(&self, index: &dyn DerivedIndex) -> Result<(), StoreFailure> {
+    /// it is new or ahead of the store, or when `rebuild` asks.
+    fn sync_index(&self, index: &dyn DerivedIndex, rebuild: bool) -> Result<(), StoreFailure> {
         let seq = self.counters.seq;
-        match index.applied_seq() {
+        match index.applied_seq().filter(|_| !rebuild) {
             Some(s) if s == seq => {}
             Some(s) if s >= 0 && s < seq => {
                 let docs = self
@@ -264,17 +271,62 @@ impl<S: Store> Graph<S> {
         Ok(text_doc(&row, content.as_deref()))
     }
 
-    /// Makes recent full-text index updates durable, when there are any. A failure marks the
-    /// index stale (search falls back to the store's full text until the graph is reopened).
+    /// Makes recent full-text index updates durable, when there are any. After a failure,
+    /// search falls back to the store's full text until a later commit succeeds.
     pub fn commit_text(&self) -> Result<(), StoreFailure> {
-        if let Some(t) = self.text_index()
-            && t.pending() > 0
-            && let Err(e) = t.commit()
-        {
-            self.text_stale.store(true, Ordering::Relaxed);
-            return Err(e);
+        let Some(t) = self.text_handle() else {
+            return Ok(());
+        };
+        if t.pending() == 0 && self.text_commit_failures() == 0 {
+            return Ok(());
         }
-        Ok(())
+        let result = t.commit();
+        self.record_text_commit(result.is_ok());
+        result
+    }
+
+    /// Records the outcome of a commit through [`Graph::text_handle`]: after a failure, search
+    /// falls back to the store's full text until a commit succeeds. Returns the number of
+    /// failures in a row.
+    pub fn record_text_commit(&self, ok: bool) -> u32 {
+        if ok {
+            self.text_failures.store(0, Ordering::Relaxed);
+            0
+        } else {
+            self.text_failures
+                .fetch_add(1, Ordering::Relaxed)
+                .saturating_add(1)
+        }
+    }
+
+    /// Full-text commits and repairs that failed in a row (0 while the index is current).
+    pub fn text_commit_failures(&self) -> u32 {
+        self.text_failures.load(Ordering::Relaxed)
+    }
+
+    /// Whether the full-text index missed updates, so that only [`Graph::repair_text_index`]
+    /// brings it back.
+    pub fn text_index_lost_updates(&self) -> bool {
+        self.text.is_some() && self.text_stale.load(Ordering::Relaxed)
+    }
+
+    /// Brings the full-text index back to `current`: catches it up from the change log (with
+    /// `rebuild`, rebuilds it from the records) and commits. Search uses the store's full text
+    /// meanwhile, and still after a failure, which counts as a failed commit. Holding the graph
+    /// shared keeps writes out while it runs.
+    pub fn repair_text_index(&self, rebuild: bool) -> Result<(), StoreFailure> {
+        let Some(t) = self.text.clone() else {
+            return Ok(());
+        };
+        self.text_stale.store(true, Ordering::Relaxed);
+        let result = self
+            .sync_index(t.as_ref(), rebuild)
+            .and_then(|()| t.commit());
+        if result.is_ok() {
+            self.text_stale.store(false, Ordering::Relaxed);
+        }
+        self.record_text_commit(result.is_ok());
+        result
     }
 
     /// Embeds and saves recent semantic index updates until none are left (each commit embeds
@@ -340,25 +392,21 @@ impl<S: Store> Graph<S> {
         }
     }
 
-    /// A handle on the full-text index (when attached and up to date), so it can be committed
-    /// without holding the graph: writes then never wait for a commit.
+    /// A handle on the full-text index (when attached and holding every update, even while its
+    /// commits fail), so it can be committed without holding the graph: writes then never wait
+    /// for a commit. Report the outcome with [`Graph::record_text_commit`].
     pub fn text_handle(&self) -> Option<Arc<dyn TextIndex>> {
         self.text
             .clone()
             .filter(|_| !self.text_stale.load(Ordering::Relaxed))
     }
 
-    /// After a failed commit through [`Graph::text_handle`]: search falls back to the store's
-    /// full text until the graph is reopened.
-    pub fn mark_text_stale(&self) {
-        self.text_stale.store(true, Ordering::Relaxed);
-    }
-
-    /// The external full-text index, when attached and up to date.
+    /// The external full-text index, when attached and current (search uses it).
     pub(crate) fn text_index(&self) -> Option<&dyn TextIndex> {
-        self.text
-            .as_deref()
-            .filter(|_| !self.text_stale.load(Ordering::Relaxed))
+        self.text.as_deref().filter(|_| {
+            !self.text_stale.load(Ordering::Relaxed)
+                && self.text_failures.load(Ordering::Relaxed) == 0
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -382,13 +430,13 @@ impl<S: Store> Graph<S> {
         self.counters.seq
     }
 
-    /// State of the external full-text index: `current`, `stale` (an update failed; search uses
-    /// the store's own full text) or `none`.
+    /// State of the external full-text index: `current`, `stale` (an update or commit failed;
+    /// search uses the store's own full text) or `none`.
     pub fn text_index_status(&self) -> &'static str {
-        match (&self.text, self.text_stale.load(Ordering::Relaxed)) {
-            (None, _) => "none",
-            (Some(_), true) => "stale",
-            (Some(_), false) => "current",
+        match &self.text {
+            None => "none",
+            Some(_) if self.text_index().is_none() => "stale",
+            Some(_) => "current",
         }
     }
 
