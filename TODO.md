@@ -8,7 +8,7 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [ ] TLS: serve HTTPS directly (certificate and key files in the configuration), so a server on a
       network needs no reverse proxy.
 - [ ] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect.
-- [ ] Tag and publish the first release (v0.1.0) and update the README's quick start for it.
+- [x] Tag the first release (v0.1.0) and update the README's quick start for it.
 
 ## Distribution and setup (in this order; docs/09-roadmap.md, Packaging and setup)
 

@@ -29,8 +29,9 @@ agents have built (a stats page and a graph viewer).
 
 ## Status
 
-A working prototype, used daily, before its first release. No prebuilt binaries yet: build it
-from source or with Docker. Tested on Windows and Linux; macOS has not been tried.
+A working prototype, used daily. Prebuilt binaries for Linux, Windows and macOS are on the
+[releases page](https://github.com/dieron/mygraph/releases); there is also a Docker image, or build
+it from source. Used daily on Windows and Linux; on macOS only the release smoke test has run.
 
 Known limits:
 - One server per data folder; no replication or clustering.
@@ -43,6 +44,23 @@ Known limits:
   still change.
 
 ## Quick start
+
+With a prebuilt binary: download from the [latest release](https://github.com/dieron/mygraph/releases/latest)
+the archive for your platform and the embedding model (`mygraph-model-multilingual-e5-small`), and
+unpack the model into the folder that holds `mygraph`, so it ends up in
+`models/multilingual-e5-small` next to the binary. Then:
+
+```bash
+./mygraph serve
+```
+
+| Platform | Archive | Needs |
+|---|---|---|
+| Linux x64, arm64 | `x86_64-` / `aarch64-unknown-linux-gnu.tar.gz` | glibc 2.38+ (Ubuntu 24.04, Debian 13, Fedora 39 or newer) |
+| Windows x64 | `x86_64-pc-windows-msvc.zip` | the [Visual C++ runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe), usually already installed |
+| macOS (Apple silicon) | `aarch64-apple-darwin.tar.gz` | macOS may block an unsigned download: `xattr -d com.apple.quarantine mygraph` |
+
+`SHA256SUMS` in the release lists every archive's checksum. The binaries are not signed yet.
 
 With Docker (the image includes the embedding model):
 
@@ -68,8 +86,9 @@ cargo build --release -p mygraph-server
 target/release/mygraph serve
 ```
 
-From source the server listens on `127.0.0.1:7420` and, without API keys, accepts local requests
-as an admin. It matches words only until you download the embedding model (135 MB, once):
+Run directly (a binary or from source), the server listens on `127.0.0.1:7420` and, without API
+keys, accepts local requests as an admin. From source it matches words only until you download
+the embedding model (135 MB, once), or unpack the release's model archive:
 
 ```bash
 deploy/fetch-model.sh <data_dir>/models/multilingual-e5-small
