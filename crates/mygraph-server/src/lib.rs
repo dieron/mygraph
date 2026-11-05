@@ -68,6 +68,23 @@ impl App {
     }
 }
 
+/// Where the embedding model is: `model_dir` when set, else `<data_dir>/models/<model>`, else
+/// `models/<model>` next to the executable (where a release archive's model unpacks).
+fn model_dir(config: &Config) -> std::path::PathBuf {
+    if let Some(dir) = &config.search.model_dir {
+        return dir.clone();
+    }
+    let in_data = mygraph_semantic::default_model_dir(&config.data_dir);
+    if in_data.join("model.onnx").is_file() {
+        return in_data;
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(mygraph_semantic::default_model_dir))
+        .filter(|dir| dir.join("model.onnx").is_file())
+        .unwrap_or(in_data)
+}
+
 /// The embedding model for semantic search, when enabled and found; without it search matches
 /// words only.
 fn load_model(config: &Config) -> Option<Arc<dyn mygraph_semantic::Embed>> {
@@ -75,10 +92,7 @@ fn load_model(config: &Config) -> Option<Arc<dyn mygraph_semantic::Embed>> {
     if !search.semantic {
         return None;
     }
-    let dir = search
-        .model_dir
-        .clone()
-        .unwrap_or_else(|| mygraph_semantic::default_model_dir(&config.data_dir));
+    let dir = model_dir(config);
     if !dir.join("model.onnx").is_file() {
         tracing::info!(
             "no embedding model in {}: search matches words only",

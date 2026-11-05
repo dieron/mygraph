@@ -1,0 +1,180 @@
+name: release
+
+# Builds the `mygraph` binary for each platform on native runners, smoke-tests it with the
+# embedding model, and packs it:
+#   tag v1.2.3         -> a draft GitHub release "MyGraph 1.2.3" with every archive and SHA256SUMS,
+#                         to check and publish by hand
+#   workflow_dispatch  -> the same archives as workflow artifacts, no release
+# The tag must match `version` in Cargo.toml.
+#
+# Assets:
+#   mygraph-<version>-<target>.tar.gz (.zip on Windows): the binary, README, licenses, the skill
+#   mygraph-model-multilingual-e5-small.tar.gz / .zip: the embedding model for semantic search,
+#     unpacked next to the binary as models/multilingual-e5-small (the server looks there)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  MODEL: multilingual-e5-small
+
+jobs:
+  model:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and check the model
+        run: sh deploy/fetch-model.sh "stage/models/$MODEL"
+      - name: Pack the model
+        working-directory: stage
+        run: |
+          cat > "models/$MODEL/SOURCE.txt" <<'EOF'
+          multilingual-e5-small (https://huggingface.co/intfloat/multilingual-e5-small), MIT license.
+          int8 ONNX conversion from https://huggingface.co/Xenova/multilingual-e5-small at revision
+          761b726dd34fb83930e26aab4e9ac3899aa1fa78, as fetched by deploy/fetch-model.sh.
+          Unpack next to the mygraph binary, or into <data_dir>, so that this folder is
+          models/multilingual-e5-small.
+          EOF
+          mkdir -p ../out
+          tar -czf "../out/mygraph-model-$MODEL.tar.gz" models
+          zip -qr "../out/mygraph-model-$MODEL.zip" models
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: out/*
+          if-no-files-found: error
+
+  build:
+    needs: model
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Name the version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+              exit 1
+            fi
+            label=$version
+          else
+            label=$version-dev.${GITHUB_SHA::7}
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "PACKAGE=mygraph-$label-${{ matrix.target }}" >> "$GITHUB_ENV"
+
+      - run: cargo build --release --locked -p mygraph-server
+
+      - name: Stage the package
+        run: |
+          exe=mygraph; [ "$RUNNER_OS" = Windows ] && exe=mygraph.exe
+          mkdir -p "stage/$PACKAGE"
+          cp "target/release/$exe" README.md SECURITY.md LICENSE-MIT LICENSE-APACHE \
+            dist/mygraph.skill "stage/$PACKAGE/"
+          echo "EXE=$exe" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: model
+
+      # Unpacks the model next to the binary, as the README tells users to, and checks that the
+      # server finds it there: health, a graph, and semantic search reported as on.
+      - name: Smoke test
+        run: |
+          dir=smoke
+          mkdir -p "$dir"
+          cp "stage/$PACKAGE/$EXE" "$dir/"
+          tar -xzf "model/mygraph-model-$MODEL.tar.gz" -C "$dir"
+          v=$("$dir/$EXE" --version)
+          echo "$v"
+          case "$v" in *"$VERSION"*) ;; *) echo "::error::unexpected version: $v"; exit 1 ;; esac
+          "$dir/$EXE" serve --data-dir "$dir/data" --listen 127.0.0.1:7420 > "$dir/server.log" 2>&1 &
+          pid=$!
+          ok=
+          for _ in $(seq 1 60); do
+            if curl -fsS localhost:7420/health; then ok=1; break; fi
+            sleep 2
+          done
+          echo
+          if [ -z "$ok" ]; then cat "$dir/server.log"; exit 1; fi
+          curl -fsS -H 'Content-Type: application/json' -d '{"name": "smoke"}' \
+            localhost:7420/admin/graphs
+          echo
+          graphs=$(curl -fsS localhost:7420/v1/graphs)
+          echo "$graphs"
+          kill "$pid" || true
+          if ! echo "$graphs" | grep -q '"semantic":true'; then
+            cat "$dir/server.log"
+            echo "::error::the server did not load the model next to the binary"
+            exit 1
+          fi
+
+      - name: Pack
+        working-directory: stage
+        run: |
+          mkdir -p ../out
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip -bso0 "../out/$PACKAGE.zip" "$PACKAGE"
+          else
+            tar -czf "../out/$PACKAGE.tar.gz" "$PACKAGE"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [model, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Checksums
+        working-directory: out
+        run: sha256sum -- * | tee SHA256SUMS
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "MyGraph ${GITHUB_REF_NAME#v}" \
+            --generate-notes

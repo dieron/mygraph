@@ -239,7 +239,8 @@ graphs = ["research"]     # optional; default all graphs
 [search]
 semantic = true            # MYGRAPH_SEMANTIC: also match by meaning (false: words only)
 semantic_threshold = 0.80  # MYGRAPH_SEMANTIC_THRESHOLD: lowest similarity for a hit found by meaning
-model_dir = "..."          # MYGRAPH_MODEL_DIR: default <data_dir>/models/multilingual-e5-small
+model_dir = "..."          # MYGRAPH_MODEL_DIR: default <data_dir>/models/multilingual-e5-small,
+                           #   then models/multilingual-e5-small next to the executable
 ```
 
 Each graph's vectors are a cache in `<data_dir>/vectors/<graph>/`. When the cache is missing, it is

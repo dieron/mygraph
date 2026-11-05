@@ -3,6 +3,13 @@
 Deferred work, kept here so it is not lost. The plan with milestones is
 [docs/08-poc-plan.md](docs/08-poc-plan.md); later features are in [docs/09-roadmap.md](docs/09-roadmap.md).
 
+## Before promoting it
+
+- [ ] TLS: serve HTTPS directly (certificate and key files in the configuration), so a server on a
+      network needs no reverse proxy.
+- [ ] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect.
+- [ ] Tag and publish the first release (v0.1.0) and update the README's quick start for it.
+
 ## Distribution and setup (in this order; docs/09-roadmap.md, Packaging and setup)
 
 - [x] **Docker and compose** — `Dockerfile` (distroless, non-root, 45 MB), `compose.yaml`,
@@ -11,8 +18,11 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] Run it as a service on a home machine; `deploy/docker/deploy.sh <ssh-destination>` deploys
       new versions.
 - [ ] Prune old snapshots on the server (each deploy adds one per graph).
-- [ ] Release executables built by GitHub Actions on a version tag (Windows, macOS, Linux; x64 and
-      arm64) with checksums; one-line installers (likely cargo-dist).
+- [x] Release executables built by GitHub Actions on a version tag (`.github/workflows/release.yml`):
+      Linux x64 and arm64, Windows x64, macOS arm64, each smoke-tested with the model; the model as
+      its own archive, found next to the binary; SHA256SUMS; a draft release to publish by hand.
+- [ ] Windows arm64 and macOS x64 builds, if anyone asks.
+- [ ] One-line installers (shell and PowerShell) that fetch the right archive and the model.
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect
       and connect Claude Desktop, Claude Code, Cursor, VS Code and Codex, install the skill.
 - [ ] Claude Desktop extension (`.mcpb`) for one-click install.

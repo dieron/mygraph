@@ -50,7 +50,7 @@ pub struct SearchConfig {
     /// The least similarity (0–1) of a hit found by meaning ([RANK-8]).
     pub semantic_threshold: f32,
     /// Folder of the embedding model (`model.onnx` and its tokenizer files); default
-    /// `<data_dir>/models/<model name>/`.
+    /// `<data_dir>/models/<model name>/`, or `models/<model name>/` next to the executable.
     pub model_dir: Option<PathBuf>,
 }
 
