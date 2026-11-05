@@ -745,8 +745,12 @@ mod tests {
         }])
     }
 
+    /// Tests run in parallel, so each call gets its own directory: a shared one is removed by
+    /// one test while another is still writing to it.
     fn loaded() -> Vec<Question> {
-        let dir = std::env::temp_dir().join(format!("lme-test-{}", std::process::id()));
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("lme-test-{}-{n}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("lme.json");
         fs::write(&file, history().to_string()).unwrap();
