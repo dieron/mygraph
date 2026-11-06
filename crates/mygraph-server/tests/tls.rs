@@ -70,7 +70,18 @@ fn serves_https_with_the_configured_certificate() {
     assert!(err.to_lowercase().contains("certificate"), "{err}");
     assert!(health(&tls::client(Some(&other)).unwrap(), &url).is_err());
 
-    // Plain HTTP gets no answer on an HTTPS port.
+    // Plain HTTP on the HTTPS port is told to use HTTPS ([API-HTTP-4]).
+    match ureq::agent()
+        .post(&format!("http://127.0.0.1:{port}/v1/graphs/x/search"))
+        .send_string(&"x".repeat(100_000))
+    {
+        Err(ureq::Error::Status(400, r)) => {
+            let body = r.into_string().unwrap();
+            assert!(body.contains(r#""code":"api.https_required""#), "{body}");
+            assert!(body.contains("use https://"), "{body}");
+        }
+        other => panic!("{other:?}"),
+    }
     assert!(health(&ureq::agent(), &format!("http://127.0.0.1:{port}")).is_err());
 
     // `mygraph health` asks the loopback address, which the certificate does not name.

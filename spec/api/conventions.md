@@ -25,6 +25,9 @@ and `/admin` are the unauthenticated service routes of §6.
 (or `text.invalid_unicode`); a body larger than the configured limit (default 16 MiB) fails with
 `api.body_too_large`.
 
+**[API-HTTP-4]** A server MAY speak HTTPS instead, on the same port. It then SHOULD answer a
+request that arrives over plain HTTP with `api.https_required` and close the connection.
+
 ## 2. Authentication and roles
 
 **[API-AUTH-1]** Requests to `/v1` and `/admin` carry `Authorization: Bearer <key>`. A key is

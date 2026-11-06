@@ -367,7 +367,8 @@ pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> s
                 let _ = tokio::signal::ctrl_c().await;
                 stop.graceful_shutdown(Some(Duration::from_secs(30)));
             });
-            axum_server::from_tcp_rustls(listener, config)?
+            axum_server::from_tcp(listener)?
+                .acceptor(tls::acceptor(config))
                 .handle(handle)
                 .serve(router(app).into_make_service())
                 .await

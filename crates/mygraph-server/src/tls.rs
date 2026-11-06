@@ -5,16 +5,21 @@
 //!
 //! The crypto provider is ring, for the server and the clients alike.
 
-use axum_server::tls_rustls::RustlsConfig;
+use axum_server::accept::Accept;
+use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 /// How often the server checks its certificate files for a change.
 pub const RELOAD_EVERY: Duration = Duration::from_secs(60);
@@ -44,6 +49,75 @@ pub async fn server_config(cert: &Path, key: &Path) -> io::Result<RustlsConfig> 
             ),
         )
     })
+}
+
+/// The acceptor of the HTTPS listener: [`PlainHttpCheck`], then the TLS handshake.
+pub fn acceptor(config: RustlsConfig) -> RustlsAcceptor<PlainHttpCheck> {
+    RustlsAcceptor::new(config).acceptor(PlainHttpCheck)
+}
+
+/// The first byte of a TLS connection: a handshake record.
+const TLS_HANDSHAKE: u8 = 0x16;
+
+/// [API-HTTP-4] Answers a plain HTTP request on the HTTPS port with `api.https_required`, instead
+/// of the TLS alert that clients show as garbage, and closes the connection. TLS connections go
+/// on to the handshake.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PlainHttpCheck;
+
+impl<S: Send + 'static> Accept<TcpStream, S> for PlainHttpCheck {
+    type Stream = TcpStream;
+    type Service = S;
+    type Future = Pin<Box<dyn Future<Output = io::Result<(TcpStream, S)>> + Send>>;
+
+    fn accept(&self, stream: TcpStream, service: S) -> Self::Future {
+        Box::pin(async move {
+            let mut first = [0u8; 1];
+            let n = tokio::time::timeout(Duration::from_secs(10), stream.peek(&mut first))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "nothing received"))??;
+            if n == 0 || first[0] == TLS_HANDSHAKE {
+                return Ok((stream, service));
+            }
+            refuse_plain_http(stream).await;
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "plain HTTP on the HTTPS port",
+            ))
+        })
+    }
+}
+
+async fn refuse_plain_http(mut stream: TcpStream) {
+    // Read what the client sent first: closing with unread data resets the connection, and the
+    // client may then lose the answer.
+    let mut buf = vec![0u8; 64 << 10];
+    let mut read = 0;
+    while read < buf.len() {
+        match tokio::time::timeout(Duration::from_millis(200), stream.read(&mut buf[read..])).await
+        {
+            Ok(Ok(n)) if n > 0 => read += n,
+            _ => break,
+        }
+    }
+    let code = "api.https_required";
+    let body = serde_json::json!({ "error": {
+        "code": code,
+        "message": "this server speaks HTTPS, and the request came over plain HTTP",
+        "section": null, "index": null, "details": null,
+        "hint": crate::error::hint_of(code),
+    }})
+    .to_string();
+    let head = [
+        "HTTP/1.1 400 Bad Request",
+        "content-type: application/json; charset=utf-8",
+        &format!("content-length: {}", body.len()),
+        "connection: close",
+    ]
+    .join("\r\n");
+    let reply = format!("{head}\r\n\r\n{body}");
+    let _ = stream.write_all(reply.as_bytes()).await;
+    let _ = stream.shutdown().await;
 }
 
 /// Reads the certificate and key again whenever either file changes (checked `every` so often),

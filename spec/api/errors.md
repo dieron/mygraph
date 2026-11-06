@@ -64,4 +64,5 @@ with the request itself and answers `400 Bad Request`.
 | `auth.missing_key` | Send `Authorization: Bearer <key>`. |
 | `api.not_found` | See `GET /openapi.yaml` for the available routes. |
 | `json.malformed` | The body must be one JSON object. |
+| `api.https_required` | This server speaks HTTPS: use `https://` instead of `http://`. |
 | any `*.invalid_field` | The message names the field; see the operation's specification. |
