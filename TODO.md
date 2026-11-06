@@ -5,8 +5,11 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 
 ## Before promoting it
 
-- [ ] TLS: serve HTTPS directly (certificate and key files in the configuration), so a server on a
-      network needs no reverse proxy.
+- [x] TLS: `[tls]` cert and key (or `MYGRAPH_TLS_CERT` / `MYGRAPH_TLS_KEY`) serve HTTPS, reloaded
+      when the files change; the bridge and `mygraph health` speak HTTPS, `--ca-cert` /
+      `MYGRAPH_CA_CERT` trusts a private CA or a self-signed certificate.
+- [ ] Certificates from Let's Encrypt by the server itself (ACME, e.g. rustls-acme), for a server
+      reachable from the internet with no certbot.
 - [ ] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect.
 - [x] Tag the first release (v0.1.0) and update the README's quick start for it.
 

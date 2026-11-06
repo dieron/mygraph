@@ -15,8 +15,9 @@ on a machine or network they control, not for the open internet.
   `agent-write` keys, and keep the admin key for yourself.
 - In `server.toml`, store keys as `key_sha256` (`mygraph hash-key <key>` prints it) rather than
   in plain text. In Docker, pass them as environment variables or as `<NAME>_FILE` secrets.
-- **The server speaks plain HTTP.** Keys and data cross the network unencrypted. Beyond one
-  machine, use a network you trust, or put a reverse proxy with TLS in front.
+- **Without a certificate the server speaks plain HTTP**, and keys and data cross the network
+  unencrypted. Beyond one machine, set `[tls]` (or `MYGRAPH_TLS_CERT` and `MYGRAPH_TLS_KEY`) so it
+  speaks HTTPS, or put a reverse proxy with TLS in front. See "HTTPS" in the README.
 - The stats page and the graph viewer ask for a key in the browser and keep it for that browser
   session only.
 

@@ -37,9 +37,9 @@ Known limits:
 - One server per data folder; no replication or clustering.
 - About 450–550 writes per second per graph, and reads wait while a write commits
   ([TODO.md](TODO.md), "Concurrency").
-- The server speaks plain HTTP with API keys. Over a network, use it on a network you trust or
-  behind a reverse proxy with TLS. Clients that need remote MCP with OAuth (claude.ai on the web
-  and mobile) can't connect yet.
+- Access is by API key. Over a network, give the server a certificate so it speaks HTTPS
+  ([HTTPS](#https)), or put it behind a reverse proxy with TLS. Clients that need remote MCP with
+  OAuth (claude.ai on the web and mobile) can't connect yet.
 - The specification is a draft (0.1.0-draft); storage migrates itself on upgrade, but the API may
   still change.
 
@@ -122,9 +122,11 @@ There are three ways to connect, and all of them use the same tools:
 
 1. **stdio bridge to a running server** (the usual one). The client starts
    `mygraph mcp --url http://<host>:7420 --graph <default graph>`, which forwards every call to the
-   server. Pass the key with `--key` or the `MYGRAPH_KEY` environment variable.
-2. **Streamable HTTP**, for clients that support it: `http://<host>:7420/mcp`, with the header
-   `Authorization: Bearer <key>`.
+   server. Pass the key with `--key` or the `MYGRAPH_KEY` environment variable. For a server with
+   HTTPS, use an `https://` URL; when its certificate is self-signed or from a private CA, also
+   pass `--ca-cert <file.pem>` (or set `MYGRAPH_CA_CERT`).
+2. **Streamable HTTP**, for clients that support it: `http://<host>:7420/mcp` (or `https://`), with
+   the header `Authorization: Bearer <key>`.
 3. **No server.** `mygraph mcp --data-dir <folder>` opens a data folder in the client's own
    process. This works only while no other process is using that folder.
 
@@ -265,6 +267,37 @@ model_dir = "..."          # MYGRAPH_MODEL_DIR: default <data_dir>/models/multil
 Each graph's vectors are a cache in `<data_dir>/vectors/<graph>/`. When the cache is missing, it is
 rebuilt in the background, and search matches words only until that finishes. Agents see the
 settings in `overview`. Without semantic search, the tools stop offering it.
+
+### HTTPS
+
+Give the server a certificate and it speaks HTTPS instead of HTTP, on the same address:
+
+```toml
+[tls]
+cert = "/etc/mygraph/fullchain.pem"   # MYGRAPH_TLS_CERT: the certificate, then any intermediates
+key = "/etc/mygraph/privkey.pem"      # MYGRAPH_TLS_KEY: PKCS#8, PKCS#1 or SEC1
+```
+
+- The files are checked every minute and read again when they change, so a renewed certificate
+  (from certbot, acme.sh or your NAS) is used without a restart. A renewal that is only half
+  written keeps the old certificate until both files load.
+- With a certificate for a public name (Let's Encrypt, usually with a DNS challenge for a home
+  server), every client trusts it as it is.
+- On a home network, [mkcert](https://github.com/FiloSottile/mkcert) makes a local CA and
+  certificates that browsers trust. Or make a self-signed certificate valid for two years:
+
+  ```bash
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 730 -keyout key.pem -out cert.pem -subj /CN=mygraph.lan -addext subjectAltName=DNS:mygraph.lan,IP:192.168.1.10 -addext basicConstraints=critical,CA:FALSE
+  ```
+
+  Without `CA:FALSE`, OpenSSL marks the certificate as a CA, and TLS refuses it as a server's
+  certificate. Give clients the certificate file: `mygraph mcp --ca-cert cert.pem`, or
+  `NODE_EXTRA_CA_CERTS=cert.pem` for Node-based clients over streamable HTTP.
+- In Docker, mount the files and point the variables at them; they must be readable by the
+  container's user (65532). `.env.example` and `compose.yaml` show how.
+- `mygraph health` follows `[tls]` and asks over HTTPS on the loopback address, without checking
+  the certificate (it is usually issued for another name). With `--url`, it checks it.
+- Without a certificate, a server that listens beyond loopback logs a warning at start.
 
 **On Windows without Docker**, `cargo build --release -p mygraph-server`, then
 `powershell -ExecutionPolicy Bypass -File deploy/windows/deploy.ps1`. This installs the server in

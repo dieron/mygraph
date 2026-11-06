@@ -268,7 +268,9 @@ fn tool_error(e: &ApiError) -> Json {
 // Forwarding to a running server ([MCP-STDIO-1])
 
 fn request(url: &str, key: Option<&str>, method: &str) -> ureq::Request {
-    let r = ureq::request(method, url).timeout(std::time::Duration::from_secs(120));
+    let r = crate::tls::agent()
+        .request(method, url)
+        .timeout(std::time::Duration::from_secs(120));
     match key {
         Some(k) => r.set("Authorization", &format!("Bearer {k}")),
         None => r,
@@ -296,7 +298,10 @@ fn answer(r: Result<ureq::Response, ureq::Error>) -> Result<Json, ApiError> {
         }
         Err(e) => Err(ApiError::new(
             "mcp.server_unreachable",
-            format!("cannot reach the MyGraph server: {e}"),
+            format!(
+                "cannot reach the MyGraph server: {}",
+                crate::tls::explain(&e.to_string())
+            ),
         )),
     }
 }

@@ -29,10 +29,14 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
-ureq = { version = "2.12", default-features = false }
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 memory-stats = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 
 [dev-dependencies]
+rcgen = "0.14.10"
 tempfile.workspace = true
 tower = { version = "0.5", features = ["util"] }
 

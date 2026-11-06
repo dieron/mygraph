@@ -39,6 +39,10 @@ enum Command {
         /// API key for the server (default: the MYGRAPH_KEY environment variable).
         #[arg(long)]
         key: Option<String>,
+        /// PEM file of extra certificates to trust for an https:// server: a private CA, or a
+        /// self-signed server certificate (default: the MYGRAPH_CA_CERT environment variable).
+        #[arg(long)]
+        ca_cert: Option<PathBuf>,
         /// Open this data folder in this process instead of forwarding (only when no server
         /// uses it).
         #[arg(long)]
@@ -54,9 +58,13 @@ enum Command {
     HashKey { key: String },
     /// Exit 0 when the server answers `GET /health` (for container health checks).
     Health {
-        /// Server to ask (default: the configured listen address, on loopback).
+        /// Server to ask (default: the configured listen address, on loopback, over HTTPS when
+        /// `[tls]` is set, without checking the certificate).
         #[arg(long)]
         url: Option<String>,
+        /// PEM file of extra certificates to trust for `--url` (default: MYGRAPH_CA_CERT).
+        #[arg(long)]
+        ca_cert: Option<PathBuf>,
     },
     /// Print the implemented spec and storage format versions.
     Versions,
@@ -80,16 +88,34 @@ fn main() -> ExitCode {
             println!("{}", mygraph_core::store::sha256_hex(key.as_bytes()));
             ExitCode::SUCCESS
         }
-        Command::Health { url } => {
-            let url = url.unwrap_or_else(|| {
-                let mut addr = config.listen;
-                if addr.ip().is_unspecified() {
-                    addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+        Command::Health { url, ca_cert } => {
+            let (url, agent) = match url {
+                Some(url) => {
+                    match mygraph_server::tls::client(ca_cert_or_env(ca_cert).as_deref()) {
+                        Ok(agent) => (url, agent),
+                        Err(e) => {
+                            eprintln!("mygraph health: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
                 }
-                format!("http://{addr}")
-            });
+                None => {
+                    let mut addr = config.listen;
+                    if addr.ip().is_unspecified() {
+                        addr.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+                    }
+                    match config.tls.files() {
+                        Some(_) => (
+                            format!("https://{addr}"),
+                            mygraph_server::tls::loopback_client(),
+                        ),
+                        None => (format!("http://{addr}"), ureq::agent()),
+                    }
+                }
+            };
             let health = format!("{}/health", url.trim_end_matches('/'));
-            match ureq::get(&health)
+            match agent
+                .get(&health)
                 .timeout(std::time::Duration::from_secs(5))
                 .call()
             {
@@ -102,7 +128,8 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
                 Err(e) => {
-                    eprintln!("mygraph health: {health}: {e}");
+                    let e = mygraph_server::tls::explain(&e.to_string());
+                    eprintln!("mygraph health: {e}");
                     ExitCode::FAILURE
                 }
             }
@@ -110,6 +137,7 @@ fn main() -> ExitCode {
         Command::Mcp {
             url,
             key,
+            ca_cert,
             data_dir,
             graph,
             actor,
@@ -119,6 +147,10 @@ fn main() -> ExitCode {
                 .with_writer(std::io::stderr)
                 .with_env_filter(tracing_subscriber::EnvFilter::new(&config.log))
                 .init();
+            if let Err(e) = mygraph_server::tls::init_client(ca_cert_or_env(ca_cert).as_deref()) {
+                eprintln!("mygraph mcp: {e}");
+                return ExitCode::FAILURE;
+            }
             let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
             match runtime.block_on(mcp_stdio(config, url, key, data_dir, graph, actor)) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -163,6 +195,15 @@ fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// `--ca-cert`, else the MYGRAPH_CA_CERT environment variable.
+fn ca_cert_or_env(flag: Option<PathBuf>) -> Option<PathBuf> {
+    flag.or_else(|| {
+        std::env::var_os("MYGRAPH_CA_CERT")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    })
 }
 
 /// [MCP-STDIO-1] One JSON-RPC message per line on stdin and stdout.

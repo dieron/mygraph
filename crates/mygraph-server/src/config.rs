@@ -15,6 +15,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Address of the HTTP listener. Local-only by default (docs/05-architecture.md §9).
     pub listen: SocketAddr,
+    /// HTTPS on `listen` (`[tls]`); plain HTTP when no certificate is set.
+    pub tls: TlsConfig,
     /// Graph used by transports that name none (MCP over stdio, later).
     pub default_graph: String,
     /// `tracing` filter, e.g. `info` or `mygraph=debug`.
@@ -52,6 +54,24 @@ pub struct SearchConfig {
     /// Folder of the embedding model (`model.onnx` and its tokenizer files); default
     /// `<data_dir>/models/<model name>/`, or `models/<model name>/` next to the executable.
     pub model_dir: Option<PathBuf>,
+}
+
+/// `[tls]`: serve HTTPS with this certificate and key (PEM files). The files are read again when
+/// they change, so a renewed certificate is used without a restart.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TlsConfig {
+    /// The certificate chain: the server's certificate first, then any intermediates.
+    pub cert: Option<PathBuf>,
+    /// The private key (PKCS#8, PKCS#1 or SEC1).
+    pub key: Option<PathBuf>,
+}
+
+impl TlsConfig {
+    /// The certificate and key files, when HTTPS is on.
+    pub fn files(&self) -> Option<(&Path, &Path)> {
+        Some((self.cert.as_deref()?, self.key.as_deref()?))
+    }
 }
 
 impl Default for SearchConfig {
@@ -102,6 +122,7 @@ impl Default for Config {
         Self {
             data_dir: PathBuf::from("data"),
             listen: SocketAddr::from(([127, 0, 0, 1], 7420)),
+            tls: TlsConfig::default(),
             default_graph: "default".to_owned(),
             log: "info".to_owned(),
             log_file: None,
@@ -145,12 +166,14 @@ impl Config {
     /// | `MYGRAPH_SEMANTIC` | `search.semantic` (`true` or `false`) |
     /// | `MYGRAPH_SEMANTIC_THRESHOLD` | `search.semantic_threshold`, e.g. `0.8` |
     /// | `MYGRAPH_MODEL_DIR` | `search.model_dir` |
+    /// | `MYGRAPH_TLS_CERT` | `tls.cert` (path of the PEM certificate chain) |
+    /// | `MYGRAPH_TLS_KEY` | `tls.key` (path of the PEM private key) |
     /// | `MYGRAPH_ADMIN_KEY` | adds a key for actor `admin`, role `admin` |
     /// | `MYGRAPH_AGENT_KEY` | adds a key for actor `agent`, role `agent-write` |
     /// | `MYGRAPH_READ_KEY` | adds a key for actor `reader`, role `agent-read` |
     ///
-    /// Each may instead be given as `<NAME>_FILE`, the path of a file holding the value (Docker
-    /// secrets). Values are trimmed; empty ones count as unset. Keys add to those of the file.
+    /// Each but the TLS paths may instead be given as `<NAME>_FILE`, the path of a file holding
+    /// the value (Docker secrets). Values are trimmed; empty ones count as unset. Keys add to those of the file.
     pub fn apply_env(&mut self, var: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
         let get = |name: &str| -> Result<Option<String>, String> {
             let set = |v: Option<String>| v.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
@@ -190,6 +213,12 @@ impl Config {
         }
         if let Some(v) = get("MYGRAPH_MODEL_DIR")? {
             self.search.model_dir = Some(PathBuf::from(v));
+        }
+        if let Some(v) = var("MYGRAPH_TLS_CERT").filter(|v| !v.trim().is_empty()) {
+            self.tls.cert = Some(PathBuf::from(v.trim()));
+        }
+        if let Some(v) = var("MYGRAPH_TLS_KEY").filter(|v| !v.trim().is_empty()) {
+            self.tls.key = Some(PathBuf::from(v.trim()));
         }
         for (name, actor, role) in [
             ("MYGRAPH_ADMIN_KEY", "admin", Role::Admin),
@@ -236,6 +265,9 @@ impl Config {
                 validate_graph_name(g).map_err(|r| format!("keys[{i}].graphs {g:?}: {r}"))?;
             }
         }
+        if self.tls.cert.is_some() != self.tls.key.is_some() {
+            return Err("tls: set both cert and key (MYGRAPH_TLS_CERT and MYGRAPH_TLS_KEY)".into());
+        }
         // [API-AUTH-4]
         if self.keys.is_empty() && !self.listen.ip().is_loopback() {
             return Err(format!(
@@ -251,6 +283,10 @@ impl Config {
         json!({
             "data_dir": self.data_dir.display().to_string(),
             "listen": self.listen.to_string(),
+            "tls": self.tls.files().map(|(cert, key)| json!({
+                "cert": cert.display().to_string(),
+                "key": key.display().to_string(),
+            })),
             "default_graph": self.default_graph,
             "log": self.log,
             "log_file": self.log_file.as_ref().map(|p| p.display().to_string()),
@@ -312,6 +348,41 @@ mod tests {
         let missing = Config::default()
             .apply_env(&|n| (n == "MYGRAPH_ADMIN_KEY_FILE").then(|| "/no/such/file".to_owned()));
         assert!(missing.unwrap_err().starts_with("MYGRAPH_ADMIN_KEY_FILE"));
+    }
+
+    #[test]
+    fn tls_settings() {
+        let c = Config::default();
+        assert!(c.tls.files().is_none());
+        assert!(c.redacted()["tls"].is_null());
+
+        let c: Config = toml::from_str(
+            "[tls]
+cert = \"/certs/fullchain.pem\"
+key = \"/certs/key.pem\"
+",
+        )
+        .unwrap();
+        c.validate().unwrap();
+        assert_eq!(c.redacted()["tls"]["cert"], "/certs/fullchain.pem");
+
+        let env: HashMap<&str, String> = HashMap::from([
+            ("MYGRAPH_TLS_CERT", "/run/cert.pem".to_owned()),
+            ("MYGRAPH_TLS_KEY", " /run/key.pem ".to_owned()),
+        ]);
+        let mut c = Config::default();
+        c.apply_env(&|n| env.get(n).cloned()).unwrap();
+        let (cert, key) = c.tls.files().unwrap();
+        assert_eq!(
+            (cert.to_str(), key.to_str()),
+            (Some("/run/cert.pem"), Some("/run/key.pem"))
+        );
+
+        // One without the other is refused.
+        let mut c = Config::default();
+        c.apply_env(&|n| (n == "MYGRAPH_TLS_CERT").then(|| "/run/cert.pem".to_owned()))
+            .unwrap();
+        assert!(c.validate().unwrap_err().starts_with("tls:"));
     }
 
     #[test]

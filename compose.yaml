@@ -3,7 +3,7 @@
 #   cp .env.example .env      # then set MYGRAPH_ADMIN_KEY (and optionally the agent key)
 #   docker compose up -d --build
 #
-# Stats page: http://<host>:7420/admin/ui · graph viewer: /admin/ui/graph (enter a key).
+# Stats page: http://<host>:7420/admin/ui (https:// with MYGRAPH_TLS_CERT and MYGRAPH_TLS_KEY) · graph viewer: /admin/ui/graph (enter a key).
 # To use a published image instead of building: set MYGRAPH_IMAGE in .env and run
 # `docker compose pull && docker compose up -d`.
 services:
@@ -23,8 +23,13 @@ services:
       MYGRAPH_LOG: ${MYGRAPH_LOG:-info}
       MYGRAPH_SEMANTIC: ${MYGRAPH_SEMANTIC:-true}
       MYGRAPH_SEMANTIC_THRESHOLD: ${MYGRAPH_SEMANTIC_THRESHOLD:-0.80}
+      # HTTPS when both are set: paths inside the container, under /certs.
+      MYGRAPH_TLS_CERT: ${MYGRAPH_TLS_CERT:-}
+      MYGRAPH_TLS_KEY: ${MYGRAPH_TLS_KEY:-}
     volumes:
       - mygraph-data:/data
+      # Certificates for HTTPS (MYGRAPH_CERTS in .env); an empty folder when unused.
+      - ${MYGRAPH_CERTS:-./deploy/docker/no-certs}:/certs:ro
     stop_grace_period: 30s
 
 volumes:

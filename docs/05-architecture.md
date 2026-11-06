@@ -212,7 +212,9 @@ own recovery logic.
   are configured with an actor name and a role (`agent-read`, `agent-write`, `admin`).
 - Admin endpoints require `admin`.
 - Request size limits, result caps, and per-request time budgets protect against runaway calls.
-- Later: per-graph permissions, OAuth for remote MCP, TLS termination guidance, audit export.
+- HTTPS when `[tls]` names a certificate and key (rustls with ring); the files are read again
+  when they change. Without one, a listener beyond loopback logs a warning.
+- Later: per-graph permissions, OAuth for remote MCP, audit export.
 
 ## 10. Observability
 

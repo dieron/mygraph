@@ -11,6 +11,7 @@ pub mod error;
 pub mod mcp;
 pub mod metrics;
 pub mod registry;
+pub mod tls;
 
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderValue, StatusCode, header};
@@ -316,9 +317,31 @@ async fn openapi() -> Response {
 
 /// Serves until Ctrl-C.
 pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
-    let listener = tokio::net::TcpListener::bind(app.config.listen).await?;
+    let listener = std::net::TcpListener::bind(app.config.listen)?;
+    serve_listener(app, listener).await
+}
+
+/// [`serve`] on a listener already bound: HTTPS when `[tls]` names a certificate, else HTTP.
+/// Returns after Ctrl+C, once the open requests finish.
+pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> std::io::Result<()> {
+    listener.set_nonblocking(true)?;
+    let addr = listener.local_addr()?;
+    let tls = match app.config.tls.files() {
+        Some((cert, key)) => {
+            let config = tls::server_config(cert, key).await?;
+            tls::spawn_reload(
+                config.clone(),
+                cert.to_owned(),
+                key.to_owned(),
+                tls::RELOAD_EVERY,
+            );
+            Some(config)
+        }
+        None => None,
+    };
     tracing::info!(
-        listen = %listener.local_addr()?,
+        listen = %addr,
+        scheme = if tls.is_some() { "https" } else { "http" },
         data_dir = %app.config.data_dir.display(),
         keys = app.config.keys.len(),
         "mygraph serving"
@@ -326,16 +349,37 @@ pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
     if app.config.keys.is_empty() {
         tracing::warn!("no API keys configured: every local request is the admin `local`");
     }
+    if tls.is_none() && !addr.ip().is_loopback() {
+        tracing::warn!(
+            "serving plain HTTP on {addr}: keys and data cross the network unencrypted;              set [tls] cert and key, or put a reverse proxy with TLS in front"
+        );
+    }
     if app.config.preload {
         app.preload();
     }
     spawn_maintenance(&app);
     let registry = app.registry.clone();
-    let result = axum::serve(listener, router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await;
+    let result = match tls {
+        Some(config) => {
+            let handle = axum_server::Handle::new();
+            let stop = handle.clone();
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                stop.graceful_shutdown(Some(Duration::from_secs(30)));
+            });
+            axum_server::from_tcp_rustls(listener, config)?
+                .handle(handle)
+                .serve(router(app).into_make_service())
+                .await
+        }
+        None => {
+            axum::serve(tokio::net::TcpListener::from_std(listener)?, router(app))
+                .with_graceful_shutdown(async {
+                    let _ = tokio::signal::ctrl_c().await;
+                })
+                .await
+        }
+    };
     tokio::task::spawn_blocking(move || {
         registry.maintain();
         registry.flush_semantic();

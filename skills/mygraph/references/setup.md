@@ -6,7 +6,8 @@ reach it through MCP in one of two ways, and agents with a shell can also use th
 
 - **stdio bridge** — the client starts `mygraph mcp --url URL --graph <default graph>`;
   works in every client that supports local MCP servers. Add `--key <key>` (or set `MYGRAPH_KEY`)
-  when the server has API keys.
+  when the server has API keys. An `https://` URL works too; for a self-signed or private-CA
+  certificate add `--ca-cert <file.pem>` (or set `MYGRAPH_CA_CERT`).
 - **Streamable HTTP** — the client connects to `URL/mcp` directly (header
   `Authorization: Bearer <key>` when keys are configured).
 
@@ -84,7 +85,8 @@ builds the zip for upload.
 ## Checking the connection
 
 Call the `graphs` tool: it lists the graphs and the default one. `error … cannot reach the MyGraph
-server` means the server is not running or the address is wrong: check `curl URL/health` (on
+server` means the server is not running or the address is wrong (or, with `invalid peer
+certificate`, that its certificate is not trusted: pass `--ca-cert`): check `curl URL/health` (on
 Windows a local server starts at logon as the scheduled task "MyGraph server"; a Docker server
 with `docker compose ps`). Over REST, `curl -s "$MYGRAPH_URL/v1/graphs" -H "Authorization: Bearer
 $MYGRAPH_KEY"` does the same check.
