@@ -44,9 +44,22 @@ fi
 setting() { sed -n "s/^$1=//p" .env | tail -1; }
 key=$(setting MYGRAPH_ADMIN_KEY)
 port=$(setting MYGRAPH_PORT); port=${port:-7420}
-url="http://127.0.0.1:$port"
+# The server speaks HTTPS when .env sets MYGRAPH_TLS_CERT, else HTTP; the one running now may
+# differ from .env (this deploy switches it), so ask both. On loopback the certificate, issued
+# for the host's name, is not checked (-k).
+url=
+reach() {
+  local scheme
+  for scheme in https http; do
+    if curl -fsSk -o /dev/null "$scheme://127.0.0.1:$port/health" 2>/dev/null; then
+      url="$scheme://127.0.0.1:$port"
+      return 0
+    fi
+  done
+  return 1
+}
 graphs() {
-  curl -fsS -H "Authorization: Bearer $key" "$url/admin/graphs" | python3 -c '
+  curl -fsSk -H "Authorization: Bearer $key" "$url/admin/graphs" | python3 -c '
 import json, sys
 for g in json.load(sys.stdin)["graphs"]:
     c = g.get("counts") or {}
@@ -54,9 +67,9 @@ for g in json.load(sys.stdin)["graphs"]:
           "last_seq", g.get("last_seq", "-"))'
 }
 
-if curl -fsS -o /dev/null "$url/health" 2>/dev/null; then
+if reach; then
   for g in $(graphs | awk '$2 == "ready" { print $1 }'); do
-    curl -fsS -X POST -H "Authorization: Bearer $key" "$url/admin/graphs/$g/snapshot" >/dev/null
+    curl -fsSk -X POST -H "Authorization: Bearer $key" "$url/admin/graphs/$g/snapshot" >/dev/null
     echo "snapshot: $g"
   done
 fi
@@ -76,6 +89,8 @@ for _ in $(seq 1 60); do
 done
 echo "health: $status"
 [ "$status" = healthy ] || { docker logs --tail 30 "$container"; exit 1; }
+reach
+echo "serving: ${url%%:*}"
 graphs
 REMOTE
 echo "deployed $commit"
