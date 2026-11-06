@@ -1702,7 +1702,7 @@ checksum = "a8afc6df942f4c022d70c5725e18df1a705773870e5b7f96fde94ca0334ce77a"
 
 [[package]]
 name = "mygraph-agentbench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "mygraph-core",
@@ -1715,7 +1715,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cap",
  "clap",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -1739,7 +1739,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-ldbc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "mygraph-core",
@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-semantic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fastembed",
  "mygraph-core",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -1791,7 +1791,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-store-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mygraph-core",
  "proptest",
@@ -1802,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "mygraph-text-tantivy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mygraph-core",
  "mygraph-store-sqlite",
