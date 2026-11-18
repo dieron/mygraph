@@ -9,6 +9,11 @@ through [MCP](https://modelcontextprotocol.io) tools shaped for how agents work,
 query language made for people. Humans install it, connect their agents, and look at what the
 agents have built (a stats page and a graph viewer).
 
+![The graph viewer with Apollo 11 selected: its crew, spacecraft, rocket and landing site, and on the right the Wikipedia sentences those links cite](docs/images/viewer-apollo-11.png)
+
+*A graph of the Apollo missions, built from 17 Wikipedia articles ([examples/apollo](examples/apollo/build.py)).
+Apollo 11 is selected; the panel lists its links and the sentences they were read from.*
+
 ## Why an agent would want it
 
 - **Every fact cites its evidence.** A node, a link or a single property is backed by a source:
@@ -236,8 +241,9 @@ For a home server or NAS that other machines and agents use, run it with Docker
   sends the committed `HEAD`, snapshots every graph, rebuilds, restarts and waits until the server
   is healthy. `.env` and the data are left alone.
 - [.github/workflows/docker.yml](.github/workflows/docker.yml) publishes a multi-arch image (amd64,
-  arm64) to `ghcr.io/dieron/mygraph`. `:main` follows the main branch, and version tags will add
-  `:latest`. To use it instead of building, set `MYGRAPH_IMAGE=ghcr.io/dieron/mygraph:main` in
+  arm64) to `ghcr.io/dieron/mygraph`. `:main` follows the main branch, and each release adds
+  its version (`:0.2.0`, `:0.2`) and `:latest`. To use it instead of building, set
+  `MYGRAPH_IMAGE=ghcr.io/dieron/mygraph:latest` in
   `.env`, then run `docker compose pull && docker compose up -d`.
 
 **API keys.** Without a configuration file, keys come from the environment. In a `server.toml`
@@ -310,6 +316,8 @@ again to upgrade; `-Uninstall` removes it and keeps the data.
   counts, growth, connectivity, evidence and recent batches.
 - `/admin/ui/graph` is the graph viewer. It draws a graph as a network, with search, type filters
   and the properties, links and evidence of whatever you click.
+
+  ![The whole Apollo graph in the viewer: 96 nodes and 136 links coloured by type, with the legend of node and link types](docs/images/viewer-apollo.png)
 - `GET /metrics` serves Prometheus metrics, listed in [spec/api/admin.md](spec/api/admin.md).
 - To back up, `POST /admin/graphs/{g}/snapshot` copies a graph online into `<data_dir>/snapshots/`.
   `POST /admin/graphs/{g}/restore` brings one back.

@@ -371,7 +371,7 @@ async function fillEvidence(slots) {
   for (const e of r.items) {
     const body = clear(slots.get(e.id));
     const p = e.parent ? parents.get(e.parent) : null;
-    if (p) body.append(el("div", { class: "muted" }, "from ", el("span", { class: "id" }, p.id), " ", p.title || p.kind, extLink(p.uri)));
+    if (p) body.append(el("div", { class: "muted" }, "from ", el("span", { class: "id" }, p.id), " ", p.title || p.kind, p.uri ? " " : "", extLink(p.uri)));
     else if (e.uri) body.append(el("div", {}, extLink(e.uri) || e.uri));
     if (e.content) body.append(el("div", { class: "quote" }, e.content + (e.content_truncated ? " …" : "")));
     const sd = e.source_date ? val(e.source_date) : null;
