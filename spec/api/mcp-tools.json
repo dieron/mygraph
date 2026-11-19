@@ -6,11 +6,14 @@
   "tools": [
     {
       "name": "graphs",
-      "description": "The graphs on this server: list them (default action; shows which one the other tools use when you pass no `graph`), or create one with action \"create\" and a `name` (lowercase letters, digits, - and _). Every other tool works on one graph.",
+      "description": "The graphs on this server: list them (default action; shows which one the other tools use when you pass no `graph`, and marks graphs you may only read), create one with action \"create\" and a `name` (lowercase letters, digits, - and _), or, as an admin, show or change who may use one with action \"access\". Every other tool works on one graph.",
       "inputSchema": { "type": "object", "properties": {
-        "action": { "enum": ["list", "create"], "description": "Default list." },
-        "name": { "type": "string", "description": "For create: the new graph's name." },
-        "policies": { "type": "object", "description": "For create, optional: require_evidence (enforce | warn | off; default enforce), inline_text_limit, naming (styled | free; default styled: names must be in style and are never rewritten)." }
+        "action": { "enum": ["list", "create", "access"], "description": "Default list." },
+        "name": { "type": "string", "description": "For create: the new graph's name. For access: the graph." },
+        "policies": { "type": "object", "description": "For create, optional: require_evidence (enforce | warn | off; default enforce), inline_text_limit, naming (styled | free; default styled: names must be in style and are never rewritten)." },
+        "access": { "type": "object", "description": "For create, optional: who may use the new graph, as {everyone, users} of action access. Default: every user may read and write." },
+        "everyone": { "enum": ["none", "read", "write"], "description": "For access, optional: what every user may do: none (private), read (public, read-only) or write (public, writable)." },
+        "users": { "type": "object", "description": "For access, optional: levels of single users by actor name, e.g. {\"alice\": \"write\", \"bob\": \"read\"}; a user's level overrides everyone's, and null removes it. Without everyone and users, access shows the current settings." }
       } }
     },
     {

@@ -41,6 +41,14 @@ key in `~/.claude/settings.json`, which is personal and not part of any reposito
 The app may rewrite this file; if the tools disappear after an update, check the entry is still
 there.
 
+## claude.ai, Claude Desktop and the phone apps (connector)
+
+When the server has OAuth on (`[oauth] public_url`) and is reachable from the internet over
+HTTPS: Settings → Connectors → Add custom connector, URL `https://<public host>/mcp`. MyGraph's
+sign-in page asks for an API key; **Read only** limits the connector to reading. One connector
+works in every Claude app on that account. If it stops working, remove and add it again to sign
+in anew.
+
 ## Cursor
 
 `~/.cursor/mcp.json` (all projects) or `.cursor/mcp.json` (one project):

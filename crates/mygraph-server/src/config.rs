@@ -40,6 +40,115 @@ pub struct Config {
     pub slow_ms: u64,
     /// API keys ([API-AUTH-1]). None: every request is the local admin ([API-AUTH-4]).
     pub keys: Vec<KeyConfig>,
+    /// OAuth for remote MCP clients (`[oauth]`, spec/api/oauth.md); off without `public_url`.
+    pub oauth: OauthConfig,
+}
+
+/// `[oauth]`: the server signs in remote MCP clients (claude.ai, Claude Desktop and mobile,
+/// Claude Code) with OAuth, and they then call `/mcp` with the tokens it issues.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OauthConfig {
+    /// The address clients reach the server at, e.g. `https://mygraph.example.com`, which may be
+    /// a reverse proxy's. OAuth is on when it is set.
+    pub public_url: Option<String>,
+    /// How long an access token lasts.
+    pub access_token_minutes: u64,
+    /// How long a refresh token lasts unused; each refresh issues a new one.
+    pub refresh_token_days: u64,
+    /// Where clients may send the browser back after sign-in: exact URLs, or `http://localhost/*`
+    /// and `http://127.0.0.1/*` for any port and path on this machine (Claude Code).
+    pub redirect_uris: Vec<String>,
+    /// Accept clients identified by the URL of their metadata document (CIMD), which the
+    /// server then fetches; else clients register (DCR).
+    pub client_metadata_documents: bool,
+}
+
+/// Claude's callback and the loopback addresses of local clients.
+pub const DEFAULT_REDIRECT_URIS: [&str; 4] = [
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+];
+
+impl Default for OauthConfig {
+    fn default() -> Self {
+        Self {
+            public_url: None,
+            access_token_minutes: 60,
+            refresh_token_days: 30,
+            redirect_uris: DEFAULT_REDIRECT_URIS.map(String::from).to_vec(),
+            client_metadata_documents: true,
+        }
+    }
+}
+
+impl OauthConfig {
+    /// The public origin (`https://host[:port]`, no trailing slash), when OAuth is on.
+    pub fn base(&self) -> Option<String> {
+        let url = url::Url::parse(self.public_url.as_deref()?).ok()?;
+        Some(url.origin().ascii_serialization())
+    }
+
+    fn validate(&self, has_keys: bool) -> Result<(), String> {
+        let Some(public) = &self.public_url else {
+            return Ok(());
+        };
+        let url =
+            url::Url::parse(public).map_err(|e| format!("oauth.public_url {public:?}: {e}"))?;
+        let loopback = match url.host() {
+            Some(url::Host::Domain(d)) => d == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        if !(url.scheme() == "https" || url.scheme() == "http" && loopback) {
+            return Err(format!(
+                "oauth.public_url {public:?}: expected https:// (http:// only for a loopback address)"
+            ));
+        }
+        if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+            return Err(format!(
+                "oauth.public_url {public:?}: expected an origin without a path, like https://mygraph.example.com"
+            ));
+        }
+        if !has_keys {
+            return Err("oauth: configure [[keys]] first; people sign in with an API key".into());
+        }
+        if self.access_token_minutes == 0 || self.refresh_token_days == 0 {
+            return Err("oauth: token lifetimes must be at least 1".into());
+        }
+        for r in &self.redirect_uris {
+            let pattern = r.strip_suffix("/*").unwrap_or(r);
+            let u =
+                url::Url::parse(pattern).map_err(|e| format!("oauth.redirect_uris {r:?}: {e}"))?;
+            let local = matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+            if r.ends_with("/*")
+                && !(u.scheme() == "http" && local && u.port().is_none() && u.path() == "/")
+            {
+                return Err(format!(
+                    "oauth.redirect_uris {r:?}: a /* pattern is only for http://localhost/*, http://127.0.0.1/* or http://[::1]/*"
+                ));
+            }
+            if !(u.scheme() == "https" || u.scheme() == "http" && local) || u.fragment().is_some() {
+                return Err(format!(
+                    "oauth.redirect_uris {r:?}: expected an https:// URL or a loopback http:// one"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn to_json(&self) -> Json {
+        json!({
+            "public_url": self.public_url,
+            "access_token_minutes": self.access_token_minutes,
+            "refresh_token_days": self.refresh_token_days,
+            "redirect_uris": self.redirect_uris,
+            "client_metadata_documents": self.client_metadata_documents,
+        })
+    }
 }
 
 /// `[search]`: how `search` and `resolve` match. More settings may join these.
@@ -134,6 +243,7 @@ impl Default for Config {
             maintenance_ms: 1000,
             slow_ms: 500,
             keys: Vec::new(),
+            oauth: OauthConfig::default(),
         }
     }
 }
@@ -168,6 +278,7 @@ impl Config {
     /// | `MYGRAPH_MODEL_DIR` | `search.model_dir` |
     /// | `MYGRAPH_TLS_CERT` | `tls.cert` (path of the PEM certificate chain) |
     /// | `MYGRAPH_TLS_KEY` | `tls.key` (path of the PEM private key) |
+    /// | `MYGRAPH_OAUTH_PUBLIC_URL` | `oauth.public_url`, e.g. `https://mygraph.example.com` |
     /// | `MYGRAPH_ADMIN_KEY` | adds a key for actor `admin`, role `admin` |
     /// | `MYGRAPH_AGENT_KEY` | adds a key for actor `agent`, role `agent-write` |
     /// | `MYGRAPH_READ_KEY` | adds a key for actor `reader`, role `agent-read` |
@@ -213,6 +324,9 @@ impl Config {
         }
         if let Some(v) = get("MYGRAPH_MODEL_DIR")? {
             self.search.model_dir = Some(PathBuf::from(v));
+        }
+        if let Some(v) = get("MYGRAPH_OAUTH_PUBLIC_URL")? {
+            self.oauth.public_url = Some(v);
         }
         if let Some(v) = var("MYGRAPH_TLS_CERT").filter(|v| !v.trim().is_empty()) {
             self.tls.cert = Some(PathBuf::from(v.trim()));
@@ -268,6 +382,7 @@ impl Config {
         if self.tls.cert.is_some() != self.tls.key.is_some() {
             return Err("tls: set both cert and key (MYGRAPH_TLS_CERT and MYGRAPH_TLS_KEY)".into());
         }
+        self.oauth.validate(!self.keys.is_empty())?;
         // [API-AUTH-4]
         if self.keys.is_empty() && !self.listen.ip().is_loopback() {
             return Err(format!(
@@ -298,6 +413,7 @@ impl Config {
             "maintenance_ms": self.maintenance_ms,
             "slow_ms": self.slow_ms,
             "keys": self.keys.len(),
+            "oauth": self.oauth.to_json(),
         })
     }
 }

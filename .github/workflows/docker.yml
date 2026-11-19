@@ -70,6 +70,7 @@ jobs:
             -addext subjectAltName=DNS:localhost -addext basicConstraints=critical,CA:FALSE
           chmod 644 certs/*.pem
           docker run -d --name mgs -p 7421:7420 -e MYGRAPH_ADMIN_KEY=ci-key \
+            -e MYGRAPH_OAUTH_PUBLIC_URL=https://localhost:7421 \
             -v "$PWD/certs:/certs:ro" \
             -e MYGRAPH_TLS_CERT=/certs/cert.pem -e MYGRAPH_TLS_KEY=/certs/key.pem mygraph:test
           ok=
@@ -79,6 +80,9 @@ jobs:
           done
           if [ -z "$ok" ]; then docker logs mgs; exit 1; fi
           curl -fsS --cacert certs/cert.pem https://localhost:7421/health
+          curl -fsS --cacert certs/cert.pem https://localhost:7421/.well-known/oauth-authorization-server \
+            | grep -q '"issuer":"https://localhost:7421"'
+          test "$(curl -s --cacert certs/cert.pem -o /dev/null -w '%{http_code}' -X POST https://localhost:7421/mcp)" = 401
           ! curl -fsS -m 5 http://localhost:7421/health
           docker rm -f mgs
 

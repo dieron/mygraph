@@ -14,7 +14,7 @@ of the design; the rest is planned.
 | Route | Request | Answer |
 |---|---|---|
 | `GET /admin/graphs` | — | `{"graphs": [GraphInfo]}` by name |
-| `POST /admin/graphs` | `{"name": …, "policies": {…}}` | `201`, `GraphInfo`, `Location: /admin/graphs/{name}` |
+| `POST /admin/graphs` | `{"name": …, "policies": {…}, "access": {…}}` | `201`, `GraphInfo`, `Location: /admin/graphs/{name}` |
 | `GET /admin/graphs/{graph}` | — | `GraphInfo` |
 | `DELETE /admin/graphs/{graph}?confirm={graph}` | — | `{"deleted": name, "moved_to": path}` |
 | `POST /admin/graphs/{graph}/snapshot` | — | `{"path": …, "bytes": n, "last_seq": n}` |
@@ -24,8 +24,11 @@ of the design; the rest is planned.
 | `POST /admin/graphs/{graph}/import` | `{"file": name}` | `GraphInfo` plus `imported` (counts) |
 | `GET /admin/graphs/{graph}/stats?sections=…&days=…&top=…` | — | `GraphStats` ([ADMIN-GRAPH-9]) |
 | `POST /admin/graphs/{graph}/reindex` | — | `GraphInfo` ([ADMIN-GRAPH-10]) |
+| `GET /admin/graphs/{graph}/access` | — | `Access` ([ADMIN-ACCESS-1]) |
+| `POST /admin/graphs/{graph}/access` | `{"everyone": level, "users": {actor: level or null}}` | `Access` |
 
-**[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes"}`, plus, when the
+**[ADMIN-GRAPH-1]** `GraphInfo` is `{"name", "status", "file_bytes", "wal_bytes", "access"}`
+(`access` as `{"everyone", "users"}`, [API-ACCESS-1]), plus, when the
 graph is loaded (`status` `ready`): `counts` (as in [OP-OVER-2]), `policies`, `last_seq`, and
 `text_index`: `"current"`, `"stale"` (an update or a commit failed; search uses the store's own
 full text until the index is current again) or `"none"`, and `semantic_index` ([RANK-8]):
@@ -40,9 +43,11 @@ from the records; while rebuilding fails too, the next rebuild waits twice as ma
 runs as the last, with no commits in between. Rebuilding by hand is [ADMIN-GRAPH-10].
 
 **[ADMIN-GRAPH-2]** Creating: `name` follows [GRAPH-NAME-1]; `policies` is optional, each missing
-member taking its default ([OBJ-POLICY-*]); invalid input fails with `admin.invalid_field`,
-`graph_name.*` or `graph.policy_invalid`; an existing name with `graph.exists`. The new graph is
-loaded and ready when the call answers.
+member taking its default ([OBJ-POLICY-*]); `access` is optional, a change of access
+([API-ACCESS-3]) applied to the default; invalid input fails with `admin.invalid_field`,
+`access.invalid_field`, `graph_name.*` or `graph.policy_invalid`; an existing name with
+`graph.exists`. The new graph is loaded and ready when the call answers. A deleted graph's access
+is forgotten, so a new graph of its name starts public.
 
 **[ADMIN-GRAPH-3]** Deleting requires `confirm` equal to the graph name (otherwise
 `admin.confirm_required`). The graph is closed and its database files are moved to
@@ -92,6 +97,12 @@ created. It fails with `admin.text_index_off` when the server runs without full-
 with `storage.failure` when the rebuild fails (the index then stays `stale` and recovers as in
 [ADMIN-GRAPH-1]).
 
+**[ADMIN-ACCESS-1]** `Access` is `{"graph", "everyone", "users": {actor: level},
+"unknown_users": [actor]}`: who may use the graph ([API-ACCESS-1]). `POST` applies a change
+([API-ACCESS-3]) and answers the result; `unknown_users` lists the users that no configured key
+acts as, which is likely a typo. The MCP `graphs` tool does the same with `action` `access`
+([MCP-TOOL-4]). An unknown graph fails with `graph.not_found`.
+
 ## 2. Server
 
 | Route | Answer |
@@ -100,6 +111,16 @@ with `storage.failure` when the rebuild fails (the index then stays `stale` and 
 | `GET /admin/slow-ops` | `{"slow_ms": n, "ops": [{"at", "op", "graph", "status", "ms"}]}` ([ADMIN-SRV-2]) |
 | `GET /admin/keys` | `{"keys": [{"key_id", "actor", "role", "graphs"}]}` — `key_id` is the first 8 hex digits of the key's SHA-256; keys themselves are never shown |
 | `GET /admin/config` | The effective configuration without key material |
+| `GET /admin/oauth` | `{"public_url", "grants": [{"id", "client_id", "client_name", "actor", "read_only", "scope", "created", "last_used"}], "registered_clients": n}` ([ADMIN-OAUTH-1]) |
+| `DELETE /admin/oauth/grants/{id}` | `{"revoked": id}` ([ADMIN-OAUTH-2]) |
+
+**[ADMIN-OAUTH-1]** `GET /admin/oauth` lists the live OAuth grants, most recently used first: the
+apps signed in with [oauth.md](oauth.md), the actor of the key each signed in with (`null` once
+the key is gone), and whether it was read-only. Tokens are never shown. Without `[oauth]` the
+list is empty and `public_url` is `null`.
+
+**[ADMIN-OAUTH-2]** Revoking a grant signs that app out at once: its tokens stop working, and it
+must sign in again. An unknown or already revoked grant fails with `oauth.grant_not_found`.
 
 **[ADMIN-SRV-1]** Request statistics count since the server started, by operation name (or route
 name for shorthands and admin routes; `mcp.<tool>` for MCP tool calls, `mcp` for the JSON-RPC

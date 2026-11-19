@@ -32,7 +32,8 @@ request that arrives over plain HTTP with `api.https_required` and close the con
 
 **[API-AUTH-1]** Requests to `/v1` and `/admin` carry `Authorization: Bearer <key>`. A key is
 configured with an **actor** name ([ACTOR-NAME-1]), a **role**, and optionally the list of graphs
-it may use (default: all).
+it may use (default: all). On `/mcp` only, the bearer may instead be an OAuth access token, which
+acts as the key it was signed in with ([oauth.md](oauth.md), [API-OAUTH-6]).
 
 | Role | May call |
 |---|---|
@@ -42,8 +43,9 @@ it may use (default: all).
 
 **[API-AUTH-2]** A missing `Authorization` header fails with `auth.missing_key`, an unknown key
 with `auth.invalid_key` (both `401`, with `WWW-Authenticate: Bearer`). A role that does not allow
-the route fails with `auth.forbidden`, a graph outside the key's list with
-`auth.graph_forbidden` (both `403`).
+the route fails with `auth.forbidden`; a graph the caller may not use ([API-ACCESS-2]) with
+`auth.graph_forbidden`, and a write to a graph it may only read with `auth.graph_read_only` (all
+`403`).
 
 **[API-AUTH-3]** Changes are recorded under the key's actor name; requests cannot choose another
 actor.
@@ -51,6 +53,34 @@ actor.
 **[API-AUTH-4]** A server configured with **no keys** treats every request as the actor `local`
 with role `admin`. It MUST then listen on loopback addresses only, and MUST refuse to start
 otherwise.
+
+### Graph access
+
+**[API-ACCESS-1]** Each graph has an access setting: a **level** for `everyone` (every user of the
+server) and levels for single **users**, named by actor ([API-AUTH-1]). A level is `none`, `read`
+or `write`, so a graph is private (`everyone: none`), public and read-only (`read`), or public
+and writable (`write`). A graph with no setting, which includes every new graph unless it is
+created with one ([ADMIN-GRAPH-2]), has `everyone: write` and no users.
+
+**[API-ACCESS-2]** What a caller may do with a graph:
+1. Nothing, if the graph is not in its key's list of graphs (when the key has one).
+2. Everything, with the `admin` role.
+3. Otherwise the user's own level when one is set, else everyone's; a user's level overrides
+   everyone's either way (`everyone: read` with `alice: write`, or `everyone: write` with
+   `bob: none`).
+4. At most `read` with the `agent-read` role.
+
+Read operations need `read`; `write`, `retract`, `merge` and the restore and `DELETE` shorthands
+need `write`. A caller with `none` fails with `auth.graph_forbidden`, one with `read` that writes
+with `auth.graph_read_only`.
+
+**[API-ACCESS-3]** A change of access ([ADMIN-ACCESS-1]) is `{"everyone": level, "users":
+{actor: level | null}}`, both optional: `everyone` replaces everyone's level, each user entry
+sets that user's level, and `null` removes it, so the user has everyone's level again. Other
+members, levels or actor names that break [ACTOR-NAME-1] fail with `access.invalid_field`.
+
+**[API-ACCESS-4]** `GET /v1/graphs` (and the `graphs` tool, [MCP-TOOL-4]) list only the graphs
+the caller may read, each with `access`: `read` or `write`.
 
 ## 3. Graphs
 

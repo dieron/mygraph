@@ -119,7 +119,12 @@ pub async fn with_graph<T: Send + 'static>(
     f: impl FnOnce(&mut GraphAccess) -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
     caller.require(role)?;
-    caller.check_graph(graph)?;
+    // [API-ACCESS-2] Reads need read access to the graph; writes and admin work need write.
+    let need = match role {
+        Role::AgentRead => crate::access::Level::Read,
+        _ => crate::access::Level::Write,
+    };
+    app.access.check(caller, graph, need)?;
     let handle = app.registry.get(graph).await?;
     let name = graph.to_owned();
     tokio::task::spawn_blocking(move || {
@@ -383,16 +388,23 @@ pub async fn post_op(
 pub async fn list_graphs(State(app): State<Arc<App>>, caller: Caller) -> Response {
     let start = Instant::now();
     let r = caller.require(Role::AgentRead).and_then(|()| {
-        let graphs: Vec<Json> = app
-            .registry
-            .list()
-            .into_iter()
-            .filter(|(n, _)| caller.may_use(n))
-            .map(|(n, s)| json!({"name": n, "status": s.name()}))
-            .collect();
+        let graphs = visible_graphs(&app, &caller);
         ok(&json!({ "graphs": graphs, "search": app.search_info() }))
     });
     finish(&app, "list_graphs", None, start, r)
+}
+
+/// [API-ACCESS-4] The graphs `caller` may read, each with its `access`: `read` or `write`.
+pub fn visible_graphs(app: &App, caller: &Caller) -> Vec<Json> {
+    app.registry
+        .list()
+        .into_iter()
+        .filter_map(|(n, s)| {
+            let level = app.access.level(caller, &n);
+            (level >= crate::access::Level::Read)
+                .then(|| json!({ "name": n, "status": s.name(), "access": level.name() }))
+        })
+        .collect()
 }
 
 /// `GET /v1/graphs/{graph}`: `overview`.

@@ -26,6 +26,8 @@ services:
       # HTTPS when both are set: paths inside the container, under /certs.
       MYGRAPH_TLS_CERT: ${MYGRAPH_TLS_CERT:-}
       MYGRAPH_TLS_KEY: ${MYGRAPH_TLS_KEY:-}
+      # OAuth for claude.ai and other remote MCP clients: the public HTTPS address.
+      MYGRAPH_OAUTH_PUBLIC_URL: ${MYGRAPH_OAUTH_PUBLIC_URL:-}
     volumes:
       - mygraph-data:/data
       # Certificates for HTTPS (MYGRAPH_CERTS in .env); an empty folder when unused.

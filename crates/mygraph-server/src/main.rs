@@ -184,12 +184,16 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let result = runtime.block_on(async { serve(App::new(config)).await });
+            let result = runtime.block_on(async {
+                let app = App::try_new(config).map_err(std::io::Error::other)?;
+                serve(app).await
+            });
             drop(lock);
             match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     tracing::error!("{e}");
+                    eprintln!("mygraph: {e}");
                     ExitCode::FAILURE
                 }
             }
@@ -232,7 +236,7 @@ async fn mcp_stdio(
             config.validate()?;
             // Held until this function returns, i.e. while stdin is open.
             _lock = Some(mygraph_server::lock_data_dir(&config.data_dir)?);
-            let app = App::new(config);
+            let app = App::try_new(config)?;
             app.preload();
             mygraph_server::spawn_maintenance(&app);
             local = Some(app.clone());

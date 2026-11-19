@@ -42,9 +42,11 @@ Known limits:
 - One server per data folder; no replication or clustering.
 - About 450–550 writes per second per graph, and reads wait while a write commits
   ([TODO.md](TODO.md), "Concurrency").
-- Access is by API key. Over a network, give the server a certificate so it speaks HTTPS
-  ([HTTPS](#https)), or put it behind a reverse proxy with TLS. Clients that need remote MCP with
-  OAuth (claude.ai on the web and mobile) can't connect yet.
+- Access is by API key, and per graph ([Who may use a graph](#who-may-use-a-graph)). Over a
+  network, give the server a certificate so it speaks HTTPS ([HTTPS](#https)), or put it behind a
+  reverse proxy with TLS. claude.ai on the web and on phones signs in with OAuth
+  ([Connecting claude.ai](#connecting-claudeai-on-the-web-desktop-and-phone)), which needs the
+  server reachable from the internet.
 - The specification is a draft (0.1.0-draft); storage migrates itself on upgrade, but the API may
   still change.
 
@@ -107,7 +109,7 @@ MCP is the main way in. An agent gets these tools:
 
 | Tool | What it does |
 |---|---|
-| `graphs` | List the graphs on the server, or create one |
+| `graphs` | List the graphs on the server, create one, or set who may use it |
 | `overview` | What a graph holds: counts, node and link types in use, conventions to follow |
 | `search` | Find nodes and evidence by name, alias, words or meaning |
 | `resolve` | Check up to 100 names before writing: match, ambiguous, or none (with similar nodes) |
@@ -134,6 +136,8 @@ There are three ways to connect, and all of them use the same tools:
    the header `Authorization: Bearer <key>`.
 3. **No server.** `mygraph mcp --data-dir <folder>` opens a data folder in the client's own
    process. This works only while no other process is using that folder.
+4. **OAuth**, for claude.ai on the web, desktop and phone: the client signs in on the server's
+   page with an API key ([below](#connecting-claudeai-on-the-web-desktop-and-phone)).
 
 Claude Code, for every project (`-s user`):
 
@@ -162,6 +166,36 @@ To check the connection, ask the agent to call `graphs`.
 On Windows, `deploy/windows/deploy.ps1 -BridgeOnly` installs just the `mygraph` program, for a
 server that runs elsewhere. The bridge lists the tools itself, so update it when the server gains
 new ones.
+
+### Connecting claude.ai on the web, desktop and phone
+
+Claude's apps connect to remote MCP servers from Anthropic's cloud and sign in with OAuth, so the
+server must be reachable from the internet over HTTPS, with a certificate that browsers trust:
+1. Give the server a public address. A reverse proxy you already run (nginx, Caddy, Traefik,
+   Nginx Proxy Manager) with a Let's Encrypt certificate works, and so does a tunnel
+   (Cloudflare Tunnel, Tailscale Funnel).
+2. Forward `/mcp`, `/oauth/` and `/.well-known/` to MyGraph. Keep `/v1` and `/admin` off the
+   internet unless you need them there. Claude connects from `160.79.104.0/21`, if you want to
+   limit `/mcp` to it (and to your own addresses).
+3. Turn on OAuth with that address, in `server.toml` or as `MYGRAPH_OAUTH_PUBLIC_URL`:
+
+   ```toml
+   [oauth]
+   public_url = "https://mygraph.example.com"   # what clients reach, the proxy's address
+   # access_token_minutes = 60
+   # refresh_token_days = 30
+   ```
+
+4. In claude.ai, open Settings → Connectors → Add custom connector, and enter
+   `https://mygraph.example.com/mcp`. MyGraph's sign-in page opens: paste an API key, and choose
+   **Allow**. Tick **Read only** to let Claude read but not write.
+
+The connector then works in claude.ai, Claude Desktop and the phone apps alike. Claude acts as the
+key's actor, with its role and graphs. `GET /admin/oauth` lists the apps signed in, and
+`DELETE /admin/oauth/grants/{id}` signs one out; removing a key from the configuration signs out
+every app that used it. Claude Code can connect the same way with
+`claude mcp add --transport http mygraph https://mygraph.example.com/mcp`, then `/mcp` to sign in.
+The details are in [spec/api/oauth.md](spec/api/oauth.md).
 
 ### The skill: teach the agent to use it well
 
@@ -259,6 +293,28 @@ actor = "claude-research"
 role = "agent-write"      # agent-read, agent-write or admin
 graphs = ["research"]     # optional; default all graphs
 ```
+
+### Who may use a graph
+
+Each graph is public and writable until you change it. You can make it private, public and
+read-only, or give single users their own level. A user is a key's actor. Admins can always do
+everything, and a read-only key never writes.
+
+With the `graphs` tool (an admin key), ask the agent, for example, "make the fishing graph private
+and let claude-research write to it". Or over REST:
+
+```bash
+curl -s -X POST localhost:7420/admin/graphs/fishing/access -H "Authorization: Bearer <admin key>" -d '{"everyone": "none", "users": {"claude-research": "write"}}'
+```
+
+| `everyone` | The graph is |
+|---|---|
+| `none` | private: only the users listed, and admins |
+| `read` | public and read-only, except for users listed with `write` |
+| `write` | public and writable (the default), except for users listed with `read` or `none` |
+
+A user's own level overrides `everyone`, and `null` removes it. `GET /v1/graphs` and the `graphs`
+tool show each caller only the graphs it may read, marking the read-only ones.
 
 **Semantic search** settings, in `server.toml` or the environment:
 

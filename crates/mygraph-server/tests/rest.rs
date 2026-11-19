@@ -210,7 +210,7 @@ async fn keys_and_roles_are_enforced() {
     let r = s.get("/v1/graphs", OTHER).await;
     assert_eq!(
         r.json()["graphs"],
-        json!([{ "name": "other", "status": "ready" }])
+        json!([{ "name": "other", "status": "ready", "access": "write" }])
     );
     // [API-GRAPH-3] No embedding model in the test server.
     assert_eq!(r.json()["search"], json!({ "semantic": false }));
@@ -1178,4 +1178,180 @@ async fn reindex_needs_a_text_index() {
         (r.status, r.code().as_str()),
         (StatusCode::BAD_REQUEST, "admin.text_index_off")
     );
+}
+
+/// A tool call over `POST /mcp`; the text of its first content block.
+async fn tool(s: &Server, key: &str, name: &str, arguments: Json) -> (bool, String) {
+    let r = s
+        .post(
+            "/mcp",
+            key,
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": { "name": name, "arguments": arguments } }),
+        )
+        .await;
+    let result = &r.json()["result"];
+    (
+        result["isError"].as_bool().unwrap_or(false),
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned(),
+    )
+}
+
+#[tokio::test]
+async fn graphs_can_be_private_public_and_read_only() {
+    const B: &str = "b-key";
+    let s = server_with(|c| c.keys.push(key(B, "agent-b", Role::AgentWrite, &[])));
+    s.create_graph("research").await;
+    s.create_graph("notes").await;
+
+    // [API-ACCESS-1] Graphs start public and writable.
+    let r = s.get("/admin/graphs/research/access", ADMIN).await;
+    assert_eq!(r.json()["everyone"], "write", "{}", r.text());
+    let r = s.get("/admin/graphs/research", ADMIN).await;
+    assert_eq!(
+        r.json()["access"],
+        json!({ "everyone": "write", "users": {} })
+    );
+
+    // Private: agent-a may write, agent-r read; others see nothing.
+    let r = s
+        .post(
+            "/admin/graphs/research/access",
+            ADMIN,
+            json!({ "everyone": "none", "users": { "agent-a": "write", "agent-r": "read", "nobody": "read" } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(r.json()["unknown_users"], json!(["nobody"]));
+    let r = s.get("/v1/graphs", B).await;
+    assert_eq!(
+        r.json()["graphs"],
+        json!([{ "name": "notes", "status": "ready", "access": "write" }])
+    );
+    let r = s.get("/v1/graphs/research", B).await;
+    assert_eq!(
+        (r.status, r.code().as_str()),
+        (StatusCode::FORBIDDEN, "auth.graph_forbidden")
+    );
+    let r = s.post("/v1/graphs/research/write", B, ada_batch()).await;
+    assert_eq!(r.code(), "auth.graph_forbidden");
+    let r = s
+        .post("/v1/graphs/research/write", WRITER, ada_batch())
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let r = s.get("/v1/graphs/research", READER).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // Public and read-only; a user's own entry overrides everyone's, and null removes it.
+    let r = s
+        .post(
+            "/admin/graphs/research/access",
+            ADMIN,
+            json!({ "everyone": "read", "users": { "agent-a": null, "nobody": null } }),
+        )
+        .await;
+    assert_eq!(
+        r.json(),
+        json!({ "graph": "research", "everyone": "read", "users": { "agent-r": "read" }, "unknown_users": [] })
+    );
+    let r = s.get("/v1/graphs/research", B).await;
+    assert_eq!(r.status, StatusCode::OK);
+    for k in [B, WRITER] {
+        let r = s.post("/v1/graphs/research/write", k, ada_batch()).await;
+        assert_eq!(
+            (r.status, r.code().as_str()),
+            (StatusCode::FORBIDDEN, "auth.graph_read_only")
+        );
+        assert!(
+            r.json()["error"]["hint"]
+                .as_str()
+                .unwrap()
+                .contains("write access")
+        );
+    }
+    // Admins may always write.
+    let r = s
+        .post("/v1/graphs/research/write", ADMIN, ada_batch())
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // Over MCP: the list marks read-only graphs, and admins change access with the graphs tool.
+    let (err, text) = tool(&s, B, "graphs", json!({})).await;
+    assert!(
+        !err && text.contains("research (ready, read only)"),
+        "{text}"
+    );
+    let (err, text) = tool(
+        &s,
+        B,
+        "graphs",
+        json!({ "action": "access", "name": "research", "everyone": "write" }),
+    )
+    .await;
+    assert!(err && text.contains("auth.forbidden"), "{text}");
+    let (err, text) = tool(
+        &s,
+        ADMIN,
+        "graphs",
+        json!({ "action": "access", "name": "research", "users": { "agent-b": "write" } }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(
+        text.contains("everyone read") && text.contains("agent-b write"),
+        "{text}"
+    );
+    let r = s.post("/v1/graphs/research/write", B, ada_batch()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // Set when creating; a deleted graph's access is not passed on to a new one of its name.
+    let r = s
+        .post(
+            "/admin/graphs",
+            ADMIN,
+            json!({ "name": "private", "access": { "everyone": "none" } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text());
+    let r = s.get("/v1/graphs/private", B).await;
+    assert_eq!(r.code(), "auth.graph_forbidden");
+    let r = s
+        .call(
+            Method::DELETE,
+            "/admin/graphs/private?confirm=private",
+            Some(ADMIN),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    s.create_graph("private").await;
+    let r = s.get("/v1/graphs/private", B).await;
+    assert_eq!(r.status, StatusCode::OK);
+
+    // [API-ACCESS-3] Bad levels and fields are refused.
+    for bad in [
+        json!({ "everyone": "all" }),
+        json!({ "users": { "agent-b": "admin" } }),
+        json!({ "owner": "agent-b" }),
+    ] {
+        let r = s
+            .post("/admin/graphs/notes/access", ADMIN, bad.clone())
+            .await;
+        assert_eq!(
+            (r.status, r.code().as_str()),
+            (StatusCode::BAD_REQUEST, "access.invalid_field"),
+            "{bad}"
+        );
+    }
+    let r = s
+        .post(
+            "/admin/graphs/missing/access",
+            ADMIN,
+            json!({ "everyone": "none" }),
+        )
+        .await;
+    assert_eq!(r.code(), "graph.not_found");
 }

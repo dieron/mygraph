@@ -37,8 +37,8 @@ with the request itself and answers `400 Bad Request`.
 | Status | Codes |
 |---|---|
 | `401` | `auth.missing_key`, `auth.invalid_key` |
-| `403` | `auth.forbidden`, `auth.graph_forbidden` |
-| `404` | `ref.not_found`, `graph.not_found`, `api.not_found`, `content.not_found`, `blob.not_found` |
+| `403` | `auth.forbidden`, `auth.graph_forbidden`, `auth.graph_read_only` |
+| `404` | `ref.not_found`, `graph.not_found`, `api.not_found`, `content.not_found`, `blob.not_found`, `oauth.grant_not_found` |
 | `405` | `api.method_not_allowed` |
 | `409` | Conflicts with the stored state — the same request could succeed against another state: `write.version_conflict`, `write.property_conflict`, `write.ambiguous_match`, `write.type_mismatch`, `write.link_mismatch`, `key.taken`, `lifecycle.identity_taken`, `lifecycle.retracted`, `lifecycle.invalid_transition`, `link.endpoint_not_active`, `citation.evidence_not_active`, `citation.target_not_active`, `evidence.blob_conflict`, `graph.exists` |
 | `413` | `api.body_too_large` |
@@ -62,6 +62,8 @@ with the request itself and answers `400 Bad Request`.
 | `graph.warming_up` | The graph is loading; retry after the number of seconds in `Retry-After`. |
 | `search.semantic_unavailable` | Search with mode `auto` (words, and meaning when available) or `text` instead. |
 | `auth.missing_key` | Send `Authorization: Bearer <key>`. |
+| `auth.graph_forbidden` | List the graphs you may use with the `graphs` tool or `GET /v1/graphs`; an admin can grant access. |
+| `auth.graph_read_only` | You may read this graph but not change it; an admin can grant write access (`graphs` tool, action `access`). |
 | `api.not_found` | See `GET /openapi.yaml` for the available routes. |
 | `json.malformed` | The body must be one JSON object. |
 | `api.https_required` | This server speaks HTTPS: use `https://` instead of `http://`. |

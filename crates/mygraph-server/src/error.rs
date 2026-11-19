@@ -55,9 +55,13 @@ impl From<OpError> for ApiError {
 pub fn status_of(code: &str) -> StatusCode {
     match code {
         "auth.missing_key" | "auth.invalid_key" => StatusCode::UNAUTHORIZED,
-        "auth.forbidden" | "auth.graph_forbidden" => StatusCode::FORBIDDEN,
-        "ref.not_found" | "graph.not_found" | "api.not_found" | "content.not_found"
-        | "blob.not_found" => StatusCode::NOT_FOUND,
+        "auth.forbidden" | "auth.graph_forbidden" | "auth.graph_read_only" => StatusCode::FORBIDDEN,
+        "ref.not_found"
+        | "graph.not_found"
+        | "api.not_found"
+        | "content.not_found"
+        | "blob.not_found"
+        | "oauth.grant_not_found" => StatusCode::NOT_FOUND,
         "api.method_not_allowed" => StatusCode::METHOD_NOT_ALLOWED,
         "write.version_conflict"
         | "write.property_conflict"
@@ -111,6 +115,12 @@ pub fn hint_of(code: &str) -> Option<&'static str> {
             "Search with mode auto (words, and meaning when available) or text instead."
         }
         "auth.missing_key" => "Send Authorization: Bearer <key>.",
+        "auth.graph_forbidden" => {
+            "List the graphs you may use with the graphs tool or GET /v1/graphs; an admin can grant access."
+        }
+        "auth.graph_read_only" => {
+            "You may read this graph but not change it; an admin can grant write access (graphs tool, action access)."
+        }
         "api.not_found" => "See GET /openapi.yaml for the available routes.",
         "json.malformed" => "The body must be one JSON object.",
         "api.https_required" => "This server speaks HTTPS: use https:// instead of http://.",

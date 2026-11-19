@@ -101,6 +101,23 @@ impl Keys {
             .ok_or_else(|| ApiError::new("auth.invalid_key", "unknown API key"))
     }
 
+    /// The caller of a key, and the key's SHA-256.
+    pub fn lookup(&self, key: &str) -> Option<(String, Caller)> {
+        let hash = sha256_hex(key.as_bytes());
+        let caller = self.by_hash.get(&hash)?.clone();
+        Some((hash, caller))
+    }
+
+    /// The caller of the key with this SHA-256, if it is still configured.
+    pub fn by_hash(&self, hash: &str) -> Option<Caller> {
+        self.by_hash.get(hash).cloned()
+    }
+
+    /// The actors of the configured keys.
+    pub fn actors(&self) -> std::collections::BTreeSet<String> {
+        self.by_hash.values().map(|c| c.actor.clone()).collect()
+    }
+
     /// `GET /admin/keys`: never the keys themselves.
     pub fn redacted(&self) -> Json {
         let mut keys: Vec<Json> = self
@@ -124,6 +141,22 @@ impl FromRequestParts<Arc<App>> for Caller {
             .headers
             .get(AUTHORIZATION)
             .map(|v| v.to_str().unwrap_or(""));
-        app.keys.authenticate(header)
+        match app.keys.authenticate(header) {
+            // [API-OAUTH-6] OAuth access tokens are for the MCP endpoint only.
+            Err(e) if e.code == "auth.invalid_key" && parts.uri.path() == "/mcp" => {
+                let token = header
+                    .and_then(|h| {
+                        h.strip_prefix("Bearer ")
+                            .or_else(|| h.strip_prefix("bearer "))
+                    })
+                    .map(str::trim)
+                    .unwrap_or("");
+                app.oauth
+                    .as_ref()
+                    .and_then(|o| o.authenticate(token, &app.keys))
+                    .ok_or(e)
+            }
+            r => r,
+        }
     }
 }

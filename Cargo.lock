@@ -1769,16 +1769,20 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "axum-server",
+ "base64 0.22.1",
  "clap",
+ "getrandom 0.3.4",
  "memory-stats",
  "mygraph-core",
  "mygraph-semantic",
  "mygraph-store-sqlite",
  "mygraph-text-tantivy",
  "rcgen",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "toml",
@@ -1786,6 +1790,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq 2.12.1",
+ "url",
  "webpki-roots 1.0.11",
 ]
 

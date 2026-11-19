@@ -2,6 +2,7 @@
 //! (`/admin`, spec/api/admin.md) and the service routes. MCP will be a further transport over
 //! the same operations.
 
+pub mod access;
 pub mod admin;
 pub mod api;
 pub mod auth;
@@ -10,7 +11,9 @@ pub mod config;
 pub mod error;
 pub mod mcp;
 pub mod metrics;
+pub mod oauth;
 pub mod registry;
+pub mod server_db;
 pub mod tls;
 
 use axum::extract::{DefaultBodyLimit, State};
@@ -30,6 +33,10 @@ pub struct App {
     pub config: Config,
     pub registry: Arc<Registry>,
     pub keys: auth::Keys,
+    /// Who may use each graph ([API-ACCESS-1]).
+    pub access: access::Access,
+    /// The OAuth authorization server, when `[oauth]` is set.
+    pub oauth: Option<Arc<oauth::OAuth>>,
     pub metrics: metrics::Metrics,
     pub started: Instant,
 }
@@ -47,20 +54,31 @@ impl App {
     }
 
     /// Finds the graphs in the data folder; call [`App::preload`] to start loading them.
+    /// Panics when `server.db` cannot be opened; see [`App::try_new`].
     pub fn new(config: Config) -> Arc<Self> {
+        Self::try_new(config).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// Like [`App::new`], failing when `<data_dir>/server.db` cannot be opened.
+    pub fn try_new(config: Config) -> Result<Arc<Self>, String> {
+        let db = Arc::new(server_db::ServerDb::open(&config.data_dir)?);
+        let access = access::Access::open(db.clone())?;
+        let oauth = oauth::OAuth::new(&config.oauth, db).map(Arc::new);
         let registry = Arc::new(Registry::new(
             &config.data_dir,
             config.text_index,
             load_model(&config),
             Duration::from_millis(config.warmup_wait_ms),
         ));
-        Arc::new(Self {
+        Ok(Arc::new(Self {
             keys: auth::Keys::new(&config),
             config,
             registry,
+            access,
+            oauth,
             metrics: metrics::Metrics::default(),
             started: Instant::now(),
-        })
+        }))
     }
 
     /// Starts loading every graph in the background (needs a tokio runtime).
@@ -127,6 +145,29 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/metrics", get(metrics))
         .route("/openapi.yaml", get(openapi))
         .route("/mcp", post(mcp_http))
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth::protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/mcp",
+            get(oauth::protected_resource),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth::authorization_server),
+        )
+        .route("/oauth/register", post(oauth::register))
+        .route(
+            "/oauth/authorize",
+            get(oauth::authorize_page).post(oauth::authorize),
+        )
+        .route("/oauth/token", post(oauth::token))
+        .route("/oauth/revoke", post(oauth::revoke))
+        .route(
+            "/admin/oauth/grants/{id}",
+            axum::routing::delete(admin::revoke_oauth_grant),
+        )
         .route("/v1/graphs", get(api::list_graphs))
         .route("/v1/graphs/{graph}", get(api::get_graph))
         .route(
@@ -358,6 +399,10 @@ pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> s
         app.preload();
     }
     spawn_maintenance(&app);
+    oauth::spawn_prune(app.clone());
+    if let Some(o) = &app.oauth {
+        tracing::info!(resource = %o.resource(), "OAuth sign-in for remote MCP clients is on");
+    }
     let registry = app.registry.clone();
     let result = match tls {
         Some(config) => {
@@ -391,8 +436,27 @@ pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> s
 }
 
 /// [MCP-HTTP-1] Streamable HTTP: one JSON-RPC message per POST, answered as JSON.
-async fn mcp_http(State(app): State<Arc<App>>, caller: auth::Caller, body: api::Body) -> Response {
+async fn mcp_http(
+    State(app): State<Arc<App>>,
+    caller: Result<auth::Caller, ApiError>,
+    body: api::Body,
+) -> Response {
     let start = Instant::now();
+    let caller = match caller {
+        Ok(c) => c,
+        Err(e) => {
+            let mut resp = e.into_response();
+            // [API-OAUTH-1] Where a client finds out how to sign in.
+            if resp.status() == StatusCode::UNAUTHORIZED
+                && let Some(o) = &app.oauth
+                && let Ok(v) = HeaderValue::from_str(&o.challenge())
+            {
+                resp.headers_mut().insert(header::WWW_AUTHENTICATE, v);
+            }
+            api::observe(&app, "mcp", None, resp.status().as_u16(), start, None);
+            return resp;
+        }
+    };
     let msg = match api::parse_body(body) {
         Ok(m) => m,
         Err(_) => json!(null),

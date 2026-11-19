@@ -547,6 +547,58 @@ paths:
         "4XX": { $ref: "#/components/responses/Error" }
         "5XX": { $ref: "#/components/responses/Error" }
 
+  /admin/graphs/{graph}/access:
+    parameters: [{ $ref: "#/components/parameters/graph" }]
+    get:
+      tags: [admin]
+      summary: Who may use the graph (admin.md [ADMIN-ACCESS-1])
+      operationId: adminGraphAccess
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [admin]
+      summary: Change who may use the graph ([API-ACCESS-3])
+      operationId: adminSetGraphAccess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                everyone: { type: string, enum: [none, read, write] }
+                users:
+                  type: object
+                  additionalProperties: { type: [string, "null"], enum: [none, read, write, null] }
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/oauth:
+    get:
+      tags: [admin]
+      summary: Live OAuth grants (admin.md [ADMIN-OAUTH-1])
+      operationId: adminOauth
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
+  /admin/oauth/grants/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [admin]
+      summary: Revoke an OAuth grant (admin.md [ADMIN-OAUTH-2])
+      operationId: adminRevokeOauthGrant
+      responses:
+        "200": { $ref: "#/components/responses/Operation" }
+        "4XX": { $ref: "#/components/responses/Error" }
+        "5XX": { $ref: "#/components/responses/Error" }
+
   /admin/stats:
     get:
       tags: [admin]
@@ -751,6 +803,7 @@ components:
             properties:
               name: { type: string }
               status: { type: string, enum: [ready, loading, unloaded, failed] }
+              access: { type: string, enum: [read, write], description: "What this caller may do ([API-ACCESS-4])." }
         search: { $ref: "#/components/schemas/SearchSettings" }
     SearchSettings:
       description: How search matches ([API-GRAPH-3], [OP-OVER-6]).
@@ -767,10 +820,19 @@ components:
         status: { type: string, enum: [ready, loading, unloaded, failed] }
         file_bytes: { type: integer }
         wal_bytes: { type: integer }
+        access: { $ref: "#/components/schemas/Access" }
         counts: { $ref: "#/components/schemas/Counts" }
         policies: { $ref: "#/components/schemas/Policies" }
         last_seq: { type: integer }
         text_index: { type: string, enum: [current, stale, none] }
+    Access:
+      description: Who may use a graph ([API-ACCESS-1]).
+      type: object
+      properties:
+        everyone: { type: string, enum: [none, read, write] }
+        users:
+          type: object
+          additionalProperties: { type: string, enum: [none, read, write] }
     Counts:
       type: object
       properties:

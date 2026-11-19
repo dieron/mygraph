@@ -10,7 +10,12 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       `MYGRAPH_CA_CERT` trusts a private CA or a self-signed certificate.
 - [ ] Certificates from Let's Encrypt by the server itself (ACME, e.g. rustls-acme), for a server
       reachable from the internet with no certbot.
-- [ ] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect.
+- [x] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect:
+      `[oauth] public_url`; sign-in with an API key, CIMD and DCR clients, PKCE, rotating
+      refresh tokens, `/admin/oauth` (spec/api/oauth.md).
+- [x] Per-graph access: private, public read-only or writable, and levels for single users
+      ([API-ACCESS-*]; `/admin/graphs/{g}/access` and the `graphs` tool).
+- [ ] Try claude.ai against a server behind a reverse proxy, from the web and a phone.
 - [x] Tag the first release (v0.1.0) and update the README's quick start for it.
 
 ## Distribution and setup (in this order; docs/09-roadmap.md, Packaging and setup)

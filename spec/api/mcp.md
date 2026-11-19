@@ -38,11 +38,14 @@ failed operation returns a result with `isError: true` and the text
 JSON when present. Hints name tools rather than REST routes (for example `graph.not_found` points to
 the `graphs` tool). Unknown tools fail with JSON-RPC error `-32602`.
 
-**[MCP-TOOL-4]** `graphs` with `action` `list` (the default) returns the graphs the caller may use,
-each with its status, and `default`: the graph of [MCP-TOOL-2] when it exists, else `null`. With
-`action` `create` it creates the graph `name` with optional `policies`, as `POST /admin/graphs`
-([ADMIN-GRAPH-2]; admin role), and returns it as `created`. Compact text: `graphs: research (ready,
-default) · lab (unloaded)`; `created graph lab · policies {…}`.
+**[MCP-TOOL-4]** `graphs` with `action` `list` (the default) returns the graphs the caller may
+read ([API-ACCESS-4]), each with its status and `access`, and `default`: the graph of
+[MCP-TOOL-2] when it exists, else `null`. With `action` `create` it creates the graph `name` with
+optional `policies` and `access`, as `POST /admin/graphs` ([ADMIN-GRAPH-2]; admin role), and
+returns it as `created`. With `action` `access` it shows who may use the graph `name`, or changes
+it with `everyone` and `users`, as `/admin/graphs/{graph}/access` ([ADMIN-ACCESS-1]; admin role),
+and returns it as `access`. Compact text: `graphs: research (ready, default) · lab (unloaded,
+read only)`; `created graph lab · policies {…}`; `graph lab · everyone read · users alice write`.
 
 **[MCP-TOOL-5]** A top-level tool argument that is `null`, `""`, `[]` or `{}` counts as absent:
 some models send every optional parameter, filled with empty values (`"type": ""`). A required

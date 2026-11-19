@@ -169,6 +169,11 @@ pub fn agent() -> &'static ureq::Agent {
 
 /// A client trusting the public roots and the certificates in `ca`.
 pub fn client(ca: Option<&Path>) -> Result<ureq::Agent, String> {
+    Ok(agent_builder(ca)?.build())
+}
+
+/// The builder of [`client`], for a client that needs more settings.
+pub fn agent_builder(ca: Option<&Path>) -> Result<ureq::AgentBuilder, String> {
     let mut roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
@@ -193,9 +198,7 @@ pub fn client(ca: Option<&Path>) -> Result<ureq::Agent, String> {
         .map_err(|e| e.to_string())?
         .with_root_certificates(roots)
         .with_no_client_auth();
-    Ok(ureq::AgentBuilder::new()
-        .tls_config(Arc::new(config))
-        .build())
+    Ok(ureq::AgentBuilder::new().tls_config(Arc::new(config)))
 }
 
 /// A client error, with what to do for the self-signed certificates that TLS refuses most often.

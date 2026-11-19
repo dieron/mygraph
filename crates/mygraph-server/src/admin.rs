@@ -42,6 +42,7 @@ async fn graph_info(app: &Arc<App>, caller: &Caller, name: &str) -> Result<Json,
     let (file_bytes, wal_bytes) = GraphFile::file_sizes(app.registry.data_dir(), name);
     let mut info = json!({
         "name": name, "status": state.name(), "file_bytes": file_bytes, "wal_bytes": wal_bytes,
+        "access": app.access.get(name).to_json(),
     });
     if let SlotState::Ready(_) = state {
         let loaded = with_graph(app, caller, name, Role::Admin, false, |access| {
@@ -80,8 +81,43 @@ pub async fn list_graphs(State(app): State<Arc<App>>, caller: Caller) -> Respons
     finish(&app, "admin.list_graphs", None, start, r)
 }
 
-/// Creates a graph from `{"name", "policies"}` and returns its `GraphInfo` ([ADMIN-GRAPH-2]);
-/// shared by `POST /admin/graphs` and the MCP `graphs` tool.
+/// [ADMIN-ACCESS-1] Shows who may use the graph `name`, or changes it with `everyone` and
+/// `users` ([API-ACCESS-3]); shared by `/admin/graphs/{graph}/access` and the MCP `graphs` tool.
+/// `unknown_users` lists users that no configured key acts as (likely a typo).
+pub fn access(app: &App, caller: &Caller, req: &Json) -> Result<Json, ApiError> {
+    caller.require(Role::Admin)?;
+    let req = req
+        .as_object()
+        .ok_or_else(|| bad("request: expected an object"))?;
+    let name = req
+        .get("name")
+        .and_then(Json::as_str)
+        .ok_or_else(|| bad("name: expected the graph's name"))?;
+    caller.check_graph(name)?;
+    app.registry
+        .state(name)
+        .ok_or_else(|| crate::registry::not_found(name))?;
+    let mut p = app.access.get(name);
+    let change: Map<String, Json> = req
+        .iter()
+        .filter(|(k, _)| *k != "name")
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if !change.is_empty() {
+        p.apply(&Json::Object(change))?;
+        app.access.set(name, &p)?;
+        tracing::info!(graph = name, actor = %caller.actor, access = %p.to_json(), "graph access changed");
+    }
+    let actors = app.keys.actors();
+    let unknown: Vec<&String> = p.users.keys().filter(|u| !actors.contains(*u)).collect();
+    let mut out = p.to_json();
+    out["graph"] = name.into();
+    out["unknown_users"] = json!(unknown);
+    Ok(out)
+}
+
+/// Creates a graph from `{"name", "policies", "access"}` and returns its `GraphInfo`
+/// ([ADMIN-GRAPH-2]); shared by `POST /admin/graphs` and the MCP `graphs` tool.
 pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json, ApiError> {
     caller.require(Role::Admin)?;
     let req = req
@@ -89,7 +125,7 @@ pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json,
         .ok_or_else(|| bad("request: expected an object"))?;
     {
         for k in req.keys() {
-            if k != "name" && k != "policies" {
+            if k != "name" && k != "policies" && k != "access" {
                 return Err(bad(format!("{k}: no such field")));
             }
         }
@@ -114,7 +150,20 @@ pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json,
         let policies = Policies::from_json(&policies)
             .filter(|p| p.validate().is_ok())
             .ok_or_else(|| ApiError::new("graph.policy_invalid", "invalid policies"))?;
+        let permissions = match req.get("access") {
+            Some(change) => {
+                let mut p = crate::access::Permissions::default();
+                p.apply(change)?;
+                Some(p)
+            }
+            None => None,
+        };
         app.registry.create(name, &policies)?;
+        // A graph of this name deleted before must not pass its access on.
+        app.access.remove(name);
+        if let Some(p) = permissions {
+            app.access.set(name, &p)?;
+        }
         graph_info(app, caller, name).await
     }
 }
@@ -171,6 +220,7 @@ pub async fn delete_graph(
         let moved = tokio::task::spawn_blocking(move || reg.delete(&name))
             .await
             .map_err(|e| ApiError::new("internal", e.to_string()))??;
+        app.access.remove(&graph);
         Ok(json_body(&json!({
             "deleted": graph, "moved_to": moved.display().to_string(),
         }))
@@ -195,6 +245,7 @@ pub async fn graph_action(
         "import" => "admin.import",
         "restore" => "admin.restore",
         "reindex" => "admin.reindex",
+        "access" => "admin.access",
         _ => "unknown",
     };
     let r = async {
@@ -202,6 +253,13 @@ pub async fn graph_action(
         let data_dir = app.registry.data_dir().to_owned();
         let name = graph.clone();
         let body = match action.as_str() {
+            "access" => {
+                let mut req = parse_body(body)?;
+                req.as_object_mut()
+                    .ok_or_else(|| bad("request: expected an object"))?
+                    .insert("name".into(), json!(graph));
+                access(&app, &caller, &req)?
+            }
             // [ADMIN-GRAPH-4] Under the shared lock: reads go on, writes wait.
             "snapshot" => {
                 with_graph(&app, &caller, &graph, Role::Admin, false, move |access| {
@@ -365,6 +423,11 @@ pub async fn graph_get(
     let start = Instant::now();
     let r = async {
         caller.require(Role::Admin)?;
+        if what == "access" {
+            return Ok(
+                json_body(&access(&app, &caller, &json!({ "name": graph }))?).into_response(),
+            );
+        }
         if what != "stats" {
             return Err(api_not_found());
         }
@@ -427,9 +490,35 @@ pub async fn server_info(
             "slow-ops" => json!({ "slow_ms": app.config.slow_ms, "ops": app.metrics.slow_ops() }),
             "keys" => app.keys.redacted(),
             "config" => app.config.redacted(),
+            "oauth" => match &app.oauth {
+                Some(o) => o.admin_list(&app.keys),
+                None => json!({ "public_url": null, "grants": [], "registered_clients": 0 }),
+            },
             _ => return Err(api_not_found()),
         };
         Ok(json_body(&body).into_response())
     });
     finish(&app, "admin.server", None, start, r)
+}
+
+/// `DELETE /admin/oauth/grants/{id}` ([ADMIN-OAUTH-2]): the app signed in with that grant is
+/// signed out at once.
+pub async fn revoke_oauth_grant(
+    State(app): State<Arc<App>>,
+    Path(id): Path<String>,
+    caller: Caller,
+) -> Response {
+    let start = Instant::now();
+    let r = caller.require(Role::Admin).and_then(|()| {
+        let o = app.oauth.as_ref().ok_or_else(api_not_found)?;
+        if o.revoke_grant(&id) {
+            Ok(json_body(&json!({ "revoked": id })).into_response())
+        } else {
+            Err(ApiError::new(
+                "oauth.grant_not_found",
+                format!("no live OAuth grant {id}"),
+            ))
+        }
+    });
+    finish(&app, "admin.oauth_revoke", None, start, r)
 }

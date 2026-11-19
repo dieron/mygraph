@@ -368,13 +368,7 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
     let result: Result<Json, ApiError> = match (action.as_str(), backend) {
         ("list", Backend::Local { app, caller }) => (|| {
             caller.require(crate::config::Role::AgentRead)?;
-            let graphs: Vec<Json> = app
-                .registry
-                .list()
-                .into_iter()
-                .filter(|(n, _)| caller.may_use(n))
-                .map(|(n, s)| json!({ "name": n, "status": s.name() }))
-                .collect();
+            let graphs = crate::api::visible_graphs(app, caller);
             let default = match &caller.graphs {
                 Some(gs) if gs.len() == 1 => gs[0].clone(),
                 _ => app.config.default_graph.clone(),
@@ -388,7 +382,10 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
                 .await
                 .map(|info| json!({ "created": info }))
         }
-        (action @ ("list" | "create"), Backend::Remote { url, key, graph }) => {
+        ("access", Backend::Local { app, caller }) => {
+            crate::admin::access(app, caller, &Json::Object(args)).map(|a| json!({ "access": a }))
+        }
+        (action @ ("list" | "create" | "access"), Backend::Remote { url, key, graph }) => {
             let (url, key, graph) = (url.clone(), key.clone(), graph.clone());
             let action = action.to_owned();
             tokio::task::spawn_blocking(move || {
@@ -398,6 +395,25 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
                         .set("Content-Type", "application/json")
                         .send_string(&Json::Object(args).to_string());
                     answer(r).map(|info| json!({ "created": info }))
+                } else if action == "access" {
+                    let mut args = args;
+                    let name = match args.remove("name") {
+                        Some(Json::String(n)) => n,
+                        _ => {
+                            return Err(ApiError::new(
+                                "mcp.invalid_graph",
+                                "name: expected the graph's name",
+                            ));
+                        }
+                    };
+                    let r = request(
+                        &format!("{base}/admin/graphs/{name}/access"),
+                        key.as_deref(),
+                        "POST",
+                    )
+                    .set("Content-Type", "application/json")
+                    .send_string(&Json::Object(args).to_string());
+                    answer(r).map(|a| json!({ "access": a }))
                 } else {
                     let list = answer(
                         request(&format!("{base}/v1/graphs"), key.as_deref(), "GET").call(),
@@ -419,7 +435,7 @@ async fn graphs_tool(backend: &Backend, mut args: Map<String, Json>) -> Json {
         }
         _ => Err(ApiError::new(
             "mcp.invalid_action",
-            "action: expected \"list\" or \"create\"",
+            "action: expected \"list\", \"create\" or \"access\"",
         )),
     };
     match result {
@@ -442,6 +458,34 @@ fn with_default(graphs: Vec<Json>, default: Option<String>) -> Json {
 }
 
 fn graphs_text(r: &Json) -> String {
+    if let Some(a) = r.get("access") {
+        let users: Vec<String> = a["users"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(u, l)| format!("{u} {}", l.as_str().unwrap_or("?")))
+            .collect();
+        let mut out = format!(
+            "graph {} · everyone {} · users {}
+",
+            a["graph"].as_str().unwrap_or("?"),
+            a["everyone"].as_str().unwrap_or("?"),
+            if users.is_empty() {
+                "(none set)".to_owned()
+            } else {
+                users.join(", ")
+            }
+        );
+        if let Some(unknown) = a["unknown_users"].as_array().filter(|u| !u.is_empty()) {
+            let names: Vec<&str> = unknown.iter().filter_map(Json::as_str).collect();
+            out.push_str(&format!(
+                "note: no key on this server has the actor {}
+",
+                names.join(", ")
+            ));
+        }
+        return out;
+    }
     if let Some(info) = r.get("created") {
         return format!(
             "created graph {} · policies {}\n",
@@ -461,7 +505,15 @@ fn graphs_text(r: &Json) -> String {
             } else {
                 ""
             };
-            format!("{name} ({}{mark})", g["status"].as_str().unwrap_or("?"))
+            let read_only = if g["access"] == "read" {
+                ", read only"
+            } else {
+                ""
+            };
+            format!(
+                "{name} ({}{read_only}{mark})",
+                g["status"].as_str().unwrap_or("?")
+            )
         })
         .collect();
     let mut out = if list.is_empty() {
