@@ -12,7 +12,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       reachable from the internet with no certbot.
 - [x] OAuth for remote MCP, so claude.ai (web and mobile) and other remote clients can connect:
       `[oauth] public_url`; sign-in with an API key, CIMD and DCR clients, PKCE, rotating
-      refresh tokens, `/admin/oauth` (spec/api/oauth.md).
+      refresh tokens, `/admin/oauth`, and a public listener (`[oauth] listen`) that serves
+      nothing else (spec/api/oauth.md).
 - [x] Per-graph access: private, public read-only or writable, and levels for single users
       ([API-ACCESS-*]; `/admin/graphs/{g}/access` and the `graphs` tool).
 - [ ] Try claude.ai against a server behind a reverse proxy, from the web and a phone.

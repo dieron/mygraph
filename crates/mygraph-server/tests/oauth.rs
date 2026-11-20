@@ -562,3 +562,143 @@ fn public_url_and_redirect_settings_are_checked() {
     c.oauth.redirect_uris = vec!["https://claude.ai/*".into()];
     assert!(c.validate().is_err(), "wildcards only on loopback");
 }
+
+/// [API-OAUTH-9] The public router answers only what remote clients use.
+#[tokio::test]
+async fn the_public_router_serves_only_mcp_and_oauth() {
+    let dir = tempfile::tempdir().unwrap();
+    let keys = vec![
+        key(AGENT, "agent-a", Role::AgentWrite),
+        key(ADMIN, "ops", Role::Admin),
+    ];
+    let app = App::new(config(dir.path(), keys));
+    let public = mygraph_server::public_router(app.clone());
+
+    let r = get(&public, "/.well-known/oauth-authorization-server", None).await;
+    assert_eq!(r.json()["issuer"], PUBLIC);
+    let r = get(&public, "/.well-known/oauth-protected-resource/mcp", None).await;
+    assert_eq!(r.json()["resource"], format!("{PUBLIC}/mcp"));
+    let r = get(
+        &public,
+        &format!("/oauth/authorize?{}", query(&authorize_query("x"))),
+        None,
+    )
+    .await;
+    assert_eq!(
+        r.status,
+        StatusCode::BAD_REQUEST,
+        "an unknown client, shown on the page"
+    );
+    let r = mcp(&public, "", "tools/list", json!({})).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert!(
+        r.headers[header::WWW_AUTHENTICATE]
+            .to_str()
+            .unwrap()
+            .contains("resource_metadata")
+    );
+    // A key works on /mcp, as on the main listener.
+    let r = mcp(&public, AGENT, "tools/list", json!({})).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // Everything else is not there, even with the admin key.
+    for path in [
+        "/health",
+        "/ready",
+        "/metrics",
+        "/openapi.yaml",
+        "/v1/graphs",
+        "/admin/graphs",
+        "/admin/oauth",
+        "/admin/config",
+        "/admin/ui",
+        "/admin/ui/graph",
+        "/",
+    ] {
+        let r = get(&public, path, Some(ADMIN)).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
+        assert!(r.body.is_empty(), "{path}: {}", r.text());
+    }
+    let r = post_json(
+        &public,
+        "/admin/graphs",
+        Some(ADMIN),
+        json!({ "name": "x" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let r = call(
+        &public,
+        Method::DELETE,
+        "/admin/oauth/grants/1",
+        Some(ADMIN),
+        "text/plain",
+        String::new(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert!(app.registry.list().is_empty(), "nothing was created");
+}
+
+/// [API-OAUTH-9] `serve` runs the public listener next to the main one.
+#[test]
+fn the_public_listener_runs_beside_the_main_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = Config {
+        data_dir: dir.path().to_owned(),
+        preload: false,
+        keys: vec![key(AGENT, "agent-a", Role::AgentWrite)],
+        ..Config::default()
+    };
+    c.search.semantic = false;
+    c.oauth.public_url = Some("http://127.0.0.1:1".into());
+    c.validate().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let main = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let public = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let (main_port, public_port) = (
+        main.local_addr().unwrap().port(),
+        public.local_addr().unwrap().port(),
+    );
+    let app = {
+        let _guard = rt.enter();
+        App::new(c)
+    };
+    rt.spawn(mygraph_server::serve_listeners(app, main, Some(public)));
+
+    let status =
+        |port: u16, path: &str| match ureq::get(&format!("http://127.0.0.1:{port}{path}")).call() {
+            Ok(r) => r.status(),
+            Err(ureq::Error::Status(s, _)) => s,
+            Err(e) => panic!("{e}"),
+        };
+    assert_eq!(status(main_port, "/health"), 200);
+    assert_eq!(status(main_port, "/ready"), 200);
+    assert_eq!(status(public_port, "/health"), 404);
+    assert_eq!(status(public_port, "/ready"), 404);
+    assert_eq!(status(public_port, "/v1/graphs"), 404);
+    assert_eq!(
+        status(public_port, "/.well-known/oauth-authorization-server"),
+        200
+    );
+}
+
+#[test]
+fn the_public_listener_needs_oauth_and_its_own_port() {
+    let mut c = Config::default();
+    c.keys.push(key(AGENT, "agent-a", Role::AgentWrite));
+    c.oauth.listen = Some("0.0.0.0:7421".parse().unwrap());
+    let err = c.validate().unwrap_err();
+    assert!(err.contains("oauth.public_url"), "{err}");
+
+    c.oauth.public_url = Some(PUBLIC.into());
+    c.validate().unwrap();
+    c.oauth.listen = Some(format!("0.0.0.0:{}", c.listen.port()).parse().unwrap());
+    let err = c.validate().unwrap_err();
+    assert!(err.contains("another port"), "{err}");
+
+    let mut c = Config::default();
+    c.apply_env(&|n| (n == "MYGRAPH_OAUTH_LISTEN").then(|| "0.0.0.0:7421".to_owned()))
+        .unwrap();
+    assert_eq!(c.oauth.listen, Some("0.0.0.0:7421".parse().unwrap()));
+}

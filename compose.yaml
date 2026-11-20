@@ -14,6 +14,9 @@ services:
     ports:
       # Host side: set MYGRAPH_BIND=127.0.0.1 in .env to keep it on this machine only.
       - "${MYGRAPH_BIND:-0.0.0.0}:${MYGRAPH_PORT:-7420}:7420"
+      # The public listener (MYGRAPH_OAUTH_LISTEN=0.0.0.0:7421), for a reverse proxy: only
+      # /mcp, /oauth/ and /.well-known/. Nothing answers here until it is set.
+      - "${MYGRAPH_OAUTH_BIND:-0.0.0.0}:${MYGRAPH_OAUTH_PORT:-7421}:7421"
     environment:
       # The container listens beyond loopback, which needs at least one key.
       MYGRAPH_ADMIN_KEY: ${MYGRAPH_ADMIN_KEY:?set MYGRAPH_ADMIN_KEY in .env}
@@ -28,6 +31,7 @@ services:
       MYGRAPH_TLS_KEY: ${MYGRAPH_TLS_KEY:-}
       # OAuth for claude.ai and other remote MCP clients: the public HTTPS address.
       MYGRAPH_OAUTH_PUBLIC_URL: ${MYGRAPH_OAUTH_PUBLIC_URL:-}
+      MYGRAPH_OAUTH_LISTEN: ${MYGRAPH_OAUTH_LISTEN:-}
     volumes:
       - mygraph-data:/data
       # Certificates for HTTPS (MYGRAPH_CERTS in .env); an empty folder when unused.

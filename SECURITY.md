@@ -29,8 +29,9 @@ on a machine or network they control, not for the open internet.
   keys a minute. Tokens work on `/mcp` only and are stored hashed. Refresh tokens rotate, and an
   old one coming back signs that app out. `GET /admin/oauth` lists the apps signed in and
   `DELETE /admin/oauth/grants/{id}` revokes one; removing a key signs out every app that used it.
-  A server open to the internet for this should forward only `/mcp`, `/oauth/` and
-  `/.well-known/` through its proxy.
+  A server open to the internet for this should have the proxy point at the public listener
+  (`oauth.listen`), which serves only `/mcp`, `/oauth/` and `/.well-known/` and answers 404 to
+  everything else, so a proxy rule that forwards too much cannot reach the REST or admin API.
 - Clients identified by a metadata URL (CIMD) make the server fetch that URL. It fetches from
   public addresses only, with a short timeout and size limit, and never follows redirects. Set
   `oauth.client_metadata_documents = false` to have clients register instead.

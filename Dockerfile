@@ -44,7 +44,7 @@ ENV MYGRAPH_LISTEN=0.0.0.0:7420 \
     MYGRAPH_DATA_DIR=/data \
     MYGRAPH_MODEL_DIR=/usr/local/share/mygraph/models/$SEMANTIC_MODEL
 VOLUME ["/data"]
-EXPOSE 7420
+EXPOSE 7420 7421
 USER 65532:65532
 HEALTHCHECK --interval=30s --timeout=6s --start-period=60s --retries=3 \
   CMD ["/usr/local/bin/mygraph", "health"]

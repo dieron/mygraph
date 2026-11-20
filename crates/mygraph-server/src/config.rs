@@ -52,6 +52,9 @@ pub struct OauthConfig {
     /// The address clients reach the server at, e.g. `https://mygraph.example.com`, which may be
     /// a reverse proxy's. OAuth is on when it is set.
     pub public_url: Option<String>,
+    /// A second address that serves only what remote clients use (`/mcp`, `/oauth/*` and
+    /// `/.well-known/*`), for the reverse proxy to point at, e.g. `0.0.0.0:7421`.
+    pub listen: Option<std::net::SocketAddr>,
     /// How long an access token lasts.
     pub access_token_minutes: u64,
     /// How long a refresh token lasts unused; each refresh issues a new one.
@@ -76,6 +79,7 @@ impl Default for OauthConfig {
     fn default() -> Self {
         Self {
             public_url: None,
+            listen: None,
             access_token_minutes: 60,
             refresh_token_days: 30,
             redirect_uris: DEFAULT_REDIRECT_URIS.map(String::from).to_vec(),
@@ -93,7 +97,12 @@ impl OauthConfig {
 
     fn validate(&self, has_keys: bool) -> Result<(), String> {
         let Some(public) = &self.public_url else {
-            return Ok(());
+            return match self.listen {
+                Some(_) => {
+                    Err("oauth.listen needs oauth.public_url (MYGRAPH_OAUTH_PUBLIC_URL)".into())
+                }
+                None => Ok(()),
+            };
         };
         let url =
             url::Url::parse(public).map_err(|e| format!("oauth.public_url {public:?}: {e}"))?;
@@ -143,6 +152,7 @@ impl OauthConfig {
     fn to_json(&self) -> Json {
         json!({
             "public_url": self.public_url,
+            "listen": self.listen.map(|a| a.to_string()),
             "access_token_minutes": self.access_token_minutes,
             "refresh_token_days": self.refresh_token_days,
             "redirect_uris": self.redirect_uris,
@@ -279,6 +289,7 @@ impl Config {
     /// | `MYGRAPH_TLS_CERT` | `tls.cert` (path of the PEM certificate chain) |
     /// | `MYGRAPH_TLS_KEY` | `tls.key` (path of the PEM private key) |
     /// | `MYGRAPH_OAUTH_PUBLIC_URL` | `oauth.public_url`, e.g. `https://mygraph.example.com` |
+    /// | `MYGRAPH_OAUTH_LISTEN` | `oauth.listen`, e.g. `0.0.0.0:7421` |
     /// | `MYGRAPH_ADMIN_KEY` | adds a key for actor `admin`, role `admin` |
     /// | `MYGRAPH_AGENT_KEY` | adds a key for actor `agent`, role `agent-write` |
     /// | `MYGRAPH_READ_KEY` | adds a key for actor `reader`, role `agent-read` |
@@ -327,6 +338,12 @@ impl Config {
         }
         if let Some(v) = get("MYGRAPH_OAUTH_PUBLIC_URL")? {
             self.oauth.public_url = Some(v);
+        }
+        if let Some(v) = get("MYGRAPH_OAUTH_LISTEN")? {
+            self.oauth.listen = Some(
+                v.parse()
+                    .map_err(|e| format!("MYGRAPH_OAUTH_LISTEN {v:?}: {e}"))?,
+            );
         }
         if let Some(v) = var("MYGRAPH_TLS_CERT").filter(|v| !v.trim().is_empty()) {
             self.tls.cert = Some(PathBuf::from(v.trim()));
@@ -383,6 +400,14 @@ impl Config {
             return Err("tls: set both cert and key (MYGRAPH_TLS_CERT and MYGRAPH_TLS_KEY)".into());
         }
         self.oauth.validate(!self.keys.is_empty())?;
+        if let Some(public) = self.oauth.listen
+            && (public.port() == self.listen.port() && public.port() != 0)
+        {
+            return Err(format!(
+                "oauth.listen {public}: use another port than listen {}",
+                self.listen
+            ));
+        }
         // [API-AUTH-4]
         if self.keys.is_empty() && !self.listen.ip().is_loopback() {
             return Err(format!(

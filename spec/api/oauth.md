@@ -99,3 +99,11 @@ revokes its grant; an access token stops working by itself. It answers `200` whe
 token was known.
 
 Admins list and revoke grants with `/admin/oauth` ([ADMIN-OAUTH-1], [ADMIN-OAUTH-2]).
+
+## 5. The public listener
+
+**[API-OAUTH-9]** With `oauth.listen` set (it needs `public_url`, and a port other than
+`listen`'s), the server also listens there, with the same certificate, for a reverse proxy to
+point at. That listener serves `/mcp`, `/oauth/*` and `/.well-known/*` as above, and answers
+every other path `404` with an empty body: the REST and admin APIs, the pages, `/health`,
+`/ready`, `/metrics` and `/openapi.yaml`. API keys still work on its `/mcp`.

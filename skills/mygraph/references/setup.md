@@ -44,7 +44,7 @@ there.
 ## claude.ai, Claude Desktop and the phone apps (connector)
 
 When the server has OAuth on (`[oauth] public_url`) and is reachable from the internet over
-HTTPS: Settings → Connectors → Add custom connector, URL `https://<public host>/mcp`. MyGraph's
+HTTPS (best through its public listener, `[oauth] listen`, which serves nothing else): Settings → Connectors → Add custom connector, URL `https://<public host>/mcp`. MyGraph's
 sign-in page asks for an API key; **Read only** limits the connector to reading. One connector
 works in every Claude app on that account. If it stops working, remove and add it again to sign
 in anew.

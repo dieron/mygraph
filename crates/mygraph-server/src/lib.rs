@@ -136,14 +136,9 @@ pub fn versions() -> Value {
     })
 }
 
-/// Every route ([API-OP-1], [API-SHORT-1], admin.md, conventions.md §6).
-pub fn router(app: Arc<App>) -> Router {
-    let limit = app.config.max_body_bytes;
+/// What remote MCP clients use: `/mcp` and the OAuth routes ([API-OAUTH-1..8]).
+fn remote_routes() -> Router<Arc<App>> {
     Router::new()
-        .route("/health", get(health))
-        .route("/ready", get(ready))
-        .route("/metrics", get(metrics))
-        .route("/openapi.yaml", get(openapi))
         .route("/mcp", post(mcp_http))
         .route(
             "/.well-known/oauth-protected-resource",
@@ -164,6 +159,39 @@ pub fn router(app: Arc<App>) -> Router {
         )
         .route("/oauth/token", post(oauth::token))
         .route("/oauth/revoke", post(oauth::revoke))
+}
+
+/// The route errors every router shares, and the body limit.
+fn finish(router: Router<Arc<App>>, app: Arc<App>) -> Router {
+    let limit = app.config.max_body_bytes;
+    router
+        .method_not_allowed_fallback(|| async {
+            ApiError::new(
+                "api.method_not_allowed",
+                "this route does not take that method",
+            )
+        })
+        .layer(DefaultBodyLimit::max(limit))
+        .with_state(app)
+}
+
+/// [API-OAUTH-9] The public listener (`oauth.listen`): only what remote MCP clients use, so a
+/// reverse proxy pointed at it cannot reach the REST and admin APIs or the service routes.
+pub fn public_router(app: Arc<App>) -> Router {
+    finish(
+        remote_routes().fallback(|| async { StatusCode::NOT_FOUND }),
+        app,
+    )
+}
+
+/// Every route ([API-OP-1], [API-SHORT-1], admin.md, conventions.md §6).
+pub fn router(app: Arc<App>) -> Router {
+    let routes = Router::new()
+        .route("/health", get(health))
+        .route("/ready", get(ready))
+        .route("/metrics", get(metrics))
+        .route("/openapi.yaml", get(openapi))
+        .merge(remote_routes())
         .route(
             "/admin/oauth/grants/{id}",
             axum::routing::delete(admin::revoke_oauth_grant),
@@ -198,15 +226,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/ui/graph", get(graph_page))
         .route("/admin/ui/cytoscape.min.js", get(cytoscape_js))
         .route("/admin/{what}", get(admin::server_info))
-        .fallback(|| async { api::api_not_found() })
-        .method_not_allowed_fallback(|| async {
-            ApiError::new(
-                "api.method_not_allowed",
-                "this route does not take that method",
-            )
-        })
-        .layer(DefaultBodyLimit::max(limit))
-        .with_state(app)
+        .fallback(|| async { api::api_not_found() });
+    finish(routes, app)
 }
 
 /// Liveness. No authentication.
@@ -359,12 +380,26 @@ async fn openapi() -> Response {
 /// Serves until Ctrl-C.
 pub async fn serve(app: Arc<App>) -> std::io::Result<()> {
     let listener = std::net::TcpListener::bind(app.config.listen)?;
-    serve_listener(app, listener).await
+    let public = match app.config.oauth.listen {
+        Some(addr) => Some(std::net::TcpListener::bind(addr)?),
+        None => None,
+    };
+    serve_listeners(app, listener, public).await
 }
 
 /// [`serve`] on a listener already bound: HTTPS when `[tls]` names a certificate, else HTTP.
 /// Returns after Ctrl+C, once the open requests finish.
 pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> std::io::Result<()> {
+    serve_listeners(app, listener, None).await
+}
+
+/// [`serve_listener`], with the public listener of `oauth.listen` ([API-OAUTH-9]) when given.
+/// Both use the same certificate.
+pub async fn serve_listeners(
+    app: Arc<App>,
+    listener: std::net::TcpListener,
+    public: Option<std::net::TcpListener>,
+) -> std::io::Result<()> {
     listener.set_nonblocking(true)?;
     let addr = listener.local_addr()?;
     let tls = match app.config.tls.files() {
@@ -404,7 +439,34 @@ pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> s
         tracing::info!(resource = %o.resource(), "OAuth sign-in for remote MCP clients is on");
     }
     let registry = app.registry.clone();
-    let result = match tls {
+    let main = run(router(app.clone()), listener, tls.clone());
+    let result = match public {
+        Some(public) => {
+            public.set_nonblocking(true)?;
+            tracing::info!(
+                listen = %public.local_addr()?,
+                "public listener: /mcp, /oauth/ and /.well-known/ only"
+            );
+            tokio::try_join!(main, run(public_router(app), public, tls)).map(|_| ())
+        }
+        None => main.await,
+    };
+    tokio::task::spawn_blocking(move || {
+        registry.maintain();
+        registry.flush_semantic();
+    })
+    .await
+    .ok();
+    result
+}
+
+/// Serves `router` on `listener` until Ctrl+C, over HTTPS when `tls` is given.
+async fn run(
+    router: Router,
+    listener: std::net::TcpListener,
+    tls: Option<axum_server::tls_rustls::RustlsConfig>,
+) -> std::io::Result<()> {
+    match tls {
         Some(config) => {
             let handle = axum_server::Handle::new();
             let stop = handle.clone();
@@ -415,24 +477,17 @@ pub async fn serve_listener(app: Arc<App>, listener: std::net::TcpListener) -> s
             axum_server::from_tcp(listener)?
                 .acceptor(tls::acceptor(config))
                 .handle(handle)
-                .serve(router(app).into_make_service())
+                .serve(router.into_make_service())
                 .await
         }
         None => {
-            axum::serve(tokio::net::TcpListener::from_std(listener)?, router(app))
+            axum::serve(tokio::net::TcpListener::from_std(listener)?, router)
                 .with_graceful_shutdown(async {
                     let _ = tokio::signal::ctrl_c().await;
                 })
                 .await
         }
-    };
-    tokio::task::spawn_blocking(move || {
-        registry.maintain();
-        registry.flush_semantic();
-    })
-    .await
-    .ok();
-    result
+    }
 }
 
 /// [MCP-HTTP-1] Streamable HTTP: one JSON-RPC message per POST, answered as JSON.

@@ -174,18 +174,24 @@ server must be reachable from the internet over HTTPS, with a certificate that b
 1. Give the server a public address. A reverse proxy you already run (nginx, Caddy, Traefik,
    Nginx Proxy Manager) with a Let's Encrypt certificate works, and so does a tunnel
    (Cloudflare Tunnel, Tailscale Funnel).
-2. Forward `/mcp`, `/oauth/` and `/.well-known/` to MyGraph. Keep `/v1` and `/admin` off the
-   internet unless you need them there. Claude connects from `160.79.104.0/21`, if you want to
-   limit `/mcp` to it (and to your own addresses).
-3. Turn on OAuth with that address, in `server.toml` or as `MYGRAPH_OAUTH_PUBLIC_URL`:
+2. Turn on OAuth with that address, and give it a public listener: a second port that serves
+   only `/mcp`, `/oauth/` and `/.well-known/`, and answers 404 to everything else, the REST and
+   admin APIs, the stats page and `/ready` included. In `server.toml`, or as
+   `MYGRAPH_OAUTH_PUBLIC_URL` and `MYGRAPH_OAUTH_LISTEN`:
 
    ```toml
    [oauth]
    public_url = "https://mygraph.example.com"   # what clients reach, the proxy's address
+   listen = "0.0.0.0:7421"                       # the public listener, for the proxy
    # access_token_minutes = 60
    # refresh_token_days = 30
    ```
 
+   It uses the same certificate as the main port, if `[tls]` is set.
+3. Point the proxy at the public listener only, so a proxy rule that forwards too much still
+   cannot reach anything else. Your own machines keep using the main port. Claude connects from
+   `160.79.104.0/21`, if you want to limit `/mcp`, `/oauth/token`, `/oauth/register` and
+   `/.well-known/` to it (`/oauth/authorize` opens in your own browser).
 4. In claude.ai, open Settings → Connectors → Add custom connector, and enter
    `https://mygraph.example.com/mcp`. MyGraph's sign-in page opens: paste an API key, and choose
    **Allow**. Tick **Read only** to let Claude read but not write.
