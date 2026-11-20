@@ -229,13 +229,14 @@ async function loadServer() {
   return graphs;
 }
 
-// [API-ACCESS-1]: everyone's level, then the levels set for single users.
+// [API-ACCESS-1]: the level of every key (`everyone`), then the levels set for single users.
+// "Everyone" means every key configured on this server, never anonymous callers.
 function accessCell(a) {
   if (!a) return "–";
   const users = Object.entries(a.users || {}).sort((x, y) => (x[0] < y[0] ? -1 : 1));
-  const text = ["everyone: " + a.everyone, ...users.map(([u, l]) => `${u}: ${l}`)].join(", ");
+  const text = ["all keys: " + a.everyone, ...users.map(([u, l]) => `${u}: ${l}`)].join(", ");
   return el("span", { title: text },
-    el("span", { class: "badge lvl-" + a.everyone }, a.everyone === "none" ? "private" : "everyone " + a.everyone),
+    el("span", { class: "badge lvl-" + a.everyone }, a.everyone === "none" ? "private" : "all keys: " + a.everyone),
     ...users.map(([u, l]) => el("span", { class: "muted" }, " · ", u, " ", el("span", { class: "lvl-" + l }, l))));
 }
 
