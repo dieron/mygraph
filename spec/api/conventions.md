@@ -82,6 +82,12 @@ members, levels or actor names that break [ACTOR-NAME-1] fail with `access.inval
 **[API-ACCESS-4]** `GET /v1/graphs` (and the `graphs` tool, [MCP-TOOL-4]) list only the graphs
 the caller may read, each with `access`: `read` or `write`.
 
+**[API-ACCESS-5]** Admins create graphs, and so does an `agent-write` key configured with
+`create_graphs` ([ADMIN-GRAPH-2]); such a key may not also list `graphs`, nor be `agent-read`
+(the configuration is refused). A graph it creates gets its actor in `users` with `write`, on top
+of any `access` in the request, and the answer is `{"name", "status", "access"}` only. Other
+callers fail with `auth.forbidden`. Changing access stays with admins.
+
 ## 3. Graphs
 
 **[API-GRAPH-1]** Every `/v1` route except `GET /v1/graphs` names its graph in the path. An

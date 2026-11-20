@@ -225,6 +225,9 @@ pub struct KeyConfig {
     /// Graphs this key may use; empty means all.
     #[serde(default)]
     pub graphs: Vec<String>,
+    /// [API-ACCESS-5] An `agent-write` key may create graphs, and may write to those it creates.
+    #[serde(default)]
+    pub create_graphs: bool,
 }
 
 /// [API-AUTH-1] Ordered: each role may do everything the previous one may.
@@ -363,6 +366,7 @@ impl Config {
                     actor: actor.to_owned(),
                     role,
                     graphs: Vec::new(),
+                    create_graphs: false,
                 });
             }
         }
@@ -392,6 +396,16 @@ impl Config {
                 }
             }
             validate_actor_name(&k.actor).map_err(|r| format!("keys[{i}].actor: {r}"))?;
+            if k.create_graphs && k.role == Role::AgentRead {
+                return Err(format!(
+                    "keys[{i}].create_graphs: needs the role agent-write; an agent-read key cannot write"
+                ));
+            }
+            if k.create_graphs && !k.graphs.is_empty() {
+                return Err(format!(
+                    "keys[{i}].create_graphs: a key limited to some graphs could not use the ones it creates; leave graphs empty and limit the key with each graph's access instead"
+                ));
+            }
             for g in &k.graphs {
                 validate_graph_name(g).map_err(|r| format!("keys[{i}].graphs {g:?}: {r}"))?;
             }

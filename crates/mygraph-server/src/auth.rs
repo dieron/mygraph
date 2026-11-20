@@ -18,6 +18,8 @@ pub struct Caller {
     pub role: Role,
     /// `None`: every graph.
     pub graphs: Option<Vec<String>>,
+    /// [API-ACCESS-5] This `agent-write` key may create graphs.
+    pub create_graphs: bool,
 }
 
 impl Caller {
@@ -31,6 +33,11 @@ impl Caller {
                 format!("this needs the role {}", need.as_str().unwrap_or("?")),
             ))
         }
+    }
+
+    /// [API-ACCESS-5] Admins, and `agent-write` keys with `create_graphs`, may create graphs.
+    pub fn may_create_graphs(&self) -> bool {
+        self.role == Role::Admin || self.create_graphs && self.role == Role::AgentWrite
     }
 
     pub fn may_use(&self, graph: &str) -> bool {
@@ -71,6 +78,7 @@ impl Keys {
                     actor: k.actor.clone(),
                     role: k.role,
                     graphs: (!k.graphs.is_empty()).then(|| k.graphs.clone()),
+                    create_graphs: k.create_graphs,
                 };
                 (hash, caller)
             })
@@ -85,6 +93,7 @@ impl Keys {
                 actor: "local".to_owned(),
                 role: Role::Admin,
                 graphs: None,
+                create_graphs: false,
             });
         }
         let header = header.ok_or_else(|| {

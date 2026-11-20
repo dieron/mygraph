@@ -13,7 +13,8 @@ use std::process::ExitCode;
     about = "Graph database with evidence, for AI agents"
 )]
 struct Cli {
-    /// Configuration file (TOML). Defaults apply when omitted.
+    /// Configuration file (TOML; default: the MYGRAPH_CONFIG environment variable). Defaults
+    /// apply when neither is given.
     #[arg(long, global = true)]
     config: Option<PathBuf>,
     #[command(subcommand)]
@@ -72,7 +73,15 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let mut config = match Config::load(cli.config.as_deref()) {
+    let mut config = match Config::load(
+        cli.config
+            .or_else(|| {
+                std::env::var_os("MYGRAPH_CONFIG")
+                    .filter(|v| !v.is_empty())
+                    .map(PathBuf::from)
+            })
+            .as_deref(),
+    ) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("mygraph: {e}");
@@ -246,6 +255,7 @@ async fn mcp_stdio(
                     actor,
                     role: Role::Admin,
                     graphs: None,
+                    create_graphs: false,
                 },
             }
         }

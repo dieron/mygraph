@@ -248,6 +248,7 @@ mod tests {
             actor: actor.into(),
             role,
             graphs: graphs.map(|g| g.into_iter().map(String::from).collect()),
+            create_graphs: false,
         }
     }
 

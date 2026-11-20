@@ -298,7 +298,11 @@ key_sha256 = "…"          # `mygraph hash-key <key>` prints it; or `key = "…
 actor = "claude-research"
 role = "agent-write"      # agent-read, agent-write or admin
 graphs = ["research"]     # optional; default all graphs
+# create_graphs = true    # an agent-write key may create graphs (then leave out graphs)
 ```
+
+With Docker, put that file in a folder on the host and set `MYGRAPH_CONFIG_DIR` (the folder) and
+`MYGRAPH_CONFIG=/config/server.toml` in `.env`; keys from the environment still apply.
 
 ### Who may use a graph
 
@@ -321,6 +325,11 @@ curl -s -X POST localhost:7420/admin/graphs/fishing/access -H "Authorization: Be
 
 A user's own level overrides `everyone`, and `null` removes it. `GET /v1/graphs` and the `graphs`
 tool show each caller only the graphs it may read, marking the read-only ones.
+
+Admins create graphs, and so can an `agent-write` key with `create_graphs = true`. Such a key is
+written into each graph it creates with `write`, so it keeps writing there whatever `everyone`
+is. To keep it out of other graphs, give it `none` on them; a key's `graphs` list would also keep
+it out of the graphs it creates, so the two do not combine.
 
 **Semantic search** settings, in `server.toml` or the environment:
 

@@ -119,7 +119,12 @@ pub fn access(app: &App, caller: &Caller, req: &Json) -> Result<Json, ApiError> 
 /// Creates a graph from `{"name", "policies", "access"}` and returns its `GraphInfo`
 /// ([ADMIN-GRAPH-2]); shared by `POST /admin/graphs` and the MCP `graphs` tool.
 pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json, ApiError> {
-    caller.require(Role::Admin)?;
+    if !caller.may_create_graphs() {
+        return Err(ApiError::new(
+            "auth.forbidden",
+            "creating graphs needs the role admin, or a key with create_graphs",
+        ));
+    }
     let req = req
         .as_object()
         .ok_or_else(|| bad("request: expected an object"))?;
@@ -150,7 +155,7 @@ pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json,
         let policies = Policies::from_json(&policies)
             .filter(|p| p.validate().is_ok())
             .ok_or_else(|| ApiError::new("graph.policy_invalid", "invalid policies"))?;
-        let permissions = match req.get("access") {
+        let mut permissions = match req.get("access") {
             Some(change) => {
                 let mut p = crate::access::Permissions::default();
                 p.apply(change)?;
@@ -158,13 +163,25 @@ pub async fn create(app: &Arc<App>, caller: &Caller, req: &Json) -> Result<Json,
             }
             None => None,
         };
+        // [API-ACCESS-5] A key that is not an admin's keeps write access to what it creates.
+        if caller.role != Role::Admin {
+            permissions
+                .get_or_insert_with(Default::default)
+                .users
+                .insert(caller.actor.clone(), crate::access::Level::Write);
+        }
         app.registry.create(name, &policies)?;
         // A graph of this name deleted before must not pass its access on.
         app.access.remove(name);
         if let Some(p) = permissions {
             app.access.set(name, &p)?;
         }
-        graph_info(app, caller, name).await
+        if caller.role == Role::Admin {
+            return graph_info(app, caller, name).await;
+        }
+        // The sizes and counts of graph_info are for admins.
+        let status = app.registry.state(name).map_or("unknown", |s| s.name());
+        Ok(json!({ "name": name, "status": status, "access": app.access.get(name).to_json() }))
     }
 }
 

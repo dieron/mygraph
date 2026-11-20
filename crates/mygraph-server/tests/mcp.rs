@@ -20,6 +20,7 @@ fn app(dir: &std::path::Path) -> axum::Router {
             actor: "claude".into(),
             role: Role::Admin,
             graphs: vec![],
+            create_graphs: false,
         }],
         ..Config::default()
     };

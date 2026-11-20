@@ -3,7 +3,8 @@
 Status: **Draft** · spec 0.1.0-draft · design: [docs/07-admin-api.md](../../docs/07-admin-api.md)
 
 Routes under `/admin` for operators: creating and dropping graphs, statistics, backups and
-checks. They require the `admin` role ([API-AUTH-1]); conventions and errors are those of
+checks. They require the `admin` role ([API-AUTH-1]), except creating a graph, which a key with
+`create_graphs` may also do ([API-ACCESS-5]); conventions and errors are those of
 [conventions.md](conventions.md) and [errors.md](errors.md). This is the proof-of-concept subset
 of the design; the rest is planned.
 

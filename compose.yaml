@@ -32,10 +32,14 @@ services:
       # OAuth for claude.ai and other remote MCP clients: the public HTTPS address.
       MYGRAPH_OAUTH_PUBLIC_URL: ${MYGRAPH_OAUTH_PUBLIC_URL:-}
       MYGRAPH_OAUTH_LISTEN: ${MYGRAPH_OAUTH_LISTEN:-}
+      # Optional configuration file, e.g. /config/server.toml for [[keys]] with their own actors.
+      MYGRAPH_CONFIG: ${MYGRAPH_CONFIG:-}
     volumes:
       - mygraph-data:/data
       # Certificates for HTTPS (MYGRAPH_CERTS in .env); an empty folder when unused.
       - ${MYGRAPH_CERTS:-./deploy/docker/no-certs}:/certs:ro
+      # The folder holding that file (MYGRAPH_CONFIG_DIR in .env); an empty folder when unused.
+      - ${MYGRAPH_CONFIG_DIR:-./deploy/docker/no-config}:/config:ro
     stop_grace_period: 30s
 
 volumes:

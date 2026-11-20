@@ -350,7 +350,7 @@ fn mcp_hint(code: &str) -> Option<&'static str> {
             "The MCP server needs a valid API key (mygraph mcp --key, or MYGRAPH_KEY)."
         }
         "auth.forbidden" => {
-            "This key's role does not allow it; creating graphs needs an admin key."
+            "This key's role does not allow it; creating graphs needs an admin key or a key with create_graphs."
         }
         "graph.warming_up" => "The graph is loading; call the tool again in a few seconds.",
         _ => return None,

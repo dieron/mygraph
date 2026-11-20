@@ -54,6 +54,7 @@ fn key(key: &str, actor: &str, role: Role) -> KeyConfig {
         actor: actor.to_owned(),
         role,
         graphs: Vec::new(),
+        create_graphs: false,
     }
 }
 

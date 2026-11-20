@@ -52,6 +52,7 @@ fn key(key: &str, actor: &str, role: Role, graphs: &[&str]) -> KeyConfig {
         actor: actor.to_owned(),
         role,
         graphs: graphs.iter().map(|g| g.to_string()).collect(),
+        create_graphs: false,
     }
 }
 
@@ -1354,4 +1355,122 @@ async fn graphs_can_be_private_public_and_read_only() {
         )
         .await;
     assert_eq!(r.code(), "graph.not_found");
+}
+
+/// [API-ACCESS-5] A key with `create_graphs` creates graphs and keeps write access to them.
+#[tokio::test]
+async fn keys_with_create_graphs_create_graphs_they_can_write() {
+    const B: &str = "b-key";
+    const C: &str = "c-key";
+    let s = server_with(|c| {
+        c.keys.push(key(B, "agent-b", Role::AgentWrite, &[]));
+        let mut k = key(C, "creator", Role::AgentWrite, &[]);
+        k.create_graphs = true;
+        c.keys.push(k);
+    });
+    s.create_graph("private").await;
+    let r = s
+        .post(
+            "/admin/graphs/private/access",
+            ADMIN,
+            json!({ "users": { "creator": "none" } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    // A plain agent-write key may not create graphs.
+    let r = s.post("/admin/graphs", B, json!({ "name": "lake" })).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    let (err, text) = tool(
+        &s,
+        B,
+        "graphs",
+        json!({ "action": "create", "name": "lake" }),
+    )
+    .await;
+    assert!(err, "{text}");
+
+    // The creator may, over MCP and REST, and is written into the new graph's access.
+    let (err, text) = tool(
+        &s,
+        C,
+        "graphs",
+        json!({ "action": "create", "name": "lake" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    let r = s.get("/admin/graphs/lake/access", ADMIN).await;
+    assert_eq!(r.json()["everyone"], "write", "{}", r.text());
+    assert_eq!(r.json()["users"], json!({ "creator": "write" }));
+    let r = s
+        .post(
+            "/admin/graphs",
+            C,
+            json!({ "name": "mine", "access": { "everyone": "none" } }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text());
+    let r = s.get("/admin/graphs/mine/access", ADMIN).await;
+    assert_eq!(
+        r.json()["users"],
+        json!({ "creator": "write" }),
+        "{}",
+        r.text()
+    );
+
+    // It sees and writes what it created, and not the graph closed to it.
+    let r = s.get("/v1/graphs", C).await;
+    let names: Vec<Json> = r.json()["graphs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["name"].clone())
+        .collect();
+    assert_eq!(names, ["lake", "mine"], "{}", r.text());
+    let (err, text) = tool(
+        &s,
+        C,
+        "write",
+        json!({ "graph": "mine",
+                "evidence": [{ "ref": "@o", "kind": "observation", "content": "Erie is a lake." }],
+                "nodes": [{ "type": "Lake", "name": "Erie", "cite": ["@o"] }] }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    let r = s.get("/v1/graphs/private", C).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+    let r = s.get("/v1/graphs", B).await;
+    assert!(!r.text().contains("\"mine\""), "{}", r.text());
+
+    // Changing access stays with admins.
+    let r = s
+        .post(
+            "/admin/graphs/lake/access",
+            C,
+            json!({ "everyone": "none" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text());
+}
+
+#[test]
+fn create_graphs_needs_a_writer_on_every_graph() {
+    let with = |role, graphs: &[&str]| {
+        let mut c = Config::default();
+        let mut k = key("k", "creator", role, graphs);
+        k.create_graphs = true;
+        c.keys.push(k);
+        c.validate()
+    };
+    assert!(with(Role::AgentWrite, &[]).is_ok());
+    assert!(
+        with(Role::AgentRead, &[])
+            .unwrap_err()
+            .contains("agent-write")
+    );
+    assert!(
+        with(Role::AgentWrite, &["fishing"])
+            .unwrap_err()
+            .contains("graphs")
+    );
 }
