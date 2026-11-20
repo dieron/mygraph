@@ -22,7 +22,8 @@ IDs are short strings with a kind prefix: `n_3kq` node, `l_9x` link, `e_2` evide
 
 1. `graphs` — which graphs exist, and which one the tools use when you pass no `graph`. If the
    user's topic has no graph yet, create one: `graphs {"action": "create", "name": "ai-history"}`
-   (names: lowercase letters, digits, `-`, `_`). Pass `graph` on every call when working in a
+   (names: lowercase letters, digits, `-`, `_`; it needs an admin key or one allowed to create
+   graphs, so if it is refused, ask the user to create the graph or to pick an existing one). Pass `graph` on every call when working in a
    graph that is not the default.
 2. `overview` — counts, node types, link types and property keys already in use, with their
    conventions. **Reuse that vocabulary**: if `Person` and `WORKS_AT` exist, don't invent `Human`

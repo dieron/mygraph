@@ -31,6 +31,10 @@ Apollo 11 is selected; the panel lists its links and the sentences they were rea
   and `history` shows every change, so an agent's mistakes can be undone.
 - **One small server.** A single Rust binary keeps the graph and its indexes in memory and stores
   everything in SQLite. It runs on a laptop or a home server, with several graphs per server.
+- **Your graphs stay on your machine.** Agents on your computer connect to it directly. Cloud AI
+  (claude.ai on the web and phone, the Claude API, the OpenAI API) connects to your server over
+  HTTPS, with a key that you limit to the graphs it may use
+  ([Using your graphs from cloud AI](#using-your-graphs-from-cloud-ai)).
 
 ## Status
 
@@ -44,9 +48,8 @@ Known limits:
   ([TODO.md](TODO.md), "Concurrency").
 - Access is by API key, and per graph ([Who may use a graph](#who-may-use-a-graph)). Over a
   network, give the server a certificate so it speaks HTTPS ([HTTPS](#https)), or put it behind a
-  reverse proxy with TLS. claude.ai on the web and on phones signs in with OAuth
-  ([Connecting claude.ai](#connecting-claudeai-on-the-web-desktop-and-phone)), which needs the
-  server reachable from the internet.
+  reverse proxy with TLS. Cloud AI (claude.ai, the Claude API, the OpenAI API) needs the
+  server reachable from the internet ([Using your graphs from cloud AI](#using-your-graphs-from-cloud-ai)).
 - The specification is a draft (0.1.0-draft); storage migrates itself on upgrade, but the API may
   still change.
 
@@ -139,6 +142,9 @@ There are three ways to connect, and all of them use the same tools:
 4. **OAuth**, for claude.ai on the web, desktop and phone: the client signs in on the server's
    page with an API key ([below](#connecting-claudeai-on-the-web-desktop-and-phone)).
 
+Ways 1 to 3 need nothing beyond your machine or your network. Cloud AI needs more; see
+[Using your graphs from cloud AI](#using-your-graphs-from-cloud-ai).
+
 Claude Code, for every project (`-s user`):
 
 ```bash
@@ -166,6 +172,32 @@ To check the connection, ask the agent to call `graphs`.
 On Windows, `deploy/windows/deploy.ps1 -BridgeOnly` installs just the `mygraph` program, for a
 server that runs elsewhere. The bridge lists the tools itself, so update it when the server gains
 new ones.
+
+### Using your graphs from cloud AI
+
+MyGraph runs where you put it: your laptop, a home server, a NAS. The graphs stay there. An AI that
+runs in the cloud can still use them: its provider's servers call your server's `/mcp` over the
+internet, and only what the tools return leaves your machine.
+
+| Where the AI runs | How it reaches your graphs | What your server needs |
+|---|---|---|
+| Your computer: Claude Code, Claude Desktop (local config), Cursor, VS Code, Codex | stdio bridge or `/mcp` on your network ([Connecting a client](#connecting-a-client)) | nothing public |
+| claude.ai on the web, Claude Desktop connectors, the Claude phone apps | custom connector, signing in with OAuth ([below](#connecting-claudeai-on-the-web-desktop-and-phone)) | a public HTTPS address and `[oauth]` |
+| Your own app on the Claude API | the Messages API MCP connector, with an API key ([below](#the-claude-api-and-the-openai-api)) | a public HTTPS address |
+| Your own app on the OpenAI API | the Responses API `mcp` tool, with an API key ([below](#the-claude-api-and-the-openai-api)) | a public HTTPS address |
+
+For each cloud service, configure a key of its own in `server.toml`, so you can see its writes in
+`history` and remove it without touching the others. Limit it with each graph's access
+([Who may use a graph](#who-may-use-a-graph)): `none` on the graphs it must not see, `write` on
+the ones it works on. Add `create_graphs = true` if it may start new graphs:
+
+```toml
+[[keys]]
+key_sha256 = "…"          # mygraph hash-key <key>
+actor = "claude-ai"
+role = "agent-write"
+create_graphs = true
+```
 
 ### Connecting claude.ai on the web, desktop and phone
 
@@ -202,6 +234,50 @@ key's actor, with its role and graphs. `GET /admin/oauth` lists the apps signed 
 every app that used it. Claude Code can connect the same way with
 `claude mcp add --transport http mygraph https://mygraph.example.com/mcp`, then `/mcp` to sign in.
 The details are in [spec/api/oauth.md](spec/api/oauth.md).
+
+Other apps that sign in to MCP servers with OAuth may work too, but only Claude's callback URLs and
+this machine are allowed by default: add an app's callback URL to `oauth.redirect_uris`. Only
+Claude's apps have been tried.
+
+### The Claude API and the OpenAI API
+
+Your own programs can give a model your graphs' tools, too. The model provider's servers call
+`/mcp` with the API key you pass, so the server must be reachable over HTTPS as in steps 1 to 3
+above (the public listener serves `/mcp` with API keys too). The key travels with every request
+through the provider, so give it a key of its own, limited to the graphs that program needs.
+
+The Claude API ([MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)):
+
+```bash
+curl https://api.anthropic.com/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2026-10-21" \
+  -H "anthropic-beta: mcp-client-2025-11-20" -H "content-type: application/json" \
+  -d '{
+    "model": "claude-opus-5-5",
+    "max_tokens": 4000,
+    "mcp_servers": [{"type": "url", "url": "https://mygraph.example.com/mcp", "name": "mygraph",
+                     "authorization_token": "<MyGraph API key>"}],
+    "tools": [{"type": "mcp_toolset", "mcp_server_name": "mygraph"}],
+    "messages": [{"role": "user", "content": "Which graphs do you have? Summarize the fishing one."}]
+  }'
+```
+
+The OpenAI API ([remote MCP](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)):
+
+```bash
+curl https://api.openai.com/v1/responses \
+  -H "Authorization: Bearer $OPENAI_API_KEY" -H "content-type: application/json" \
+  -d '{
+    "model": "<model>",
+    "tools": [{"type": "mcp", "server_label": "mygraph", "server_url": "https://mygraph.example.com/mcp",
+               "authorization": "<MyGraph API key>", "require_approval": "never"}],
+    "input": "Which graphs do you have? Summarize the fishing one."
+  }'
+```
+
+Both follow the providers' documentation; so far only claude.ai has been tried against a real
+server. Give the model the skill's guidance as well ([next section](#the-skill-teach-the-agent-to-use-it-well)),
+for example in the system prompt.
 
 ### The skill: teach the agent to use it well
 
@@ -282,7 +358,7 @@ For a home server or NAS that other machines and agents use, run it with Docker
   is healthy. `.env` and the data are left alone.
 - [.github/workflows/docker.yml](.github/workflows/docker.yml) publishes a multi-arch image (amd64,
   arm64) to `ghcr.io/dieron/mygraph`. `:main` follows the main branch, and each release adds
-  its version (`:0.2.0`, `:0.2`) and `:latest`. To use it instead of building, set
+  its version (`:0.3.0`, `:0.3`) and `:latest`. To use it instead of building, set
   `MYGRAPH_IMAGE=ghcr.io/dieron/mygraph:latest` in
   `.env`, then run `docker compose pull && docker compose up -d`.
 
@@ -383,8 +459,10 @@ again to upgrade; `-Uninstall` removes it and keeps the data.
 
 ## Watching and backing up
 
-- `/admin/ui` is the stats page: graphs, request statistics, slow requests, and per graph its
-  counts, growth, connectivity, evidence and recent batches.
+- `/admin/ui` is the stats page: graphs with who may use them, request statistics, slow
+  requests, the API keys (their actors and roles, never the keys) with the graphs each may read or
+  write, the apps signed in with OAuth, and per graph its counts, growth, connectivity, evidence
+  and recent batches.
 - `/admin/ui/graph` is the graph viewer. It draws a graph as a network, with search, type filters
   and the properties, links and evidence of whatever you click.
 

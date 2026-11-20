@@ -368,6 +368,10 @@ paths:
     post:
       tags: [admin]
       summary: Create a graph
+      description: |
+        Admins, and `agent-write` keys configured with `create_graphs` ([API-ACCESS-5]). Such a
+        key is added to the new graph's `users` with `write`, and gets back only `name`, `status`
+        and `access`.
       operationId: adminCreateGraph
       requestBody:
         required: true
@@ -380,6 +384,7 @@ paths:
               properties:
                 name: { type: string }
                 policies: { $ref: "#/components/schemas/Policies" }
+                access: { $ref: "#/components/schemas/Access", description: "A change of access applied to the default ([API-ACCESS-3])." }
       responses:
         "201":
           description: Created and loaded.

@@ -16,6 +16,8 @@ on a machine or network they control, not for the open internet.
 - **Each graph has its own access**: private, public and read-only, or public and writable (the
   default), with levels for single users (a key's actor). The role and the key's graph list
   still apply on top. See "Who may use a graph" in the README.
+- **Creating graphs** needs an admin key, or an `agent-write` key with `create_graphs = true`.
+  Such a key gets write access to what it creates, but cannot change any graph's access.
 - In `server.toml`, store keys as `key_sha256` (`mygraph hash-key <key>` prints it) rather than
   in plain text. In Docker, pass them as environment variables or as `<NAME>_FILE` secrets.
 - **Without a certificate the server speaks plain HTTP**, and keys and data cross the network
@@ -32,6 +34,9 @@ on a machine or network they control, not for the open internet.
   A server open to the internet for this should have the proxy point at the public listener
   (`oauth.listen`), which serves only `/mcp`, `/oauth/` and `/.well-known/` and answers 404 to
   everything else, so a proxy rule that forwards too much cannot reach the REST or admin API.
+- **Cloud AI APIs** (the Claude API's MCP connector, OpenAI's remote MCP tool) send the API key
+  you give them with each call, through the provider's servers. Give each one a key of its own,
+  limited to the graphs it needs, and put the server behind the public listener.
 - Clients identified by a metadata URL (CIMD) make the server fetch that URL. It fetches from
   public addresses only, with a short timeout and size limit, and never follows redirects. Set
   `oauth.client_metadata_documents = false` to have clients register instead.

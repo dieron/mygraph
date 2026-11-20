@@ -41,6 +41,17 @@ key in `~/.claude/settings.json`, which is personal and not part of any reposito
 The app may rewrite this file; if the tools disappear after an update, check the entry is still
 there.
 
+## The Claude API and the OpenAI API
+
+A program can give the model MyGraph's tools when the server is reachable from the internet over
+HTTPS (its public listener, `[oauth] listen`, serves `/mcp`). Use a key of its own, limited with
+each graph's access.
+- Claude API (Messages, beta `mcp-client-2025-11-20`): `"mcp_servers": [{"type": "url", "url":
+  "https://<public host>/mcp", "name": "mygraph", "authorization_token": "<key>"}]` and
+  `"tools": [{"type": "mcp_toolset", "mcp_server_name": "mygraph"}]`.
+- OpenAI Responses API: `"tools": [{"type": "mcp", "server_label": "mygraph", "server_url":
+  "https://<public host>/mcp", "authorization": "<key>", "require_approval": "never"}]`.
+
 ## claude.ai, Claude Desktop and the phone apps (connector)
 
 When the server has OAuth on (`[oauth] public_url`) and is reachable from the internet over
