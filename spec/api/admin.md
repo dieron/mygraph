@@ -167,8 +167,11 @@ left out for a graph busy with a long write at that moment).
 ## 4. Pages
 
 **[ADMIN-UI-1]** `GET /admin/ui` answers an HTML page that shows the server's state: versions,
-uptime, memory, graphs with status, counts and sizes, request statistics, slow requests, and for
-a chosen graph its statistics ([ADMIN-GRAPH-9]) and recent batches. The page itself contains no
+uptime, memory, graphs with status, access ([API-ACCESS-1]), counts and sizes, request
+statistics, slow requests, the API keys with the graphs each may write or only read
+([API-ACCESS-2]), the OAuth grants ([ADMIN-OAUTH-1]) with a button that revokes one
+([ADMIN-OAUTH-2]) after the user confirms, and for a chosen graph its statistics
+([ADMIN-GRAPH-9]) and recent batches. Revoking is its only change to the server. The page itself contains no
 data and needs no authentication: script in the browser reads the routes of this file and
 `overview`, sending the API key the user enters (kept for the browser session only) or none when
 the server has no keys. It loads nothing from other origins. Its layout is informative.

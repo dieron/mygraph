@@ -72,6 +72,8 @@
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px;
         vertical-align: -1px; }
+  .lvl-none { color: var(--good); } .lvl-read { color: var(--ink); } .lvl-write { color: var(--warn); }
+  button.small { padding: 0 7px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -96,6 +98,12 @@
     <section><h2>Requests since start</h2><div class="scroll"><table id="requests"></table></div></section>
     <section><h2>Slow requests <span class="grow"></span><span class="muted" id="slowms" style="text-transform:none"></span></h2>
       <div class="scroll"><table id="slow"></table></div></section>
+  </div>
+  <div class="grid2">
+    <section><h2>API keys <span class="grow"></span><span class="muted" id="keynote" style="text-transform:none"></span></h2>
+      <div class="scroll"><table id="keys"></table></div></section>
+    <section><h2>OAuth sign-ins <span class="grow"></span><span class="muted" id="oauthnote" style="text-transform:none"></span></h2>
+      <div class="scroll"><table id="grants"></table></div></section>
   </div>
   <div id="detail" style="display:none; gap:16px" class="grid3-wrap">
     <section style="margin-bottom:16px">
@@ -166,9 +174,9 @@ function table(node, head, rows, numeric) {
   if (!rows.length) node.append(el("tr", {}, el("td", { class: "muted", colspan: head.length }, "none")));
 }
 
-async function api(path) {
+async function api(path, method) {
   const headers = key ? { Authorization: "Bearer " + key } : {};
-  const r = await fetch(path, { headers });
+  const r = await fetch(path, { headers, method: method || "GET" });
   if (r.status === 401 || r.status === 403) {
     $("keybox").style.display = "flex";
     const e = new Error(r.status === 401 ? "This server needs an admin API key." : "This key is not an admin key.");
@@ -186,7 +194,8 @@ function banner(msg) {
 }
 
 async function loadServer() {
-  const [stats, list, slow] = await Promise.all([api("/admin/stats"), api("/admin/graphs"), api("/admin/slow-ops")]);
+  const [stats, list, slow, keys, oauth] = await Promise.all([api("/admin/stats"), api("/admin/graphs"),
+    api("/admin/slow-ops"), api("/admin/keys"), api("/admin/oauth")]);
   $("keybox").style.display = "none";
   const v = stats.versions || {};
   clear($("facts")).append(
@@ -198,15 +207,17 @@ async function loadServer() {
   const graphs = list.graphs || [];
   if (!selected && graphs.length) selected = graphs[0].name;
   table($("graphs"),
-    ["Graph", "Status", "Nodes", "Links", "Evidence", "Citations", "Last seq", "Database", "WAL", "Text index", ""],
+    ["Graph", "Status", "Access", "Nodes", "Links", "Evidence", "Citations", "Last seq", "Database", "WAL", "Text index", ""],
     graphs.map((g) => ({
       attrs: { class: "pick" + (g.name === selected ? " on" : ""), onclick: () => select(g.name) },
-      cells: [g.name, el("span", { class: "badge " + g.status }, g.status),
+      cells: [g.name, el("span", { class: "badge " + g.status }, g.status), accessCell(g.access),
         num(g.counts?.nodes), num(g.counts?.links), num(g.counts?.evidence), num(g.counts?.citations),
         num(g.last_seq), bytes(g.file_bytes), bytes(g.wal_bytes),
         g.text_index ? el("span", { class: g.text_index }, g.text_index) : "–",
         el("a", { class: "browse", href: "/admin/ui/graph?graph=" + encodeURIComponent(g.name) }, "browse →")],
-    })), [2, 3, 4, 5, 6, 7, 8]);
+    })), [3, 4, 5, 6, 7, 8, 9]);
+  keyTable(keys.keys || [], graphs);
+  grantTable(oauth);
   const reqs = Object.entries(stats.requests || {}).sort((a, b) => b[1].count - a[1].count);
   table($("requests"), ["Operation", "Calls", "Errors", "Mean ms", "Max ms"],
     reqs.map(([op, r]) => ({ cells: [op, num(r.count),
@@ -216,6 +227,71 @@ async function loadServer() {
     (slow.ops || []).map((s) => ({ cells: [String(s.at).replace("T", " ").slice(0, 19), s.op, s.graph ?? "–",
       el("span", { class: s.status >= 400 ? "err" : "" }, s.status), s.ms] })), [3, 4]);
   return graphs;
+}
+
+// [API-ACCESS-1]: everyone's level, then the levels set for single users.
+function accessCell(a) {
+  if (!a) return "–";
+  const users = Object.entries(a.users || {}).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  const text = ["everyone: " + a.everyone, ...users.map(([u, l]) => `${u}: ${l}`)].join(", ");
+  return el("span", { title: text },
+    el("span", { class: "badge lvl-" + a.everyone }, a.everyone === "none" ? "private" : "everyone " + a.everyone),
+    ...users.map(([u, l]) => el("span", { class: "muted" }, " · ", u, " ", el("span", { class: "lvl-" + l }, l))));
+}
+
+// [API-ACCESS-2]: what a key may do with a graph.
+function levelFor(k, g) {
+  if (k.graphs && k.graphs.length && !k.graphs.includes(g.name)) return "none";
+  if (k.role === "admin") return "write";
+  const a = g.access || { everyone: "write", users: {} };
+  const l = (a.users || {})[k.actor] ?? a.everyone;
+  return k.role === "agent-read" && l === "write" ? "read" : l;
+}
+
+function keyTable(keys, graphs) {
+  $("keynote").textContent = keys.length ? `${keys.length} configured` : "";
+  const names = (k, lvl) => {
+    const list = graphs.filter((g) => levelFor(k, g) === lvl).map((g) => g.name);
+    return list.length ? el("span", { title: list.join(", ") }, list.join(", ")) : el("span", { class: "muted" }, "–");
+  };
+  table($("keys"), ["Actor", "Role", "Key", "Writes", "Reads only"],
+    keys.map((k) => ({ cells: [k.actor, k.role, el("span", { class: "id" }, k.key_id), names(k, "write"), names(k, "read")] })), []);
+  if (!keys.length) {
+    const td = $("keys").querySelector("td.muted");
+    if (td) td.textContent = "no keys: every request is admin, so keep the server on loopback";
+  }
+}
+
+function grantTable(o) {
+  const grants = o.grants || [];
+  $("oauthnote").textContent = o.public_url
+    ? `${o.public_url} · ${o.registered_clients} app${o.registered_clients === 1 ? "" : "s"} registered` : "off";
+  const when = (t) => t ? String(t).replace("T", " ").slice(0, 16) : "–";
+  table($("grants"), ["App", "Actor", "Access", "Last used (UTC)", ""],
+    grants.map((g) => ({ cells: [
+      el("span", { title: g.client_id }, g.client_name || g.client_id),
+      g.actor ?? el("span", { class: "err", title: "The key it signed in with was removed; its tokens no longer work." }, "key removed"),
+      g.read_only ? "read-only" : "as key",
+      el("span", { title: "signed in " + when(g.created) }, when(g.last_used)),
+      el("button", { class: "small", type: "button", onclick: () => revoke(g) }, "Revoke"),
+    ] })), []);
+  if (!o.public_url) {
+    const td = $("grants").querySelector("td.muted");
+    if (td) td.textContent = "OAuth is off: set [oauth] public_url to let remote MCP clients sign in";
+  }
+}
+
+// [ADMIN-OAUTH-2]: the app is signed out at once and must sign in again.
+async function revoke(g) {
+  const name = g.client_name || g.client_id;
+  if (!confirm(`Sign out ${name}${g.actor ? " (" + g.actor + ")" : ""}? It will have to sign in again.`)) return;
+  try {
+    await api(`/admin/oauth/grants/${encodeURIComponent(g.id)}`, "DELETE");
+  } catch (e) {
+    banner("Could not revoke: " + e.message);
+    return;
+  }
+  refresh();
 }
 
 function select(name) {
