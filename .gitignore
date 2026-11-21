@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local secrets for docker compose
 .env
+
+# Demo recordings: upload them to GitHub or YouTube instead (demo/README.md)
+demo/*.mp4
