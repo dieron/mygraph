@@ -35,6 +35,28 @@ Apollo 11 is selected; the panel lists its links and the sentences they were rea
   (claude.ai on the web and phone, the Claude API, the OpenAI API) connects to your server over
   HTTPS, with a key that you limit to the graphs it may use
   ([Using your graphs from cloud AI](#using-your-graphs-from-cloud-ai)).
+- **Shared by people and their agents.** Point several people's agents at one server and what one
+  agent records, the others can read at once, with who wrote it and where it came from
+  ([Sharing knowledge without git](#sharing-knowledge-without-git)).
+
+### Sharing knowledge without git
+
+Agents often keep what they learn in notes inside a repository. Those notes reach other people
+only after someone commits, pushes and the others pull, and much of what agents learn (how a
+system behaves, why something was decided, what an investigation found) doesn't belong in a
+repository at all, or there is none.
+
+With MyGraph, each person's agent connects to the same server with its own key. A fact written by
+one agent is there for every other agent on its next read: no commit, push, pull or merge
+conflicts. Each fact keeps its source, and every change records which key made it, so an agent
+can tell a colleague's finding from its own and check it. `history` with `since_seq` shows an
+agent what the others have added since it last looked, and `resolve` stops two agents from
+creating the same thing twice. Mistakes are retracted, not lost, so one person's agent can't
+silently erase another's work.
+
+Give each person a key with their own actor name, and use
+[Who may use a graph](#who-may-use-a-graph) to decide who may read or write each graph. Git
+stays the place for code; MyGraph holds the knowledge around it.
 
 ## Status
 
