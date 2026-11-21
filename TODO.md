@@ -39,9 +39,9 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       and key as plugin options, and the skill; the release checks its version.
 - [x] MCP Registry entry (`server.json`, `io.github.dieron/mygraph`): the image over stdio with a
       data volume; the image carries the ownership label, and a version tag publishes it.
-- [ ] Publish 0.3.1 so the registry entry goes live (the 0.3.0 image has no label), then check
-      the listing and submit to the directories (awesome-mcp-servers, mcp.so, Glama, PulseMCP,
-      Smithery, Docker MCP Catalog).
+- [x] Registry entry live since 0.3.1 (`io.github.dieron/mygraph`, updated by every version tag).
+- [ ] Submit to the directories (awesome-mcp-servers, mcp.so, Glama, PulseMCP, Smithery, Docker
+      MCP Catalog).
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect
       and connect Claude Desktop, Claude Code, Cursor, VS Code and Codex, install the skill.
 - [ ] Claude Desktop extension (`.mcpb`) for one-click install.
