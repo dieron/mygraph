@@ -1,7 +1,7 @@
 {
   "name": "mygraph",
   "displayName": "MyGraph",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Long-term memory for Claude as a knowledge graph where every fact cites its evidence: the MCP connection to your MyGraph server and the skill that teaches Claude to use it well.",
   "author": { "name": "dieron", "url": "https://github.com/dieron" },
   "homepage": "https://github.com/dieron/mygraph",

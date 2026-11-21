@@ -3,7 +3,7 @@
   "name": "io.github.dieron/mygraph",
   "title": "MyGraph",
   "description": "Knowledge graph memory for agents: every fact cites its evidence. Self-hosted, one Rust binary.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "websiteUrl": "https://github.com/dieron/mygraph",
   "repository": {
     "url": "https://github.com/dieron/mygraph",
@@ -13,7 +13,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dieron/mygraph:0.3.0",
+      "identifier": "ghcr.io/dieron/mygraph:0.3.1",
       "runtimeHint": "docker",
       "transport": { "type": "stdio" },
       "runtimeArguments": [
