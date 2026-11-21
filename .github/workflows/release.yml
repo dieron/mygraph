@@ -89,6 +89,12 @@ jobs:
               echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
               exit 1
             fi
+            # Claude Code updates an installed plugin only when its version changes.
+            plugin=$(sed -n 's/^ *"version": "\([^"]*\)".*/\1/p' .claude-plugin/plugin.json)
+            if [ "$plugin" != "$version" ]; then
+              echo "::error::.claude-plugin/plugin.json has version $plugin, Cargo.toml $version"
+              exit 1
+            fi
             label=$version
           else
             label=$version-dev.${GITHUB_SHA::7}

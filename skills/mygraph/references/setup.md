@@ -11,12 +11,29 @@ reach it through MCP in one of two ways, and agents with a shell can also use th
 - **Streamable HTTP** — the client connects to `URL/mcp` directly (header
   `Authorization: Bearer <key>` when keys are configured).
 
-Below, `MYGRAPH` stands for the full path of `mygraph.exe` (after `deploy/windows/deploy.ps1`:
-`%LOCALAPPDATA%\MyGraph\bin\mygraph.exe`, written out in full; in JSON write backslashes as `\\`).
+No server yet? The installers set one up on this machine and start it at login:
+`curl -fsSL https://raw.githubusercontent.com/dieron/mygraph/main/install.sh | sh` (Linux, macOS)
+or `irm https://raw.githubusercontent.com/dieron/mygraph/main/install.ps1 | iex` (Windows).
+
+Below, `MYGRAPH` stands for the full path of the `mygraph` program (after the Windows installer:
+`%LOCALAPPDATA%\MyGraph\bin\mygraph.exe`, written out in full; in JSON write backslashes as `\\`;
+after `install.sh`: `~/.local/share/mygraph/bin/mygraph`).
 
 ## Claude Code
 
-`-s user` makes the tools available in every project (`-s local` only in the current folder):
+The plugin connects over Streamable HTTP and installs this skill:
+
+```bash
+claude plugin marketplace add dieron/mygraph
+```
+
+```bash
+claude plugin install mygraph@mygraph
+```
+
+Its options (`/plugin`, or `--config server_url=URL --config api_key=<key>` at install) are the
+server address, default `http://127.0.0.1:7420`, and the API key. Or connect by hand; `-s user`
+makes the tools available in every project (`-s local` only in the current folder):
 
 ```bash
 claude mcp add mygraph -s user -e MYGRAPH_KEY=<key> -- MYGRAPH mcp --url URL --graph research

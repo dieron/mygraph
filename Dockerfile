@@ -35,7 +35,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM gcr.io/distroless/cc-debian13:nonroot
 LABEL org.opencontainers.image.title="MyGraph" \
       org.opencontainers.image.description="Graph database with evidence, for AI agents (MCP and REST)" \
-      org.opencontainers.image.licenses="MIT OR Apache-2.0"
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      io.modelcontextprotocol.server.name="io.github.dieron/mygraph"
 ARG SEMANTIC_MODEL
 COPY --from=build /out/mygraph /usr/local/bin/mygraph
 COPY --from=build --chown=65532:65532 /out/data /data

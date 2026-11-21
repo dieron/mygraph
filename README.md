@@ -77,7 +77,43 @@ Known limits:
 
 ## Quick start
 
-With a prebuilt binary: download from the [latest release](https://github.com/dieron/mygraph/releases/latest)
+Install the server and start it, on Linux or macOS (Apple silicon):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dieron/mygraph/main/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/dieron/mygraph/main/install.ps1 | iex
+```
+
+The installer downloads the [latest release](https://github.com/dieron/mygraph/releases/latest)
+and the embedding model, checks both against the release's `SHA256SUMS`, and starts the server at
+login on `127.0.0.1:7420`, where only this machine can reach it. Running it again upgrades and
+keeps your data and `server.toml`. Options (another version, folder or port, no model, no
+autostart) and uninstalling are described at the top of [install.sh](install.sh) and
+[install.ps1](install.ps1).
+
+Then connect Claude Code with the plugin, which adds the MCP connection and the
+[skill](#the-skill-teach-the-agent-to-use-it-well):
+
+```bash
+claude plugin marketplace add dieron/mygraph
+```
+
+```bash
+claude plugin install mygraph@mygraph
+```
+
+Start a new Claude Code session and ask it to create a graph and remember something. For a server
+elsewhere or one with API keys, set the plugin's options with `/plugin` (server address and key).
+Other clients: [Connecting a client](#connecting-a-client).
+
+### Other ways to install
+
+With a prebuilt binary, by hand: download from the [latest release](https://github.com/dieron/mygraph/releases/latest)
 the archive for your platform and the embedding model (`mygraph-model-multilingual-e5-small`), and
 unpack the model into the folder that holds `mygraph`, so it ends up in
 `models/multilingual-e5-small` next to the binary. Then:
@@ -128,6 +164,14 @@ deploy/fetch-model.sh <data_dir>/models/multilingual-e5-small
 
 Then connect an agent (next section) and ask it to create a graph and remember something.
 
+With no server at all, an MCP client can run the Docker image over stdio, keeping the graphs in a
+volume (this is what the [MCP Registry](https://registry.modelcontextprotocol.io) entry
+`io.github.dieron/mygraph` describes; only one client at a time can use the volume):
+
+```bash
+docker run -i --rm -v mygraph-data:/data ghcr.io/dieron/mygraph:latest mcp --data-dir /data
+```
+
 ## Using it over MCP
 
 MCP is the main way in. An agent gets these tools:
@@ -167,7 +211,9 @@ There are three ways to connect, and all of them use the same tools:
 Ways 1 to 3 need nothing beyond your machine or your network. Cloud AI needs more; see
 [Using your graphs from cloud AI](#using-your-graphs-from-cloud-ai).
 
-Claude Code, for every project (`-s user`):
+Claude Code: the plugin ([Quick start](#quick-start)) connects over HTTP and installs the skill.
+Its options are the server address (default `http://127.0.0.1:7420`) and an API key. To connect
+by hand instead, for every project (`-s user`):
 
 ```bash
 claude mcp add mygraph -s user -e MYGRAPH_KEY=<key> -- mygraph mcp --url http://127.0.0.1:7420 --graph research
@@ -314,7 +360,8 @@ The tools work on their own, but agents do much better with the skill in
 - fixing mistakes.
 
 The skill is one folder in the Agent Skills format, which Claude, Codex, Cursor and GitHub Copilot
-read. Install it in `~/.claude/skills/mygraph/` (Claude Code) or `~/.agents/skills/mygraph/`
+read. The Claude Code plugin installs it; the installers also leave a copy in the install folder
+(`skills/mygraph`). Otherwise install it in `~/.claude/skills/mygraph/` (Claude Code) or `~/.agents/skills/mygraph/`
 (Codex, Cursor, Copilot), or upload it zipped in the Claude apps. `deploy/install-skill.ps1` does
 all three on Windows.
 

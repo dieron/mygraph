@@ -1,0 +1,14 @@
+{
+  "name": "mygraph",
+  "owner": { "name": "dieron", "url": "https://github.com/dieron" },
+  "description": "MyGraph: a knowledge graph that agents use as long-term memory, where every fact cites its evidence.",
+  "plugins": [
+    {
+      "name": "mygraph",
+      "source": "./",
+      "description": "Connects Claude Code to your MyGraph server and adds the skill that teaches it to record and recall facts with their sources.",
+      "category": "productivity",
+      "tags": ["memory", "knowledge-graph", "mcp"]
+    }
+  ]
+}

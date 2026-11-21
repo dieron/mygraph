@@ -32,11 +32,19 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       Linux x64 and arm64, Windows x64, macOS arm64, each smoke-tested with the model; the model as
       its own archive, found next to the binary; SHA256SUMS; a draft release to publish by hand.
 - [ ] Windows arm64 and macOS x64 builds, if anyone asks.
-- [ ] One-line installers (shell and PowerShell) that fetch the right archive and the model.
+- [x] One-line installers (`install.sh`, `install.ps1`): the release archive and the model, checked
+      against SHA256SUMS, installed per user with autostart (systemd user service, launchd agent,
+      scheduled task), upgrades keep data and `server.toml`, `--uninstall`.
+- [x] Claude Code plugin and marketplace (`.claude-plugin/`): MCP over HTTP with the server address
+      and key as plugin options, and the skill; the release checks its version.
+- [x] MCP Registry entry (`server.json`, `io.github.dieron/mygraph`): the image over stdio with a
+      data volume; the image carries the ownership label, and a version tag publishes it.
+- [ ] Publish 0.3.1 so the registry entry goes live (the 0.3.0 image has no label), then check
+      the listing and submit to the directories (awesome-mcp-servers, mcp.so, Glama, PulseMCP,
+      Smithery, Docker MCP Catalog).
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect
       and connect Claude Desktop, Claude Code, Cursor, VS Code and Codex, install the skill.
 - [ ] Claude Desktop extension (`.mcpb`) for one-click install.
-- [ ] Claude Code plugin with the skill and the MCP registration.
 - [ ] Code signing for Windows and macOS.
 
 ## Publishing on GitHub

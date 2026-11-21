@@ -3,7 +3,7 @@ name: docker
 # Builds the server image for amd64 and arm64 on native runners (no emulation), smoke-tests
 # each, and publishes a multi-arch image to GitHub's container registry:
 #   push to main  -> ghcr.io/<owner>/mygraph:main (and :sha-<commit>)
-#   tag v1.2.3    -> :1.2.3, :1.2 and :latest
+#   tag v1.2.3    -> :1.2.3, :1.2 and :latest, then server.json for 1.2.3 in the MCP Registry
 # Pull requests build and test only.
 
 on:
@@ -93,6 +93,20 @@ jobs:
           test "$(curl -s --cacert certs/cert.pem -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ci-key' https://localhost:7422/admin/graphs)" = 404
           docker rm -f mgs
 
+      # The command the MCP Registry entry (server.json) gives clients: MCP over stdio in the
+      # container, with the data in a volume.
+      - name: Smoke test MCP over stdio
+        run: |
+          test "$(docker inspect -f '{{ index .Config.Labels "io.modelcontextprotocol.server.name" }}' mygraph:test)" \
+            = "$(jq -r .name server.json)"
+          out=$(printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | timeout 120 docker run -i --rm -v mg-stdio:/data mygraph:test mcp --data-dir /data)
+          echo "$out" | head -c 300; echo
+          echo "$out" | grep -q '"name":"write"'
+          docker volume rm mg-stdio
+
       - name: Log in to the registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -160,3 +174,40 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf "$IMAGE@sha256:%s " *)
       - run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
+
+  # Lists the new version in the official MCP Registry (registry.modelcontextprotocol.io) as
+  # io.github.<owner>/mygraph, pointing at the image just published. GitHub's OIDC token proves
+  # the namespace; the image's io.modelcontextprotocol.server.name label proves the image.
+  mcp-registry:
+    if: github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive=mcp-publisher_linux_amd64.tar.gz
+          base=https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION
+          curl -fsSL -o "$archive" "$base/$archive"
+          curl -fsSL -o "$archive.sigstore.json" "$base/$archive.sigstore.json"
+          cosign verify-blob --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/$MCP_PUBLISHER_VERSION" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$archive"
+          tar xzf "$archive" mcp-publisher
+      - name: Stamp the version
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          image=${IMAGE,,}
+          jq --arg v "$v" --arg img "$image:$v" \
+            '.version = $v | .packages[0].identifier = $img' server.json > server.json.new
+          mv server.json.new server.json
+          cat server.json
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish

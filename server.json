@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.dieron/mygraph",
+  "title": "MyGraph",
+  "description": "Knowledge graph memory for agents: every fact cites its evidence. Self-hosted, one Rust binary.",
+  "version": "0.3.0",
+  "websiteUrl": "https://github.com/dieron/mygraph",
+  "repository": {
+    "url": "https://github.com/dieron/mygraph",
+    "source": "github",
+    "id": "1445230296"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/dieron/mygraph:0.3.0",
+      "runtimeHint": "docker",
+      "transport": { "type": "stdio" },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-v",
+          "description": "Docker volume (or host folder) that keeps the graphs between runs",
+          "value": "{volume}:/data",
+          "isRequired": true,
+          "variables": {
+            "volume": {
+              "description": "Volume name or absolute host path for the data",
+              "default": "mygraph-data",
+              "isRequired": true
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        { "type": "positional", "value": "mcp" },
+        { "type": "named", "name": "--data-dir", "value": "/data" }
+      ]
+    }
+  ]
+}
