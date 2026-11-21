@@ -242,6 +242,10 @@ async fn mcp_stdio(
             if let Some(g) = graph {
                 config.default_graph = g;
             }
+            // Nothing listens over stdio, so the network settings (e.g. the Docker image's
+            // MYGRAPH_LISTEN=0.0.0.0:7420, which needs keys) do not apply.
+            config.listen.set_ip(std::net::Ipv4Addr::LOCALHOST.into());
+            config.oauth = Default::default();
             config.validate()?;
             // Held until this function returns, i.e. while stdin is open.
             _lock = Some(mygraph_server::lock_data_dir(&config.data_dir)?);

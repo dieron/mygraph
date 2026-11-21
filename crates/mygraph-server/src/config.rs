@@ -263,7 +263,8 @@ impl Default for Config {
 
 impl Config {
     /// Reads `path` if given (a missing file is an error only when it was named explicitly),
-    /// then the environment.
+    /// then the environment. Commands that run a server call [`Config::validate`] after their own
+    /// overrides; the others (`mcp --url`, `health`, `hash-key`) need no valid server settings.
     pub fn load(path: Option<&Path>) -> Result<Self, String> {
         let mut config: Self = match path {
             Some(p) => {
@@ -274,7 +275,6 @@ impl Config {
             None => Self::default(),
         };
         config.apply_env(&|name| std::env::var(name).ok())?;
-        config.validate()?;
         Ok(config)
     }
 

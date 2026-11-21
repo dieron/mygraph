@@ -107,8 +107,9 @@ claude plugin marketplace add dieron/mygraph
 claude plugin install mygraph@mygraph
 ```
 
-Start a new Claude Code session and ask it to create a graph and remember something. For a server
-elsewhere or one with API keys, set the plugin's options with `/plugin` (server address and key).
+Start a new Claude Code session and ask it to create a graph and remember something. Claude Code
+says the plugin's two options are not set; their defaults fit the server the installer started.
+For a server elsewhere or one with API keys, set them with `/plugin` (server address and key).
 Other clients: [Connecting a client](#connecting-a-client).
 
 ### Other ways to install

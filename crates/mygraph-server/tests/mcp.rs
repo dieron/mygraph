@@ -279,6 +279,9 @@ fn mcp_over_stdio_with_a_data_folder() {
             "--data-dir",
         ])
         .arg(dir.path())
+        // As in the Docker image: a listen address that would need keys for `serve` does not
+        // matter over stdio.
+        .env("MYGRAPH_LISTEN", "0.0.0.0:7420")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
