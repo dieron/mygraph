@@ -608,7 +608,8 @@ spec, and the goal is that an agent could rewrite it in another language from `s
 | [Benchmarks](docs/11-benchmarks.md) | LDBC SNB against Neo4j, and the agent benchmarks |
 | [Decisions](docs/decisions.md) | The architecture decision records |
 
-Open work is in [TODO.md](TODO.md).
+Open work is in [TODO.md](TODO.md). To report a bug or send a change, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 

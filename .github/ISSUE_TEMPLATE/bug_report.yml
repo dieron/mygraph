@@ -1,0 +1,62 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go to private reporting (the repository's Security tab), not here.
+        Don't paste API keys, OAuth tokens or private graph contents.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands, requests or tool calls, as small as you can make them.
+      placeholder: |
+        1. mygraph serve --data-dir ./scratch
+        2. curl ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `mygraph versions` (or the Docker image tag).
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it is installed
+      options:
+        - Installer script (install.sh / install.ps1)
+        - Release binary
+        - Docker image
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 24.04, Windows 11, macOS 15 ...
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client, if any
+      placeholder: Claude Code 2.1, Claude Desktop, claude.ai connector, Cursor ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error responses
+      description: Server log lines and the error body (its `code` and `hint`).
+      render: text

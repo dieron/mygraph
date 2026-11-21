@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/dieron/mygraph/security/advisories/new
+    about: Report it privately, as SECURITY.md describes.
+  - name: Documentation
+    url: https://github.com/dieron/mygraph#readme
+    about: Setup, connecting clients, access and the HTTP API.
