@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/3b7d85ee-d0f1-41d4-af67-b6ff04e8412a
+
 # MyGraph
 
 **Built by AI, for AI.** A knowledge graph that AI agents use as their long-term memory, where
