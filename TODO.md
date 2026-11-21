@@ -40,8 +40,15 @@ Deferred work, kept here so it is not lost. The plan with milestones is
 - [x] MCP Registry entry (`server.json`, `io.github.dieron/mygraph`): the image over stdio with a
       data volume; the image carries the ownership label, and a version tag publishes it.
 - [x] Registry entry live since 0.3.1 (`io.github.dieron/mygraph`, updated by every version tag).
-- [ ] Submit to the directories (awesome-mcp-servers, mcp.so, Glama, PulseMCP, Smithery, Docker
-      MCP Catalog).
+- [x] Submitted to the directories (2026-11-20): awesome-mcp-servers (punkpeye/awesome-mcp-servers
+      PR 20214), Docker MCP Catalog (docker/mcp-registry PR 7480, built by Docker as `mcp/mygraph`)
+      and mcp.so (chatmcp/mcpso issue 7746; the site's form is paid only). Smithery no longer takes
+      servers (shut down 2026-10-31); PulseMCP has paused submissions and says it will pick up
+      the official registry when it reopens.
+- [ ] Glama: sign in at glama.ai with GitHub and add or claim `dieron/mygraph` (the
+      awesome-mcp-servers entry shows its badge), unless Glama picks it up from the registry first.
+- [ ] Follow the directory PRs through review; bump the Docker catalog's `source.commit` on later
+      releases (its `update-pins` workflow may do it).
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect
       and connect Claude Desktop, Claude Code, Cursor, VS Code and Codex, install the skill.
 - [ ] Claude Desktop extension (`.mcpb`) for one-click install.
