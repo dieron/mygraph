@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/3b7d85ee-d0f1-41d4-af67-b6ff04e8412a
-
 # MyGraph
 
 **Built by AI, for AI.** A knowledge graph that AI agents use as their long-term memory, where
@@ -13,11 +9,11 @@ through [MCP](https://modelcontextprotocol.io) tools shaped for how agents work,
 query language made for people. Humans install it, connect their agents, and look at what the
 agents have built (a stats page and a graph viewer).
 
-[![The one-minute demo on YouTube: two Claude Code sessions side by side; the second answers from the graph and quotes the Wikipedia sentences the first one recorded](https://img.youtube.com/vi/oXssE5qTpYA/maxresdefault.jpg)](https://youtu.be/oXssE5qTpYA)
+https://github.com/user-attachments/assets/3b7d85ee-d0f1-41d4-af67-b6ff04e8412a
 
-*▶ [Watch the one-minute demo](https://youtu.be/oXssE5qTpYA): one agent records two Wikipedia
-articles, a second agent that never saw them answers from the graph and quotes the sentences, and
-the viewer shows the source behind a link.*
+*One agent records two Wikipedia articles; a second agent that never saw them answers from the
+graph and quotes the sentences; the viewer shows the source behind a link.
+Also [on YouTube](https://youtu.be/oXssE5qTpYA).*
 
 ![The graph viewer with Apollo 11 selected: its crew, spacecraft, rocket and landing site, and on the right the Wikipedia sentences those links cite](docs/images/viewer-apollo-11.png)
 
