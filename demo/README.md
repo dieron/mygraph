@@ -1,6 +1,6 @@
 # Demo video: script
 
-A one-minute screen recording for the launch posts and the README. One agent reads two Wikipedia
+A one-minute screen recording for the launch posts and the README ([on YouTube](https://youtu.be/oXssE5qTpYA)). One agent reads two Wikipedia
 articles and records them. A second agent, in a separate session that never saw the articles,
 answers a question from the graph and quotes the sentences. The viewer then shows the source
 behind a link.

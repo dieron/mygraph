@@ -9,6 +9,12 @@ through [MCP](https://modelcontextprotocol.io) tools shaped for how agents work,
 query language made for people. Humans install it, connect their agents, and look at what the
 agents have built (a stats page and a graph viewer).
 
+[![The one-minute demo on YouTube: two Claude Code sessions side by side; the second answers from the graph and quotes the Wikipedia sentences the first one recorded](https://img.youtube.com/vi/oXssE5qTpYA/maxresdefault.jpg)](https://youtu.be/oXssE5qTpYA)
+
+*▶ [Watch the one-minute demo](https://youtu.be/oXssE5qTpYA): one agent records two Wikipedia
+articles, a second agent that never saw them answers from the graph and quotes the sentences, and
+the viewer shows the source behind a link.*
+
 ![The graph viewer with Apollo 11 selected: its crew, spacecraft, rocket and landing site, and on the right the Wikipedia sentences those links cite](docs/images/viewer-apollo-11.png)
 
 *A graph of the Apollo missions, built from 17 Wikipedia articles ([examples/apollo](examples/apollo/build.py)).
