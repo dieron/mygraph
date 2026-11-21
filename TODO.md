@@ -45,8 +45,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       and mcp.so (chatmcp/mcpso issue 7746; the site's form is paid only). Smithery no longer takes
       servers (shut down 2026-10-31); PulseMCP has paused submissions and says it will pick up
       the official registry when it reopens.
-- [ ] Glama: sign in at glama.ai with GitHub and add or claim `dieron/mygraph` (the
-      awesome-mcp-servers entry shows its badge), unless Glama picks it up from the registry first.
+- [x] Glama: listed at glama.ai/mcp/servers/dieron/mygraph (2026-11-20); its quality score, which
+      the awesome-mcp-servers PR asks for, comes after Glama's evaluation.
 - [ ] Follow the directory PRs through review; bump the Docker catalog's `source.commit` on later
       releases (its `update-pins` workflow may do it).
 - [ ] `mygraph setup` / `mygraph doctor`: data folder, first graph, autostart on each OS, detect
