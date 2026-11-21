@@ -66,7 +66,8 @@ problem found as text; `ok` is `true` when there are none.
 **[ADMIN-GRAPH-6]** Restoring copies a snapshot file — a name in `<data_dir>/snapshots/` — to the
 graph `{graph}` and loads it. An existing graph of that name is first deleted as in
 [ADMIN-GRAPH-3] when `replace` is `true`, otherwise the call fails with `graph.exists`. A missing
-snapshot fails with `admin.snapshot_not_found`. The full-text cache of the name is rebuilt.
+snapshot fails with `admin.snapshot_not_found`. The full-text cache of the name is rebuilt. The
+call answers once the graph has loaded, however long that takes, never with `graph.warming_up`.
 
 **[ADMIN-GRAPH-7]** Export writes the graph in the format of [export-format.md](export-format.md) to
 `<data_dir>/exports/<graph>-<UTC time as in [ADMIN-GRAPH-4]>.jsonl`. Writes wait while it runs.

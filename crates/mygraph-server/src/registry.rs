@@ -226,6 +226,20 @@ impl Registry {
 
     /// The graph, loading it if needed and waiting up to the warm-up time ([API-GRAPH-2]).
     pub async fn get(self: &Arc<Self>, name: &str) -> Result<Handle, ApiError> {
+        self.get_within(name, Some(self.warmup_wait)).await
+    }
+
+    /// The graph, loading it if needed and waiting until it is ready, however long that takes
+    /// (for admin calls that load a graph, such as a restore).
+    pub async fn get_loaded(self: &Arc<Self>, name: &str) -> Result<Handle, ApiError> {
+        self.get_within(name, None).await
+    }
+
+    async fn get_within(
+        self: &Arc<Self>,
+        name: &str,
+        wait: Option<Duration>,
+    ) -> Result<Handle, ApiError> {
         let slot = lock(&self.slots).get(name).cloned();
         let slot = match slot {
             Some(s) => s,
@@ -242,11 +256,11 @@ impl Registry {
         };
         self.start_load(name, &slot);
         let mut rx = slot.subscribe();
-        let ready = tokio::time::timeout(
-            self.warmup_wait,
-            rx.wait_for(|s| !matches!(s, SlotState::Loading)),
-        )
-        .await;
+        let loaded = rx.wait_for(|s| !matches!(s, SlotState::Loading));
+        let ready = match wait {
+            Some(wait) => tokio::time::timeout(wait, loaded).await,
+            None => Ok(loaded.await),
+        };
         let state = match ready {
             Ok(Ok(s)) => s.clone(),
             Ok(Err(_)) => return Err(not_found(name)),

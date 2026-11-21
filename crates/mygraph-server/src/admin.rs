@@ -375,7 +375,9 @@ pub async fn graph_action(
                 tokio::task::spawn_blocking(move || reg.restore(&name, &path, replace))
                     .await
                     .map_err(|e| ApiError::new("internal", e.to_string()))??;
-                app.registry.get(&graph).await?;
+                // The restore is done: wait for the load rather than answer `graph.warming_up`,
+                // which would invite the client to restore again.
+                app.registry.get_loaded(&graph).await?;
                 graph_info(&app, &caller, &graph).await?
             }
             // [ADMIN-GRAPH-10]

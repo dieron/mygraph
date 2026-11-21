@@ -951,6 +951,35 @@ async fn export_import_and_restore_keep_everything() {
     assert_eq!(r.json()["hits"][0]["id"], "n_1");
 }
 
+#[tokio::test]
+async fn restore_answers_once_the_graph_has_loaded() {
+    // [ADMIN-GRAPH-6] However long the load takes: no warm-up wait at all here.
+    let s = server_with(|c| c.warmup_wait_ms = 0);
+    s.create_graph("src").await;
+    s.post("/v1/graphs/src/write", WRITER, ada_batch()).await;
+    let snap = s
+        .post("/admin/graphs/src/snapshot", ADMIN, json!(null))
+        .await
+        .json();
+    let snap_file = std::path::Path::new(snap["path"].as_str().unwrap())
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    for replace in [false, true] {
+        let r = s
+            .post(
+                "/admin/graphs/back/restore",
+                ADMIN,
+                json!({ "snapshot": snap_file, "replace": replace }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(r.json()["counts"]["nodes"], 3);
+    }
+}
+
 #[test]
 fn one_process_per_data_folder() {
     // [STORE-DIR-4]
