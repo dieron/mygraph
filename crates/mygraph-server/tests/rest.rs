@@ -91,7 +91,21 @@ impl Server {
         key: Option<&str>,
         body: Option<Json>,
     ) -> Reply {
+        self.call_accepting(method, uri, key, body, None).await
+    }
+
+    async fn call_accepting(
+        &self,
+        method: Method,
+        uri: &str,
+        key: Option<&str>,
+        body: Option<Json>,
+        accept: Option<&str>,
+    ) -> Reply {
         let mut req = Request::builder().method(method).uri(uri);
+        if let Some(a) = accept {
+            req = req.header("accept", a);
+        }
         if let Some(k) = key {
             req = req.header("authorization", format!("Bearer {k}"));
         }
@@ -117,6 +131,12 @@ impl Server {
 
     async fn get(&self, uri: &str, key: &str) -> Reply {
         self.call(Method::GET, uri, Some(key), None).await
+    }
+
+    async fn get_text(&self, uri: &str) -> Reply {
+        let accept = Some("text/plain");
+        self.call_accepting(Method::GET, uri, Some(READER), None, accept)
+            .await
     }
 
     async fn post(&self, uri: &str, key: &str, body: Json) -> Reply {
@@ -448,6 +468,55 @@ async fn agent_workflow_over_rest() {
     );
 }
 
+/// [compact-format.md] `Accept: text/plain` gives the compact format on `POST` and on the `GET`
+/// forms of operations; JSON otherwise.
+#[tokio::test]
+async fn compact_text_on_request() {
+    let s = server();
+    s.create_graph("research").await;
+    let g = "/v1/graphs/research";
+    let r = s.post(&format!("{g}/write"), WRITER, ada_batch()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+
+    let text = |r: &Reply| {
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+        assert_eq!(r.headers["content-type"], "text/plain; charset=utf-8");
+        let t = r.text();
+        assert!(!t.trim_start().starts_with('{'), "{t}");
+        t
+    };
+    let post = s
+        .call_accepting(
+            Method::POST,
+            &format!("{g}/search"),
+            Some(READER),
+            Some(json!({ "query": "Lovelace" })),
+            Some("text/plain"),
+        )
+        .await;
+    let post = text(&post);
+    assert!(post.contains("Ada Lovelace"), "{post}");
+    // The GET form of the same search reads the same.
+    assert_eq!(
+        text(&s.get_text(&format!("{g}/search?q=Lovelace")).await),
+        post
+    );
+    assert!(text(&s.get_text(g).await).contains("Person"));
+    assert!(text(&s.get_text(&format!("{g}/nodes/n_1")).await).contains("Ada Lovelace"));
+    text(&s.get_text(&format!("{g}/nodes/n_1/history")).await);
+    text(&s.get_text(&format!("{g}/changes")).await);
+    text(&s.get_text(&format!("{g}/stats")).await);
+
+    // Without the header the same reads are JSON, and errors stay JSON either way.
+    let r = s.get(&format!("{g}/search?q=Lovelace"), READER).await;
+    assert_eq!(r.json()["hits"][0]["id"], "n_1");
+    let r = s.get(&format!("{g}/nodes/n_1"), READER).await;
+    assert_eq!(r.json()["name"], "Ada Lovelace");
+    let r = s.get_text(&format!("{g}/nodes/n_99")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(r.code(), "ref.not_found");
+}
+
 #[tokio::test]
 async fn request_errors_map_to_statuses() {
     let s = server_with(|c| c.max_body_bytes = 4096);
@@ -636,6 +705,43 @@ async fn admin_manages_graphs() {
     let snap = std::path::PathBuf::from(r.json()["path"].as_str().unwrap());
     assert!(snap.starts_with(s.dir.path().join("snapshots")));
     assert!(snap.is_file());
+    let snap_name = snap.file_name().unwrap().to_str().unwrap().to_owned();
+    // `keep` deletes this graph's older snapshots but the newest n, and nothing else.
+    let dir = s.dir.path().join("snapshots");
+    for f in [
+        "lab-20250101T000000000Z.db",
+        "lab-20250102T000000000Z.db",
+        "lab-b-20250101T000000000Z.db",
+        "lab-notes.db",
+    ] {
+        std::fs::write(dir.join(f), b"").unwrap();
+    }
+    let r = s
+        .post("/admin/graphs/lab/snapshot", ADMIN, json!({ "keep": 0 }))
+        .await;
+    assert_eq!(r.code(), "admin.invalid_field");
+    let r = s
+        .post("/admin/graphs/lab/snapshot", ADMIN, json!({ "keep": 2 }))
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    assert_eq!(
+        r.json()["removed"],
+        json!(["lab-20250101T000000000Z.db", "lab-20250102T000000000Z.db"])
+    );
+    let newest = std::path::PathBuf::from(r.json()["path"].as_str().unwrap());
+    let mut left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    let mut want = vec![
+        "lab-b-20250101T000000000Z.db".to_owned(),
+        "lab-notes.db".to_owned(),
+        snap_name,
+        newest.file_name().unwrap().to_str().unwrap().to_owned(),
+    ];
+    want.sort();
+    assert_eq!(left, want);
     let r = s.post("/admin/graphs/lab/check", ADMIN, json!(null)).await;
     assert_eq!(r.json(), json!({ "ok": true, "problems": [] }));
 

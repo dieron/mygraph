@@ -435,6 +435,17 @@ paths:
       tags: [admin]
       summary: Consistent online copy of the database
       operationId: adminSnapshot
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keep:
+                  type: integer
+                  minimum: 1
+                  description: Then delete this graph's snapshots but the newest `keep`.
       responses:
         "200":
           description: Where the snapshot was written.
@@ -446,6 +457,10 @@ paths:
                   path: { type: string }
                   bytes: { type: integer }
                   last_seq: { type: integer }
+                  removed:
+                    type: array
+                    items: { type: string }
+                    description: With `keep`, the snapshot files deleted, oldest first.
         "4XX": { $ref: "#/components/responses/Error" }
         "5XX": { $ref: "#/components/responses/Error" }
 

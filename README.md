@@ -430,8 +430,9 @@ For a home server or NAS that other machines and agents use, run it with Docker
   See `Config::apply_env` in [crates/mygraph-server/src/config.rs](crates/mygraph-server/src/config.rs).
 - To update on the machine, run `git pull && docker compose up -d --build`. From your own computer,
   `deploy/docker/deploy.sh <ssh-destination>` does it over SSH without a clone on the server. It
-  sends the committed `HEAD`, snapshots every graph, rebuilds, restarts and waits until the server
-  is healthy. `.env` and the data are left alone.
+  sends the committed `HEAD`, snapshots every graph (keeping the newest 10 of each;
+  `MYGRAPH_KEEP_SNAPSHOTS` changes it), rebuilds, restarts and waits until the server is healthy.
+  `.env` and the data are left alone.
 - [.github/workflows/docker.yml](.github/workflows/docker.yml) publishes a multi-arch image (amd64,
   arm64) to `ghcr.io/dieron/mygraph`. `:main` follows the main branch, and each release adds
   its version (`:0.3.0`, `:0.3`) and `:latest`. To use it instead of building, set
@@ -544,7 +545,8 @@ again to upgrade; `-Uninstall` removes it and keeps the data.
 
   ![The whole Apollo graph in the viewer: 96 nodes and 136 links coloured by type, with the legend of node and link types](docs/images/viewer-apollo.png)
 - `GET /metrics` serves Prometheus metrics, listed in [spec/api/admin.md](spec/api/admin.md).
-- To back up, `POST /admin/graphs/{g}/snapshot` copies a graph online into `<data_dir>/snapshots/`.
+- To back up, `POST /admin/graphs/{g}/snapshot` copies a graph online into `<data_dir>/snapshots/`;
+  with `{"keep": n}` it then deletes all but the graph's newest n snapshots.
   `POST /admin/graphs/{g}/restore` brings one back.
 - To move a graph, `POST /admin/graphs/{g}/export` writes it as JSONL
   ([spec/api/export-format.md](spec/api/export-format.md)). `POST /admin/graphs/{new}/import`

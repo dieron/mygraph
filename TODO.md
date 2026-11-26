@@ -27,7 +27,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       workflow `.github/workflows/docker.yml` runs once the repository is on GitHub.
 - [x] Run it as a service on a home machine; `deploy/docker/deploy.sh <ssh-destination>` deploys
       new versions.
-- [ ] Prune old snapshots on the server (each deploy adds one per graph).
+- [x] Prune old snapshots on the server: the snapshot call takes `{"keep": n}`, and `deploy.sh`
+      keeps the newest 10 per graph (`MYGRAPH_KEEP_SNAPSHOTS`).
 - [x] Release executables built by GitHub Actions on a version tag (`.github/workflows/release.yml`):
       Linux x64 and arm64, Windows x64, macOS arm64, each smoke-tested with the model; the model as
       its own archive, found next to the binary; SHA256SUMS; a draft release to publish by hand.
@@ -169,9 +170,8 @@ Deferred work, kept here so it is not lost. The plan with milestones is
       «коптильню» for «коптильня»).
 - [ ] A test where words fail more often (extracting ingest, other languages, questions written
       without the history's words), to see whether meaning earns its cost.
-- [ ] Docker image with the model: build and check it (not built yet: no Docker on the
-      development machine); the image grows by about 165 MB (model 135 MB, ONNX Runtime in the
-      binary about 28 MB).
+- [x] Docker image with the model: built by GitHub Actions and running on the deployed instance;
+      the image grows by about 165 MB (model 135 MB, ONNX Runtime in the binary about 28 MB).
 - [ ] `resolve` on the Leipzig entity-resolution datasets.
 - [ ] Agent with MyGraph tools versus agent writing Cypher (CypherBench-style questions).
 
@@ -201,7 +201,8 @@ docs/05-architecture.md §6 meant the lock to cover only the in-memory apply.
 
 ## API gaps
 
-- [ ] `GET /v1/graphs/{g}/search` ignores `Accept: text/plain` (the compact format).
+- [x] `Accept: text/plain` gives the compact format on the `GET` forms too (overview, `search`,
+      `changes`, `stats`, an object and its `history`), not only on `POST`.
 - [ ] Per-request time limits (spec/api/conventions.md [API-LIMIT-1]); with many users this also
       keeps one heavy `find` or `paths` from holding a graph up.
 - [ ] Export leaves out the change log and vocabulary notes.
@@ -210,11 +211,13 @@ docs/05-architecture.md §6 meant the lock to cover only the in-memory apply.
 
 ## Graph viewer
 
-- [ ] When browsing a large graph by expanding nodes, a link between two nodes already on screen
-      appears only after one of them is expanded; fetch the links among shown nodes.
+- [x] When browsing a large graph by expanding nodes, a link between two nodes already on screen
+      appeared only after one of them was expanded; each expansion now fetches the links between
+      the new nodes and the rest (`find` on links with `from` / `to` starts from those nodes'
+      links instead of scanning).
 
 ## Clients
 
 - [ ] Check the `graphs` and `stats` tools in Claude Desktop after a restart.
-- [ ] claude.ai (web and mobile) needs remote MCP with OAuth and HTTPS.
+- [x] claude.ai (web and mobile) needs remote MCP with OAuth and HTTPS.
 - [ ] Feedback from agents to central GitHub issues (docs/09-roadmap.md, Feedback).

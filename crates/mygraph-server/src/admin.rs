@@ -29,6 +29,45 @@ pub fn stamp(ms: i64) -> String {
         .collect()
 }
 
+/// [ADMIN-GRAPH-4] Whether `file` is one of `graph`'s snapshots: `<graph>-<stamp>.db`.
+fn is_snapshot_of(file: &str, graph: &str) -> bool {
+    file.strip_prefix(graph)
+        .and_then(|r| r.strip_prefix('-'))
+        .and_then(|r| r.strip_suffix(".db"))
+        .is_some_and(|t| {
+            let b = t.as_bytes();
+            b.len() == 19
+                && b[8] == b'T'
+                && b[18] == b'Z'
+                && b.iter()
+                    .enumerate()
+                    .all(|(i, c)| i == 8 || i == 18 || c.is_ascii_digit())
+        })
+}
+
+/// [ADMIN-GRAPH-4] Deletes `graph`'s snapshots in `dir` but the newest `keep`; returns the
+/// deleted file names, oldest first.
+fn prune_snapshots(
+    dir: &std::path::Path,
+    graph: &str,
+    keep: usize,
+) -> Result<Vec<String>, ApiError> {
+    let internal = |e: std::io::Error| ApiError::new("internal", e.to_string());
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .map_err(internal)?
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|f| is_snapshot_of(f, graph))
+        .collect();
+    // The stamp sorts by time.
+    files.sort();
+    let old = files.len().saturating_sub(keep);
+    let removed: Vec<String> = files.drain(..old).collect();
+    for f in &removed {
+        std::fs::remove_file(dir.join(f)).map_err(internal)?;
+    }
+    Ok(removed)
+}
+
 fn bad(msg: impl Into<String>) -> ApiError {
     ApiError::new("admin.invalid_field", msg)
 }
@@ -279,6 +318,16 @@ pub async fn graph_action(
             }
             // [ADMIN-GRAPH-4] Under the shared lock: reads go on, writes wait.
             "snapshot" => {
+                let req = parse_body(body)?;
+                let keep = match req.get("keep") {
+                    None | Some(Json::Null) => None,
+                    Some(k) => Some(
+                        k.as_u64()
+                            .filter(|&k| k >= 1)
+                            .ok_or_else(|| bad("keep: expected a whole number of at least 1"))?
+                            as usize,
+                    ),
+                };
                 with_graph(&app, &caller, &graph, Role::Admin, false, move |access| {
                     let g = access.graph();
                     let dir = data_dir.join("snapshots");
@@ -289,10 +338,14 @@ pub async fn graph_action(
                         .snapshot_to(&path)
                         .map_err(|e| ApiError::new("storage.failure", e.to_string()))?;
                     let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
-                    Ok(json!({
+                    let mut out = json!({
                         "path": path.display().to_string(), "bytes": bytes,
                         "last_seq": g.last_seq(),
-                    }))
+                    });
+                    if let Some(keep) = keep {
+                        out["removed"] = json!(prune_snapshots(&dir, &name, keep)?);
+                    }
+                    Ok(out)
                 })
                 .await?
             }

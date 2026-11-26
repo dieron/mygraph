@@ -1232,6 +1232,37 @@ fn find_with_linked_starts_from_the_linked_node() {
 }
 
 #[test]
+fn find_on_link_ends_starts_from_those_nodes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = traversal_graph(dir.path());
+    let rows = |g: &Graph<GraphFile>, w: Json| {
+        ids_of(&g.find(&json!({ "target": "links", "where": w })).unwrap()["rows"])
+    };
+    let from = |v: Json| json!({ "field": "from", "op": "in", "value": v });
+    let to = |v: Json| json!({ "field": "to", "op": "in", "value": v });
+    // Each condition gives the same links from the nodes' links as under `any` (a scan).
+    let cases = [
+        json!({ "field": "to", "op": "eq", "value": "n_3" }),
+        from(json!(["n_1", "n_2"])),
+        json!({ "all": [from(json!(["n_1", "n_2", "n_4"])), to(json!(["n_3"]))] }),
+        json!({ "all": [from(json!(["n_1"])), from(json!(["n_1", "n_2"]))] }),
+        json!({ "all": [to(json!(["n_3"])), { "field": "type", "op": "eq", "value": "WROTE_ABOUT" }] }),
+        // Only canonical node IDs match, as in a scan.
+        from(json!(["N_1", "n_I", "l_1", "n_99"])),
+        json!({ "field": "from", "op": "eq", "value": 1 }),
+    ];
+    for w in cases {
+        let scan = rows(&g, json!({ "any": [w.clone()] }));
+        assert_eq!(rows(&g, w.clone()), scan, "{w}");
+    }
+    assert_eq!(rows(&g, to(json!(["n_3"]))), ["l_2", "l_3", "l_4"]);
+    assert_eq!(rows(&g, from(json!(["N_1"]))), Vec::<String>::new());
+    // Retracted links are not candidates.
+    g.retract(ACTOR, &json!({ "targets": ["l_4"] }), T).unwrap();
+    assert_eq!(rows(&g, to(json!(["n_3"]))), ["l_2", "l_3"]);
+}
+
+#[test]
 fn traversal_link_type_filter_follows_writes_retractions_and_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let mut g = traversal_graph(dir.path());

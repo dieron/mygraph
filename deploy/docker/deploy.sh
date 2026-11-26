@@ -8,8 +8,9 @@
 #
 # First time: create <remote-dir>/.env on the host from .env.example and set the keys. The
 # script never changes .env or the data volume. Before restarting it snapshots every graph of the
-# running server (into the volume's snapshots/ folder), then rebuilds, restarts and waits until
-# the server is healthy. Uncommitted changes are not deployed.
+# running server (into the volume's snapshots/ folder, keeping the newest MYGRAPH_KEEP_SNAPSHOTS
+# of each, default 10), then rebuilds, restarts and waits until the server is healthy.
+# Uncommitted changes are not deployed.
 #
 # MCP clients reach the server through the local `mygraph` program; update it too when the server
 # gains tools (Windows: deploy/windows/deploy.ps1 -BridgeOnly).
@@ -18,6 +19,8 @@ set -euo pipefail
 host=${1:?usage: deploy/docker/deploy.sh <ssh-destination> [remote-dir]}
 dir=${2:-mygraph}
 project=${MYGRAPH_COMPOSE_PROJECT:-mygraph}
+keep=${MYGRAPH_KEEP_SNAPSHOTS:-10}
+case $keep in '' | *[!0-9]* | 0) echo "MYGRAPH_KEEP_SNAPSHOTS: expected a number of at least 1" >&2; exit 1 ;; esac
 
 cd "$(git rev-parse --show-toplevel)"
 if [ -n "$(git status --porcelain)" ]; then
@@ -32,9 +35,9 @@ git archive --format=tar HEAD |
   ssh "$host" "set -e; mkdir -p '$dir'; rm -rf '$dir/.next'; mkdir '$dir/.next'; tar -xf - -C '$dir/.next'"
 
 # 2. On the host: snapshot, swap the source, rebuild, restart, check.
-ssh "$host" bash -s -- "$dir" "$project" "$commit" <<'REMOTE'
+ssh "$host" bash -s -- "$dir" "$project" "$commit" "$keep" <<'REMOTE'
 set -euo pipefail
-dir=$1 project=$2 commit=$3
+dir=$1 project=$2 commit=$3 keep=$4
 cd "$dir"
 if [ ! -f .env ]; then
   echo "missing $dir/.env on the host: copy .env.example to .env and set the keys" >&2
@@ -69,8 +72,11 @@ for g in json.load(sys.stdin)["graphs"]:
 
 if reach; then
   for g in $(graphs | awk '$2 == "ready" { print $1 }'); do
-    curl -fsSk -X POST -H "Authorization: Bearer $key" "$url/admin/graphs/$g/snapshot" >/dev/null
-    echo "snapshot: $g"
+    # A server older than `keep` ignores it; the next deploy prunes.
+    removed=$(curl -fsSk -X POST -H "Authorization: Bearer $key" -d "{\"keep\": $keep}" \
+      "$url/admin/graphs/$g/snapshot" |
+      python3 -c 'import json, sys; print(len(json.load(sys.stdin).get("removed", [])))')
+    echo "snapshot: $g (removed $removed old)"
   done
 fi
 

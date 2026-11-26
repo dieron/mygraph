@@ -1,7 +1,7 @@
 //! Operation `find` — spec/api/operations/find.md.
 
 use crate::engine::{Graph, OpError};
-use crate::ids::ObjectKind;
+use crate::ids::{ObjectId, ObjectKind};
 use crate::model::{Row, Status, TargetKind, id_string, record_json};
 use crate::name_key::name_key;
 use crate::read::BRIEF;
@@ -822,6 +822,81 @@ impl<S: Store> Graph<S> {
         Some(ids)
     }
 
+    /// Candidates from the links of the nodes a condition requires at `from` or `to` (`eq` or
+    /// `in` node IDs, alone or within `all`): the active links whose ends are among them, in
+    /// internal-number order. Exact when the condition holds nothing else.
+    fn endpoint_candidates(&self, target: Target, cond: Option<&Cond>) -> Option<(Vec<i64>, bool)> {
+        if target != Target::Links {
+            return None;
+        }
+        // The node numbers whose canonical ID is the string (field values are canonical).
+        let number = |v: &Value| match v {
+            Value::String(s) => ObjectId::decode_of_kind(s, ObjectKind::Node)
+                .ok()
+                .filter(|id| id.encode() == *s)
+                .map(|id| id.number as i64),
+            _ => None,
+        };
+        let end = |c: &Cond| -> Option<(bool, HashSet<i64>)> {
+            let (from, op, v) = match c {
+                Cond::Cmp(Expr::Field(Base::From, None), op, Some(v)) => (true, op, v),
+                Cond::Cmp(Expr::Field(Base::To, None), op, Some(v)) => (false, op, v),
+                _ => return None,
+            };
+            let ids = match (op, v) {
+                (Op::Eq, v) => number(v).into_iter().collect(),
+                (Op::In, Value::List(xs)) => xs.iter().filter_map(number).collect(),
+                _ => return None,
+            };
+            Some((from, ids))
+        };
+        let conds: &[Cond] = match cond? {
+            Cond::All(cs) => cs,
+            c => std::slice::from_ref(c),
+        };
+        let (mut from, mut to): (Option<HashSet<i64>>, Option<HashSet<i64>>) = (None, None);
+        let mut exact = true;
+        for c in conds {
+            match end(c) {
+                Some((is_from, ids)) => {
+                    let side = if is_from { &mut from } else { &mut to };
+                    *side = Some(match side.take() {
+                        Some(had) => had.intersection(&ids).copied().collect(),
+                        None => ids,
+                    });
+                }
+                None => exact = false,
+            }
+        }
+        let seeds = match (&from, &to) {
+            (Some(f), Some(t)) => {
+                if f.len() <= t.len() {
+                    f
+                } else {
+                    t
+                }
+            }
+            (Some(f), None) => f,
+            (None, Some(t)) => t,
+            (None, None) => return None,
+        };
+        let st = &self.state;
+        let mut ids: Vec<i64> = seeds
+            .iter()
+            .flat_map(|n| st.adjacency.get(n).into_iter().flatten())
+            .copied()
+            .filter(|l| {
+                let l = &st.links[l];
+                l.status == Status::Active
+                    && from.as_ref().is_none_or(|f| f.contains(&l.src))
+                    && to.as_ref().is_none_or(|t| t.contains(&l.dst))
+            })
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Some((ids, exact))
+    }
+
     fn test(&self, target: Target, idx: i64, c: &Cond) -> bool {
         match c {
             Cond::All(cs) => cs.iter().all(|c| self.test(target, idx, c)),
@@ -991,17 +1066,22 @@ impl<S: Store> Graph<S> {
         }
 
         // Matching objects, by internal number. A condition that fixes the type starts from the
-        // type index, one that requires a linked node from that node's links (whichever is
-        // smaller), instead of scanning the table.
+        // type index, one that requires a linked node from that node's links, one that fixes a
+        // link's ends from those nodes' links (whichever is smaller), instead of scanning the
+        // table.
         let st = &self.state;
         let ok_status = |s: Status| s == Status::Active || retracted && s == Status::Retracted;
         let planned = if retracted {
             None
         } else {
-            match self.linked_candidates(target, cond.as_ref()) {
-                Some(ids) => self
+            let near = match self.linked_candidates(target, cond.as_ref()) {
+                Some(ids) => Some((ids, false)),
+                None => self.endpoint_candidates(target, cond.as_ref()),
+            };
+            match near {
+                Some((ids, exact)) => self
                     .type_candidates(target, cond.as_ref(), Some(ids.len()))
-                    .or(Some((ids, false))),
+                    .or(Some((ids, exact))),
                 None => self.type_candidates(target, cond.as_ref(), None),
             }
         };

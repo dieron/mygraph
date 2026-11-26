@@ -18,7 +18,7 @@ of the design; the rest is planned.
 | `POST /admin/graphs` | `{"name": …, "policies": {…}, "access": {…}}` | `201`, `GraphInfo`, `Location: /admin/graphs/{name}` |
 | `GET /admin/graphs/{graph}` | — | `GraphInfo` |
 | `DELETE /admin/graphs/{graph}?confirm={graph}` | — | `{"deleted": name, "moved_to": path}` |
-| `POST /admin/graphs/{graph}/snapshot` | — | `{"path": …, "bytes": n, "last_seq": n}` |
+| `POST /admin/graphs/{graph}/snapshot` | `{"keep": n}` (optional) | `{"path": …, "bytes": n, "last_seq": n}`, plus `removed` with `keep` |
 | `POST /admin/graphs/{graph}/check` | — | `{"ok": bool, "problems": [text]}` |
 | `POST /admin/graphs/{graph}/restore` | `{"snapshot": file, "replace": bool}` | `GraphInfo` |
 | `POST /admin/graphs/{graph}/export` | — | `{"path": …, "bytes": n, "counts": {…}}` |
@@ -58,7 +58,10 @@ running finish first; later requests fail with `graph.not_found`.
 **[ADMIN-GRAPH-4]** A snapshot is a consistent copy of the graph's database taken while it stays
 online, written to `<data_dir>/snapshots/<graph>-<UTC time as YYYYMMDDTHHMMSSmmmZ>.db`. Writes wait
 while it is taken. It can be opened by any implementation like the original file, and restored
-with [ADMIN-GRAPH-6].
+with [ADMIN-GRAPH-6]. With `keep` (a whole number, at least 1), the graph's snapshots in that
+folder but the newest `keep`, this one included, are then deleted outright, and `removed` lists
+their file names, oldest first; other files there are left alone. An invalid `keep` fails with
+`admin.invalid_field` before the snapshot is taken.
 
 **[ADMIN-GRAPH-5]** A check runs the storage engine's own integrity checks and reports each
 problem found as text; `ok` is `true` when there are none.

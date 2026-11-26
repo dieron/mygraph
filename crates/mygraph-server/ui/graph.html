@@ -215,15 +215,32 @@ function add(nodes, links) {
   return { nodes: cy.nodes().length - before, added };
 }
 
-async function findAll(target) {
+async function findAll(target, where) {
   const rows = [];
   let cursor = null;
   do {
-    const r = await op("find", { target, limit: 1000, ...(cursor ? { cursor } : {}) });
+    const r = await op("find", { target, limit: 1000, ...(where ? { where } : {}), ...(cursor ? { cursor } : {}) });
     rows.push(...r.rows);
     cursor = r.next_cursor || null;
   } while (cursor);
   return rows;
+}
+
+// The links between new nodes and the others on screen: `neighbors` brings only the links it
+// followed from the expanded nodes.
+// A value list holds at most 1000 IDs, so the nodes on screen go in parts.
+async function linkNew(ids) {
+  const shown = cy.nodes().map((n) => n.id());
+  const ends = (a, b) => ({ all: [{ field: "from", op: "in", value: a }, { field: "to", op: "in", value: b }] });
+  const asks = [];
+  for (let i = 0; i < ids.length; i += 1000) {
+    const some = ids.slice(i, i + 1000);
+    for (let j = 0; j < shown.length; j += 1000) {
+      const part = shown.slice(j, j + 1000);
+      asks.push(findAll("links", ends(some, part)), findAll("links", ends(part, some)));
+    }
+  }
+  add([], (await Promise.all(asks)).flat());
 }
 
 function layout(onlyNew) {
@@ -242,7 +259,8 @@ async function expand(ids, select) {
   status("loading neighbours…");
   const r = await op("neighbors", { start: ids, depth: 1, limit: Math.min(400, MAX_ON_SCREEN - cy.nodes().length + ids.length),
     limit_per_node: 80 });
-  const { nodes } = add(r.nodes, r.links);
+  const { nodes, added } = add(r.nodes, r.links);
+  if (nodes > 0) await linkNew(added.map((n) => n.id()));
   if (nodes > 0) layout(cy.nodes().length > nodes);
   showCounts();
   if (select) focus(select);

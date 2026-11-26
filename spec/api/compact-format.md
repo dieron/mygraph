@@ -4,7 +4,9 @@ Status: **Draft** · spec 0.1.0-draft · design: [docs/06-agent-api.md §6](../.
 
 A line-oriented rendering of operation responses for agents: the same content as the JSON
 response with far fewer tokens. MCP tool results use it by default ([MCP-TOOL-3]); REST returns
-it for `POST /v1/graphs/{graph}/{operation}` when the request has `Accept: text/plain`.
+it for `POST /v1/graphs/{graph}/{operation}` and for the `GET` forms of operations (overview,
+`search`, `changes`, `stats`, an object and its `history`) when the request has
+`Accept: text/plain`. Errors stay JSON.
 
 The format is for reading, not parsing: clients that need structure use JSON. Rules below fix
 what is shown; spacing and the exact layout of the examples are informative.

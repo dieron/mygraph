@@ -8,7 +8,7 @@ use crate::registry::{G, now_ms};
 use axum::body::Bytes;
 use axum::extract::rejection::{BytesRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use mygraph_core::ids::{ObjectId, ObjectKind};
 use mygraph_core::store::Store;
@@ -82,6 +82,46 @@ pub fn observe(
 
 fn ok(v: &Json) -> Result<Response, ApiError> {
     Ok(json_body(v).into_response())
+}
+
+/// [compact-format.md] An operation's response as compact text when the request has
+/// `Accept: text/plain`, otherwise `json` (the whole response, or the part a short form returns).
+fn reply(
+    headers: &HeaderMap,
+    op: &str,
+    req: &Json,
+    resp: &Json,
+    json: &Json,
+) -> Result<Response, ApiError> {
+    let text = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|a| a.starts_with("text/plain"));
+    if !text {
+        return ok(json);
+    }
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; charset=utf-8"),
+        )],
+        crate::compact::render(op, req, resp),
+    )
+        .into_response())
+}
+
+/// Runs an operation for a `GET` form and replies with its whole response.
+async fn answer(
+    app: &Arc<App>,
+    caller: &Caller,
+    graph: &str,
+    headers: &HeaderMap,
+    op: &'static str,
+    req: Map<String, Json>,
+) -> Result<Response, ApiError> {
+    let req = Json::Object(req);
+    let resp = run(app, caller, graph, op, req.clone()).await?;
+    reply(headers, op, &req, &resp, &resp)
 }
 
 /// [API-HTTP-1] [API-HTTP-3] The body as JSON; empty means `{}`.
@@ -353,7 +393,7 @@ pub async fn post_op(
     State(app): State<Arc<App>>,
     Path((graph, name)): Path<(String, String)>,
     caller: Caller,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     body: Body,
 ) -> Response {
     let start = Instant::now();
@@ -363,22 +403,7 @@ pub async fn post_op(
     let r = async {
         let req = strip_graph(parse_body(body)?, &graph)?;
         let resp = run(&app, &caller, &graph, op, req.clone()).await?;
-        // [compact-format.md] on request.
-        let text = headers
-            .get(header::ACCEPT)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|a| a.starts_with("text/plain"));
-        if text {
-            return Ok((
-                [(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("text/plain; charset=utf-8"),
-                )],
-                crate::compact::render(op, &req, &resp),
-            )
-                .into_response());
-        }
-        ok(&resp)
+        reply(&headers, op, &req, &resp, &resp)
     }
     .await;
     finish(&app, op, Some(&graph), start, r)
@@ -412,6 +437,7 @@ pub async fn get_graph(
     State(app): State<Arc<App>>,
     Path(graph): Path<String>,
     caller: Caller,
+    headers: HeaderMap,
     params: Params,
 ) -> Response {
     let start = Instant::now();
@@ -422,7 +448,7 @@ pub async fn get_graph(
             ("recent", "recent", Kind::Int),
             ("types_limit", "types_limit", Kind::Int),
         ])?;
-        ok(&run(&app, &caller, &graph, "overview", Json::Object(req)).await?)
+        answer(&app, &caller, &graph, &headers, "overview", req).await
     }
     .await;
     finish(&app, "overview", Some(&graph), start, r)
@@ -433,13 +459,18 @@ pub async fn get_named(
     State(app): State<Arc<App>>,
     Path((graph, name)): Path<(String, String)>,
     caller: Caller,
+    headers: HeaderMap,
     params: Params,
 ) -> Response {
     let start = Instant::now();
+    let h = &headers;
     let (label, r) = match name.as_str() {
-        "search" => ("search", search_get(&app, &caller, &graph, params).await),
-        "changes" => ("history", changes_get(&app, &caller, &graph, params).await),
-        "stats" => ("stats", stats_get(&app, &caller, &graph, params).await),
+        "search" => ("search", search_get(&app, &caller, &graph, h, params).await),
+        "changes" => (
+            "history",
+            changes_get(&app, &caller, &graph, h, params).await,
+        ),
+        "stats" => ("stats", stats_get(&app, &caller, &graph, h, params).await),
         _ => ("unknown", Err(api_not_found())),
     };
     finish(&app, label, Some(&graph), start, r)
@@ -449,6 +480,7 @@ async fn search_get(
     app: &Arc<App>,
     caller: &Caller,
     graph: &str,
+    headers: &HeaderMap,
     params: Params,
 ) -> Result<Response, ApiError> {
     let q = Q::new(
@@ -463,7 +495,7 @@ async fn search_get(
         ("limit", "limit", Kind::Int),
         ("include_retracted", "include_retracted", Kind::Bool),
     ])?;
-    ok(&run(app, caller, graph, "search", Json::Object(req)).await?)
+    answer(app, caller, graph, headers, "search", req).await
 }
 
 /// The `stats` request of `GET /v1/graphs/{graph}/stats` and `GET /admin/graphs/{graph}/stats`.
@@ -480,15 +512,19 @@ async fn stats_get(
     app: &Arc<App>,
     caller: &Caller,
     graph: &str,
+    headers: &HeaderMap,
     params: Params,
 ) -> Result<Response, ApiError> {
-    ok(&run(app, caller, graph, "stats", stats_query(params)?).await?)
+    let req = stats_query(params)?;
+    let resp = run(app, caller, graph, "stats", req.clone()).await?;
+    reply(headers, "stats", &req, &resp, &resp)
 }
 
 async fn changes_get(
     app: &Arc<App>,
     caller: &Caller,
     graph: &str,
+    headers: &HeaderMap,
     params: Params,
 ) -> Result<Response, ApiError> {
     let q = Q::new(params, &["since_seq", "limit"])?;
@@ -497,7 +533,7 @@ async fn changes_get(
         ("limit", "limit", Kind::Int),
     ])?;
     req.entry("since_seq").or_insert(json!(0));
-    ok(&run(app, caller, graph, "history", Json::Object(req)).await?)
+    answer(app, caller, graph, headers, "history", req).await
 }
 
 /// `GET /v1/graphs/{graph}/{collection}/{id}`: one object via `get`.
@@ -505,6 +541,7 @@ pub async fn get_object(
     State(app): State<Arc<App>>,
     Path((graph, collection, id)): Path<(String, String, String)>,
     caller: Caller,
+    headers: HeaderMap,
     params: Params,
 ) -> Response {
     let start = Instant::now();
@@ -554,8 +591,10 @@ pub async fn get_object(
         if !include.is_empty() {
             req.insert("include".into(), Json::Object(include));
         }
-        let resp = run(&app, &caller, &graph, "get", Json::Object(req)).await?;
-        ok(&single_item(resp)?)
+        let req = Json::Object(req);
+        let resp = run(&app, &caller, &graph, "get", req.clone()).await?;
+        let item = single_item(resp.clone())?;
+        reply(&headers, "get", &req, &resp, &item)
     }
     .await;
     finish(&app, "get", Some(&graph), start, r)
@@ -585,13 +624,14 @@ pub async fn get_object_part(
     State(app): State<Arc<App>>,
     Path((graph, collection, id, part)): Path<(String, String, String, String)>,
     caller: Caller,
+    headers: HeaderMap,
     params: Params,
 ) -> Response {
     let start = Instant::now();
     let (label, r) = match part.as_str() {
         "history" => (
             "history",
-            object_history(&app, &caller, &graph, &collection, &id, params).await,
+            object_history(&app, &caller, &graph, &collection, &id, &headers, params).await,
         ),
         "content" if collection == "evidence" => (
             "content",
@@ -612,6 +652,7 @@ async fn object_history(
     graph: &str,
     collection: &str,
     id: &str,
+    headers: &HeaderMap,
     params: Params,
 ) -> Result<Response, ApiError> {
     object_id(collection, id)?;
@@ -621,7 +662,7 @@ async fn object_history(
         ("before_seq", "before_seq", Kind::Int),
     ])?;
     req.insert("target".into(), json!(id));
-    ok(&run(app, caller, graph, "history", Json::Object(req)).await?)
+    answer(app, caller, graph, headers, "history", req).await
 }
 
 async fn evidence_content(

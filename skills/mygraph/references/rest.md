@@ -48,7 +48,7 @@ Shorthands:
 | `POST /admin/graphs` `{"name": "lab", "policies": {"require_evidence": "warn"}}` | create a graph (the MCP `graphs` tool does this too) |
 | `GET /admin/graphs`, `GET /admin/graphs/{g}` | graphs with status, counts, sizes |
 | `DELETE /admin/graphs/{g}?confirm={g}` | drop a graph (moved to the trash folder) |
-| `POST /admin/graphs/{g}/snapshot` | online copy of the database into `snapshots/` |
+| `POST /admin/graphs/{g}/snapshot` `{"keep": 5}` | online copy of the database into `snapshots/`; `keep` (optional) deletes all but the newest n |
 | `POST /admin/graphs/{g}/restore` `{"snapshot": "<file>", "replace": true}` | restore a snapshot |
 | `POST /admin/graphs/{g}/export` | JSONL export into `exports/` |
 | `POST /admin/graphs/{new}/import` `{"file": "<file>"}` | import an export into a new graph, IDs kept |
